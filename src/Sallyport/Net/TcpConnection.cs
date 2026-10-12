@@ -454,19 +454,19 @@ internal sealed class TcpConnection : Stream, IHalfClosable
         return [.. ordered];
     }
 
+    /// <summary>The window the 16-bit field can say right now, in bytes: unscaled it stops at 65535 however much is free.</summary>
+    private int Advertisable(bool syn = false) => syn || !_scaling
+        ? Math.Min(_receive.Free, ushort.MaxValue)
+        : Math.Min(_receive.Free >> OurScale, ushort.MaxValue) << OurScale;
+
+    /// <summary>How much the window must have grown since last said before a read announces it — a quarter of the most
+    /// the field can say, so an unscaled window (at most 65535) is announced too, not only a scaled one.</summary>
+    private int WindowUpdateStep => Math.Max(2 * _sendMss, (_scaling ? Math.Min(ReceiveCapacity, ushort.MaxValue << OurScale) : ushort.MaxValue) / 4);
+
     private void Emit(uint seq, TcpFlags flags, ReadOnlySpan<byte> payload, bool syn = false)
     {
-        int field;
-        if (syn || !_scaling)
-        {
-            field = Math.Min(_receive.Free, ushort.MaxValue);
-            _advertised = field;
-        }
-        else
-        {
-            field = Math.Min(_receive.Free >> OurScale, ushort.MaxValue);
-            _advertised = field << OurScale;
-        }
+        _advertised = Advertisable(syn);
+        var field = syn || !_scaling ? _advertised : _advertised >> OurScale;
         var ack = (flags & TcpFlags.Ack) != 0 ? _rcvNxt : 0;
         var sack = (flags & TcpFlags.Ack) != 0 && _sackOk && _early.Count > 0 ? SackBlocks() : [];
         _sink.Send(Tcp.Build(_local, Remote, _sink.NextIpId(), LocalPort, RemotePort, seq, ack, flags, (ushort)field, payload,
@@ -521,7 +521,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
                 {
                     var n = _receive.Read(buffer.Span);
                     // Tell the peer the window reopened once it has grown enough to matter, not after every read.
-                    if (_state == State.Established && _receive.Free - _advertised >= Math.Max(2 * _sendMss, ReceiveCapacity / 4))
+                    if (_state == State.Established && Advertisable() - _advertised >= WindowUpdateStep)
                         Emit(_sndNxt, TcpFlags.Ack, []);
                     return n;
                 }

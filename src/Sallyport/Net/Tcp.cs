@@ -32,6 +32,9 @@ internal static class Tcp
         sack = sack[..Math.Min(sack.Length, MaxSackBlocks)];
         var options = (mss is null ? 0 : 4) + (windowScale is null ? 0 : 4) + (sackPermitted ? 4 : 0) + (sack.Length > 0 ? 4 + 8 * sack.Length : 0);
         var tcpLength = HeaderLength + options;
+        // The data offset is 4 bits of 32-bit words: 60 bytes of header at most. Past it the field wraps and the header
+        // reads back as something else entirely, so refuse rather than send that.
+        if (tcpLength > 60) throw new ArgumentException($"{options} bytes of TCP options exceed the 40 a header can hold");
         var packet = new byte[Ipv4.HeaderLength + tcpLength + payload.Length];
         Ipv4.WriteHeader(packet, Ipv4.Tcp, source, destination, ipId);
         var tcp = packet.AsSpan(Ipv4.HeaderLength);
