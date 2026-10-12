@@ -3,14 +3,10 @@
 A finished item is deleted (git is the archive); a phase is done when it is measured against a real server.
 
 ## Phase 3 — what is left
-- [ ] Unit tests for the TCP state machine against a scripted peer (handshake, refusal, SYN timeout, in-order and
-      out-of-order data with SACK blocks, retransmission, fast retransmit, FIN both ways, reset, zero-window probe).
-      The live runs exercise it against Linux and Cloudflare; nothing yet pins each path down.
 - [ ] Many concurrent connections — a browser page opens dozens. Only one or two at a time have been measured.
 
-## Then Kobo adopts it
-Kobo hosts Sallyport in-process in place of the WSL `start`/`stop` commands; the route file's `proxy` and `hosts` stay.
-Measured by a FANZA page in Kobo's browser with WSL's OpenVPN stopped.
+Kobo adopted it on 2026-10-12, as a provider process (`Sallyport.Host.exe serve|stop`). Its browser rendered a FANZA
+product page through Sallyport with WSL's OpenVPN stopped. In-process hosting waits for the release.
 
 ## Phase 4 — the long run
 Reconnect, fallback across a profile's remotes, renegotiation over hours (`ControlStream` refuses a soft reset today —
