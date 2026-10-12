@@ -14,7 +14,7 @@ that renegotiates costs a reconnect; the owner's server did NOT renegotiate in a
 OpenVPN's default is hourly — other servers will), status and byte counts as events for a host (Kobo's Network page), `auth-user-pass`,
 `tls-auth`, `tls-crypt-v2` and `P_DATA_V1` profiles. Uploads at volume (the send side has no SACK of its own). Then release.
 
-**Written but never run against a server:** the TCP transport (the test profile's second remote is `tcp/443`); the
-reconnect path (nothing ended the tunnel in 75 minutes); whether the server acts on the exit notices
+**Written but never run against a server:** the reconnect path (nothing ended the tunnel in 75 minutes); whether the server acts on the exit notices
 (`explicit-exit-notify`, `EXIT`). The keepalive is measured: 75 minutes up, idle between probes 5 minutes apart, never
-dropped by either side.
+dropped by either side. So is the TCP transport (2026-10-13, the `tcp/443` remote): TLS 1.3, DNS, ipinfo JP Tokyo,
+a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared with anything).
