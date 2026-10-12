@@ -2,6 +2,8 @@
 
 ## 0.1.0 — unreleased
 
+- SOCKS5 server (RFC 1928 CONNECT) over a pluggable connector, loopback-only (D2) — phase 3's front half, tested in
+  process; nothing dials through the tunnel yet.
 - Phase 2, the data channel (2026-10-12): key method 2's PRF key expansion, `P_DATA_V2` with AES-256-GCM / AES-128-GCM,
   a replay window, keepalive and `ping-restart`, exit notices; `Tunnel` is the public surface. Measured: two DNS
   lookups answered through the tunnel in 204 ms each, and the egress address was the server's own.
