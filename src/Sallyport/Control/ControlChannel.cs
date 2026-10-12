@@ -41,6 +41,10 @@ internal sealed class ControlChannel : IAsyncDisposable
     private readonly SemaphoreSlim _sending = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private readonly Channel<ControlPacket> _inbound = Channel.CreateUnbounded<ControlPacket>(new UnboundedChannelOptions { SingleWriter = true });
+    // Bounded and lossy on purpose: a data packet nobody reads in time is a dropped datagram, which IP already expects,
+    // where an unbounded queue would grow without limit behind a slow reader.
+    private readonly Channel<byte[]> _data = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096)
+        { SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
     private readonly List<Outgoing> _outgoing = [];
     private readonly SortedDictionary<uint, ControlPacket> _early = [];
     private readonly List<uint> _acksOwed = [];
@@ -63,6 +67,18 @@ internal sealed class ControlChannel : IAsyncDisposable
     /// <summary>Packets delivered by message id, in order, exactly once. Completes, with the error if any, when the
     /// transport fails or the channel is disposed.</summary>
     public ChannelReader<ControlPacket> Inbound => _inbound.Reader;
+    /// <summary>Data-channel packets, still sealed: the same transport carries both channels, and only the opcode tells
+    /// them apart.</summary>
+    public ChannelReader<byte[]> DataInbound => _data.Reader;
+
+    /// <summary>Sends a sealed data packet. It shares the semaphore with the control channel because a TCP transport
+    /// cannot take two writes at once.</summary>
+    public async ValueTask SendDataAsync(byte[] packet, CancellationToken ct)
+    {
+        await _sending.WaitAsync(ct);
+        try { await _transport.SendAsync(packet, ct); }
+        finally { _sending.Release(); }
+    }
 
     public bool AllAcknowledged { get { lock (_gate) return _outgoing.Count == 0; } }
 
@@ -129,14 +145,25 @@ internal sealed class ControlChannel : IAsyncDisposable
             while (!ct.IsCancellationRequested)
             {
                 var datagram = await _transport.ReceiveAsync(ct);
+                if (datagram.Length > 0 && (Opcode)(datagram[0] >> 3) is Opcode.DataV1 or Opcode.DataV2)
+                {
+                    _data.Writer.TryWrite(datagram);
+                    continue;
+                }
                 var packet = ControlPacket.Decode(datagram, _crypt);
                 if (packet is null) { Interlocked.Increment(ref _dropped); continue; }
                 if (Accept(packet)) await FlushAsync(ct);
             }
-            _inbound.Writer.TryComplete();
+            Complete(null);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { _inbound.Writer.TryComplete(); }
-        catch (Exception e) { _inbound.Writer.TryComplete(e); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { Complete(null); }
+        catch (Exception e) { Complete(e); }
+    }
+
+    private void Complete(Exception? error)
+    {
+        _inbound.Writer.TryComplete(error);
+        _data.Writer.TryComplete(error);
     }
 
     private async Task TickLoopAsync(CancellationToken ct)
@@ -147,7 +174,7 @@ internal sealed class ControlChannel : IAsyncDisposable
             while (await timer.WaitForNextTickAsync(ct)) await FlushAsync(ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        catch (Exception e) { _inbound.Writer.TryComplete(e); }
+        catch (Exception e) { Complete(e); }
     }
 
     /// <returns>Whether the packet was taken — and so whether something (an ACK, or window room) may now be due.</returns>

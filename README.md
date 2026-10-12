@@ -10,9 +10,9 @@ no system routes, no WSL.
 
 ## Status
 
-Phase 1 of 4 done: the control channel reaches a real OpenVPN server's `PUSH_REPLY` with a client certificate and
-`tls-crypt` (UDP, TLS 1.3, 1.2 s, 2026-10-12). Phase 2, the data channel, is next (see `TASKS.md`). Not yet usable as a
-tunnel. First consumer: [Kobo](../Kobo/apps/kobo), whose browser route uses it before it is released.
+Phases 1 and 2 of 4 done (2026-10-12): against a real OpenVPN server, the control channel reaches `PUSH_REPLY`
+(`tls-crypt`, client certificate, TLS 1.3, 1.1 s) and the data channel carries DNS both ways (AES-256-GCM). Phase 3, the
+userspace TCP and the SOCKS5 proxy, is next (see `TASKS.md`) — until then it carries packets, not connections. First consumer: [Kobo](../Kobo/apps/kobo), whose browser route uses it before it is released.
 
 ## Licence and provenance
 

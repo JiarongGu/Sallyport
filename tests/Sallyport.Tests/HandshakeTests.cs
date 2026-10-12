@@ -1,7 +1,9 @@
+using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using Sallyport.Control;
 using Sallyport.Crypto;
+using Sallyport.Data;
 using Sallyport.Profile;
 using Sallyport.Transport;
 
@@ -17,7 +19,9 @@ public class HandshakeTests
     {
         public string? ClientPeerInfo;
         public string? ClientOptions;
-        public bool SawExit;
+        public bool SawExit, SawOccExit;
+        /// <summary>The half the server sends data with: the client's opposite (1), unless a test wants a mix-up.</summary>
+        public int DataSendHalf = 1;
 
         public async Task RunAsync(ITransport transport, byte[] staticKey, X509Certificate2 certificate, CancellationToken ct)
         {
@@ -43,13 +47,82 @@ public class HandshakeTests
             inbox.Consume(used);
             ClientOptions = hello!.Options;
             ClientPeerInfo = hello.Trailing.Count == 3 ? hello.Trailing[2] : null;
-            await tls.WriteAsync(KeyMethod2Message.Write(KeySource.ForServer(), "V4,dev-type tun,tls-server"), ct);
+            var mine = KeySource.ForServer();
+            await tls.WriteAsync(KeyMethod2Message.Write(mine, "V4,dev-type tun,tls-server"), ct);
 
             Assert.Equal("PUSH_REQUEST", await inbox.ReadTextAsync(ct));
             await tls.WriteAsync("PUSH_REPLY,route 10.0.0.0 255.0.0.0,push-continuation 2\0"u8.ToArray(), ct);
-            await tls.WriteAsync("PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0,auth-token SESSION-SECRET,peer-id 3,cipher AES-256-GCM,push-continuation 1\0"u8.ToArray(), ct);
+            await tls.WriteAsync("PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0,auth-token SESSION-SECRET,peer-id 3,cipher AES-256-GCM,explicit-exit-notify,protocol-flags cc-exit,push-continuation 1\0"u8.ToArray(), ct);
+
+            // The data channel, keyed as the server derives it: the client's key source and session id first.
+            var block = DataKeys.Expand(hello.Source, mine, channel.PeerSession!, channel.LocalSession);
+            using var data = new DataChannel(DataKeys.FromBlock(block, DataSendHalf, 32), 3, 0);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var echoing = Task.Run(async () =>
+            {
+                await channel.SendDataAsync(data.Seal(Signals.Ping), stop.Token);
+                await foreach (var packet in channel.DataInbound.ReadAllAsync(stop.Token))
+                {
+                    if (data.Open(packet, out var payload) != DataChannel.Verdict.Opened || Signals.IsPing(payload)) continue;
+                    if (Signals.IsOcc(payload, out var kind)) { SawOccExit = kind == Signals.OccExit; continue; }
+                    await channel.SendDataAsync(data.Seal(payload), stop.Token);
+                }
+            }, stop.Token);
             SawExit = await inbox.ReadTextAsync(ct) == "EXIT";
+            await stop.CancelAsync();
+            try { await echoing; } catch (OperationCanceledException) { }
         }
+    }
+
+    private static Task<Tunnel> Connect(string profileText, MemoryTransport end) =>
+        Tunnel.ConnectAsync(OvpnProfile.Parse(profileText), Remote, _ => Task.FromResult<ITransport>(end), TimeSpan.FromSeconds(30), new TunnelOptions(), null, CancellationToken.None);
+
+    [Fact]
+    public async Task APacketCrossesTheDataChannelBothWays()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var (clientEnd, serverEnd) = MemoryTransport.Pair();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var server = new FakeServer();
+        var serving = server.RunAsync(serverEnd, key, pki.Server, stop.Token);
+
+        var tunnel = await Connect(pki.Profile(key), clientEnd);
+        byte[] packet = [0x45, 0, 0, 20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        await tunnel.SendAsync(packet);
+        var echoed = await tunnel.Packets.ReadAsync(stop.Token);
+        for (var i = 0; i < 200 && tunnel.Counters.PingsIn == 0; i++) await Task.Delay(10);
+        var counters = tunnel.Counters;
+        await tunnel.DisposeAsync();
+        await serving;
+
+        Assert.Equal(packet, echoed);
+        Assert.Equal(new IPAddress([10, 8, 0, 2]), tunnel.Config.Address);
+        Assert.Equal(1, counters.PacketsOut);
+        Assert.Equal(1, counters.PacketsIn);
+        Assert.Equal(1, counters.PingsIn);   // the server's ping is a keepalive, not a packet for the reader
+        Assert.Equal(0, counters.Rejected + counters.OppositeDirection);
+        Assert.True(server.SawOccExit);
+        Assert.True(server.SawExit);
+        await Assert.ThrowsAsync<TunnelEnded>(() => tunnel.SendAsync(packet).AsTask());
+    }
+
+    [Fact]
+    public async Task BothSidesOnTheSameKeyHalfIsNamedAsSuch()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var (clientEnd, serverEnd) = MemoryTransport.Pair();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var serving = new FakeServer { DataSendHalf = 0 }.RunAsync(serverEnd, key, pki.Server, stop.Token);
+
+        await using var tunnel = await Connect(pki.Profile(key), clientEnd);
+        for (var i = 0; i < 200 && tunnel.Counters.OppositeDirection == 0; i++) await Task.Delay(10);
+
+        Assert.Equal(1, tunnel.Counters.OppositeDirection);
+        Assert.Equal(0, tunnel.Counters.PingsIn);
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<Exception>(() => serving);
     }
 
     private static Task<HandshakeResult> Client(string profileText, MemoryTransport end, TimeSpan timeout) =>
@@ -69,7 +142,8 @@ public class HandshakeTests
         await serving;
 
         Assert.Equal(
-            ["route 10.0.0.0 255.0.0.0", "ifconfig 10.8.0.2 255.255.255.0", "auth-token SESSION-SECRET", "peer-id 3", "cipher AES-256-GCM"],
+            ["route 10.0.0.0 255.0.0.0", "ifconfig 10.8.0.2 255.255.255.0", "auth-token SESSION-SECRET", "peer-id 3", "cipher AES-256-GCM",
+             "explicit-exit-notify", "protocol-flags cc-exit"],
             result.PushOptions);
         Assert.Equal("auth-token [redacted]", PushOptions.Redact(result.PushOptions[2]));
         Assert.Equal("CN=server", result.ServerSubject);

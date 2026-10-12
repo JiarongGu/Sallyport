@@ -32,3 +32,14 @@ Peer info carries `IV_PLAT`, `IV_PROTO`, `IV_NCP`, `IV_CIPHERS` and `IV_GUI_VER=
 Sallyport is not OpenVPN and does not claim to be a version of it; what a server needs to know is which capabilities the
 client has, and those have their own fields. Measured 2026-10-12: the first real server pushed its full configuration
 without it. If a server is ever found that gates on `IV_VER`, record which one before adding it.
+
+## D5 — The client sends data with the derived block's FIRST half (2026-10-12)
+
+The data-channel key block has two halves, one per direction, and the client sends with half 0. That is the opposite
+of the tls-crypt static key, where the client sends with half 1 — so the two must not share a constant. Measured
+2026-10-12: with half 0 both DNS lookups were answered and no packet was rejected. `TunnelOptions.DataSendHalf` keeps
+the other half reachable, and `TunnelCounters.OppositeDirection` names the mix-up when it happens (a packet that opens
+only under this side's own sending key), so a server that disagrees is diagnosed rather than merely silent.
+
+The same run confirmed D3's derivation end to end: a wrong master secret or key expansion would have authenticated
+nothing in either direction.
