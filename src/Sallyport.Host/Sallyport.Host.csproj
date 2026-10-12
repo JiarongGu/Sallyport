@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Sallyport.Host.exe, not sallyport.exe: on a case-insensitive file system "sallyport.dll" and the library's
+       "Sallyport.dll" are one file, and the second written replaces the first. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sallyport\Sallyport.csproj" />
+  </ItemGroup>
+
+</Project>

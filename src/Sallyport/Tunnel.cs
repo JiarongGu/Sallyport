@@ -385,7 +385,7 @@ public sealed class Tunnel : IAsyncDisposable
             : profile.CaPem is null ? "the profile has no <ca>"
             : profile.CertPem is null || profile.KeyPem is null ? "the profile has no client certificate and key"
             : null;
-        if (why is not null) throw new HandshakeFailed(HandshakeStage.Connect, Outcome.Unverifiable, why);
+        if (why is not null) throw new HandshakeFailed(HandshakeStage.Profile, Outcome.Unverifiable, why);
     }
 
     private static string Waiting(HandshakeStage stage) => stage switch

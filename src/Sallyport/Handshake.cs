@@ -3,8 +3,9 @@ using Sallyport.Transport;
 
 namespace Sallyport;
 
-/// <summary>How far a handshake got, in order.</summary>
-public enum HandshakeStage { Connect, HardReset, Tls, KeyExchange, Push, DataChannel, Done }
+/// <summary>How far a handshake got, in order. <see cref="Profile"/>: refused before any packet, because the profile
+/// asks for something this version does not do — so trying again cannot help.</summary>
+public enum HandshakeStage { Profile, Connect, HardReset, Tls, KeyExchange, Push, DataChannel, Done }
 
 /// <summary>Three answers, never two (CLAUDE.md rule 6).</summary>
 public enum Outcome { Holds, Failed, Unverifiable }

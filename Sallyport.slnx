@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Sallyport/Sallyport.csproj" />
     <Project Path="src/Sallyport.Probe/Sallyport.Probe.csproj" />
+    <Project Path="src/Sallyport.Host/Sallyport.Host.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Sallyport.Tests/Sallyport.Tests.csproj" />
