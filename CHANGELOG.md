@@ -2,8 +2,12 @@
 
 ## 0.1.0 — unreleased
 
-- SOCKS5 server (RFC 1928 CONNECT) over a pluggable connector, loopback-only (D2) — phase 3's front half, tested in
-  process; nothing dials through the tunnel yet.
+- Phase 3, the userspace network (2026-10-12): `TunnelNetwork` — outbound TCP (MSS, window scaling, SACK, RFC 6298
+  retransmission, slow start, fast retransmit, reassembly, FIN both ways) and DNS through the pushed resolvers with a TTL
+  cache — and `TunnelConnector`, which makes `Socks5Server` dial through the tunnel. Measured: ipinfo.io through the
+  proxy says JP Tokyo; DMM serves its domestic age check rather than the English one; a 10 MB download arrives whole at
+  2.9–3.9 MB/s, level with Linux OpenVPN on the same server (D6).
+- SOCKS5 server (RFC 1928 CONNECT) over a pluggable connector, loopback-only (D2).
 - Phase 2, the data channel (2026-10-12): key method 2's PRF key expansion, `P_DATA_V2` with AES-256-GCM / AES-128-GCM,
   a replay window, keepalive and `ping-restart`, exit notices; `Tunnel` is the public surface. Measured: two DNS
   lookups answered through the tunnel in 204 ms each, and the egress address was the server's own.

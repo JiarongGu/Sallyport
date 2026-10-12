@@ -32,10 +32,16 @@ internal static class DnsMessage
 
     /// <summary>Reads the response to query <paramref name="id"/>: its response code and every answer of
     /// <paramref name="type"/>. False when the message is not that response or does not parse.</summary>
-    public static bool TryReadAnswers(ReadOnlySpan<byte> message, ushort id, ushort type, out int responseCode, out List<IPAddress> addresses)
+    public static bool TryReadAnswers(ReadOnlySpan<byte> message, ushort id, ushort type, out int responseCode, out List<IPAddress> addresses) =>
+        TryReadAnswers(message, id, type, out responseCode, out addresses, out _);
+
+    /// <summary>As above, with <c>ttl</c>: the shortest time-to-live among the matching answers, in seconds — how long
+    /// they may be cached.</summary>
+    public static bool TryReadAnswers(ReadOnlySpan<byte> message, ushort id, ushort type, out int responseCode, out List<IPAddress> addresses, out uint ttl)
     {
         responseCode = -1;
         addresses = [];
+        ttl = uint.MaxValue;
         if (message.Length < 12 || BinaryPrimitives.ReadUInt16BigEndian(message) != id || (message[2] & 0x80) == 0) return false;
         responseCode = message[3] & 0x0f;
         int questions = BinaryPrimitives.ReadUInt16BigEndian(message[4..]);
@@ -53,7 +59,11 @@ internal static class DnsMessage
             var length = BinaryPrimitives.ReadUInt16BigEndian(message[(at + 8)..]);
             at += 10;
             if (at + length > message.Length) return false;
-            if (answerType == type && length == (type == TypeA ? 4 : 16)) addresses.Add(new IPAddress(message.Slice(at, length)));
+            if (answerType == type && length == (type == TypeA ? 4 : 16))
+            {
+                addresses.Add(new IPAddress(message.Slice(at, length)));
+                ttl = Math.Min(ttl, BinaryPrimitives.ReadUInt32BigEndian(message[(at - 6)..]));
+            }
             at += length;
         }
         return true;

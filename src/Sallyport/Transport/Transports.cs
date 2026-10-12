@@ -37,7 +37,13 @@ internal sealed class UdpTransport : ITransport
 
     public static async Task<UdpTransport> ConnectAsync(IPEndPoint endpoint, CancellationToken ct)
     {
-        var socket = new Socket(endpoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+        var socket = new Socket(endpoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp)
+        {
+            // A server sends a whole congestion window in one burst; a small socket buffer drops the tail of it while
+            // the receive loop is busy, and each drop costs a TCP retransmission on the far side.
+            ReceiveBufferSize = 4 * 1024 * 1024,
+            SendBufferSize = 1024 * 1024,
+        };
         if (OperatingSystem.IsWindows())
         {
             // SIO_UDP_CONNRESET off: otherwise one ICMP "port unreachable" makes every later receive throw, and a

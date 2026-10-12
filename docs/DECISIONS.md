@@ -43,3 +43,21 @@ only under this side's own sending key), so a server that disagrees is diagnosed
 
 The same run confirmed D3's derivation end to end: a wrong master secret or key expansion would have authenticated
 nothing in either direction.
+
+## D6 — The userspace TCP is sized by measurement: 4 MB window, 4 MB socket buffer, SACK (2026-10-12)
+
+**Axis measured: one connection's 10 MB download, from Australia through the Tokyo server, against WSL's OpenVPN
+(Linux TCP) on the same server, runs interleaved.** Many concurrent connections, uploads and hours-long sessions were
+not measured.
+
+| change | Sallyport | WSL in the same window | what the counters showed |
+|---|---|---|---|
+| first cut: 512 KB window, default socket buffer | 0.51–1.06 MB/s | 1.09–2.94 | 403–1,807 segments out of order per run |
+| UDP receive buffer 4 MB | 1.72–1.88 | 2.23–3.40 | out of order fell to 0–2: the drops were OURS, a burst overflowing the socket |
+| receive window 4 MB (scale 6) | 3.87, 1.86, 3.92 | 3.45–3.52 | the slow run lost 11 packets on the path |
+| receiver SACK | 3.57, 2.92, 3.23 | 0.67, 2.97, 3.37 | 53 and 337 packets lost in the fast runs, recovered |
+
+A connection's ceiling is window ÷ round trip, so 512 KB at 200 ms could never pass ~2.5 MB/s. The receive buffer grows
+as bytes queue, so the 4 MB is a ceiling, not a cost per connection. Without SACK a server repairs one hole per round
+trip; with it, many. The counters that made this visible — segments out of order, ids missing from the server's data
+packets — stay, because a download's loss is otherwise invisible from the receiving side.

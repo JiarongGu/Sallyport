@@ -21,7 +21,7 @@ public sealed class TunnelEnded(string message, Exception? inner = null) : Excep
 /// only under this side's own sending key — both sides chose the same key half, which no other fault produces.</summary>
 public readonly record struct TunnelCounters(
     long PacketsIn, long PacketsOut, long BytesIn, long BytesOut, long PingsIn, long PingsOut,
-    long Rejected, long OppositeDirection, long Replayed, int ControlDropped);
+    long Rejected, long OppositeDirection, long Replayed, int ControlDropped, long MissingIn);
 
 /// <summary>Options a caller rarely sets.</summary>
 public sealed class TunnelOptions
@@ -87,7 +87,7 @@ public sealed class Tunnel : IAsyncDisposable
     public TunnelCounters Counters => new(
         Interlocked.Read(ref _packetsIn), Interlocked.Read(ref _packetsOut), Interlocked.Read(ref _bytesIn), Interlocked.Read(ref _bytesOut),
         Interlocked.Read(ref _pingsIn), Interlocked.Read(ref _pingsOut), Interlocked.Read(ref _rejected), Interlocked.Read(ref _opposite),
-        Interlocked.Read(ref _replayed), _channel.Dropped);
+        Interlocked.Read(ref _replayed), _channel.Dropped, _data.Missing);
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> packet, CancellationToken ct = default)
     {

@@ -28,6 +28,9 @@ internal sealed class DataChannel : IDisposable
     private readonly ReplayWindow _replay = new();
     private long _sent;
 
+    /// <summary>Packets from the server that never arrived (see <see cref="ReplayWindow.Missing"/>).</summary>
+    public long Missing => _replay.Missing;
+
     public DataChannel(DataKeys keys, uint peerId, byte keyId)
     {
         _seal = new AesGcm(keys.SendKey, TagLength);
@@ -108,6 +111,11 @@ internal sealed class ReplayWindow
     private readonly object _gate = new();
     private uint _highest;
     private ulong _seen;   // bit i: (_highest - i) has been accepted
+    private long _missing;
+
+    /// <summary>Ids skipped and not (yet) filled in: packets the server sent that never arrived — lost on the path or
+    /// dropped by this machine — as opposed to arriving late.</summary>
+    public long Missing { get { lock (_gate) return _missing; } }
 
     public bool Accept(uint id)
     {
@@ -117,6 +125,7 @@ internal sealed class ReplayWindow
             if (id > _highest)
             {
                 var shift = id - _highest;
+                _missing += shift - 1;
                 _seen = shift >= Size ? 0 : _seen << (int)shift;
                 _seen |= 1;
                 _highest = id;
@@ -127,6 +136,7 @@ internal sealed class ReplayWindow
             var bit = 1UL << (int)behind;
             if ((_seen & bit) != 0) return false;
             _seen |= bit;
+            _missing--;
             return true;
         }
     }
