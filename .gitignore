@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+# Machine state, and anything that could hold a profile or key — never committed (CLAUDE.md, rule 2).
+local/
+*.ovpn
+*.pem
+*.key
+*.p12
+*.pfx
