@@ -21,3 +21,14 @@ Newer servers prefer deriving data keys with the TLS keying-material exporter (R
 does not expose an exporter. A client that does not advertise the exporter capability in its peer info is given the
 older key-method-2 expansion (the TLS 1.0 PRF over both sides' random material), which servers still support. Revisit
 if .NET gains an exporter, or if a server refuses clients without it.
+
+Measured 2026-10-12 against the first real server: it accepted the client without the capability, and its push reply's
+`protocol-flags` held only `cc-exit` — no `tls-ekm` — so it expects the PRF expansion. One server, so this says that one
+server does not insist, not that none will.
+
+## D4 — The peer info claims no OpenVPN version (2026-10-12)
+
+Peer info carries `IV_PLAT`, `IV_PROTO`, `IV_NCP`, `IV_CIPHERS` and `IV_GUI_VER=Sallyport_<version>` — and no `IV_VER`.
+Sallyport is not OpenVPN and does not claim to be a version of it; what a server needs to know is which capabilities the
+client has, and those have their own fields. Measured 2026-10-12: the first real server pushed its full configuration
+without it. If a server is ever found that gates on `IV_VER`, record which one before adding it.
