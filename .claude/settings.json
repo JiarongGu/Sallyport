@@ -1,0 +1,34 @@
+{
+  "$comment": "Harness config for Sallyport. acceptEdits + an allow-list for the normal .NET dev loop so routine work does not prompt. Pushes and anything not listed still ask. Reading .ovpn profiles is denied because a profile holds a private/static key and must never enter the repo, be logged, or be printed (CLAUDE.md rule 2).",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "Bash(dotnet:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git branch:*)",
+      "Bash(git switch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git restore:*)",
+      "Bash(git stash:*)",
+      "PowerShell(dotnet:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)",
+      "PowerShell(git add:*)",
+      "PowerShell(git commit:*)"
+    ],
+    "deny": [
+      "Read(**/*.ovpn)",
+      "Read(**/*.key)"
+    ]
+  }
+}
