@@ -62,6 +62,47 @@ public class Socks5ServerTests
         }
     }
 
+    /// <summary>Reads until the client's EOF, then sends one byte every <c>interval</c> for <c>ticks</c> times — and never
+    /// closes its own side, as some real servers do after a client's FIN.</summary>
+    private sealed class NeverClosingServer : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _stop = new();
+        private readonly Task _loop;
+
+        public NeverClosingServer(int ticks = 0, TimeSpan interval = default)
+        {
+            _listener.Start();
+            _loop = Task.Run(async () =>
+            {
+                try
+                {
+                    using var client = await _listener.AcceptTcpClientAsync(_stop.Token);
+                    var stream = client.GetStream();
+                    var buffer = new byte[8192];
+                    while (await stream.ReadAsync(buffer, _stop.Token) > 0) { }
+                    for (var i = 0; i < ticks; i++)
+                    {
+                        await Task.Delay(interval, _stop.Token);
+                        await stream.WriteAsync(new[] { (byte)i }, _stop.Token);
+                    }
+                    await Task.Delay(Timeout.Infinite, _stop.Token);
+                }
+                catch (Exception) { }
+            });
+        }
+
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+        public async ValueTask DisposeAsync()
+        {
+            await _stop.CancelAsync();
+            _listener.Stop();
+            await _loop;
+            _stop.Dispose();
+        }
+    }
+
     private sealed class StubConnector(Func<string, int, Exception?> fail) : IConnector
     {
         public ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken ct) =>
@@ -240,6 +281,48 @@ public class Socks5ServerTests
         var back = new MemoryStream();
         await stream.CopyToAsync(back, cts.Token);
         Assert.Equal("ping"u8.ToArray(), back.ToArray());
+    }
+
+    [Fact]
+    public async Task A_half_closed_relay_whose_server_stays_silent_is_let_go_after_the_silence_limit()
+    {
+        using var cts = new CancellationTokenSource(Limit);
+        await using var silent = new NeverClosingServer();
+        await using var server = new Socks5Server(new DirectConnector()) { HalfClosedSilence = TimeSpan.FromMilliseconds(300) };
+        server.Start();
+        var (client, stream, rep) = await HandshakeAsync(server, V4(silent.Port), cts.Token);
+        using var _ = client;
+        Assert.Equal(0x00, rep);
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        client.Client.Shutdown(SocketShutdown.Send);
+
+        // The proxy gives up on the silent side and closes ours: the read ends rather than waiting for the test's limit.
+        Assert.Equal(0, await stream.ReadAsync(new byte[1], cts.Token));
+        Assert.InRange(clock.Elapsed, TimeSpan.FromMilliseconds(250), TimeSpan.FromSeconds(3));
+        for (var i = 0; i < 100 && server.ActiveConnections > 0; i++) await Task.Delay(10, cts.Token);
+        Assert.Equal(0, server.ActiveConnections);
+    }
+
+    [Fact]
+    public async Task A_half_closed_relay_stays_up_while_the_open_side_keeps_talking()
+    {
+        using var cts = new CancellationTokenSource(Limit);
+        // Six bytes 150 ms apart: 900 ms in all, three times the silence limit, but never 300 ms without a word.
+        await using var talking = new NeverClosingServer(ticks: 6, interval: TimeSpan.FromMilliseconds(150));
+        await using var server = new Socks5Server(new DirectConnector()) { HalfClosedSilence = TimeSpan.FromMilliseconds(300) };
+        server.Start();
+        var (client, stream, rep) = await HandshakeAsync(server, V4(talking.Port), cts.Token);
+        using var _ = client;
+        Assert.Equal(0x00, rep);
+
+        client.Client.Shutdown(SocketShutdown.Send);
+        var got = new byte[6];
+        await stream.ReadExactlyAsync(got, cts.Token);
+
+        Assert.Equal(new byte[] { 0, 1, 2, 3, 4, 5 }, got);
+        // And once it falls silent, the limit applies again.
+        Assert.Equal(0, await stream.ReadAsync(new byte[1], cts.Token));
     }
 
     [Fact]

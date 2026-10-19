@@ -70,6 +70,13 @@ public sealed class Socks5Server : IAsyncDisposable
     /// <summary>The bound endpoint, so a requested port 0 shows the real port.</summary>
     public IPEndPoint Endpoint { get; }
 
+    /// <summary>How long a relay whose one direction has ended waits on the other before giving up. The proxy sees only
+    /// end-of-stream, never whether the client shut down its sending side or closed outright, so it passes it on as a
+    /// half-close and keeps the reply open. A browser closes outright, and some servers never close their side after
+    /// our FIN: measured, 6 of a cold Edge session's 114 connections were still held 90 s after it exited. An
+    /// operating system bounds the same state for a closed socket; Linux gives it a minute (tcp_fin_timeout).</summary>
+    internal TimeSpan HalfClosedSilence { get; init; } = TimeSpan.FromSeconds(60);
+
     public int ActiveConnections => Volatile.Read(ref _active);
     /// <summary>Bytes relayed client to remote.</summary>
     public long BytesUp => Interlocked.Read(ref _up);
@@ -205,27 +212,39 @@ public sealed class Socks5Server : IAsyncDisposable
         {
             try { client.Dispose(); remote.Dispose(); } catch (Exception) { }
         });
+        var relay = new Relay(cts);
         await Task.WhenAll(
-            PumpAsync(client, remote, up: true, cts),
-            PumpAsync(remote, client, up: false, cts));
+            PumpAsync(client, remote, up: true, relay),
+            PumpAsync(remote, client, up: false, relay));
     }
 
-    private async Task PumpAsync(Stream from, Stream to, bool up, CancellationTokenSource cts)
+    /// <summary>What the two directions of one relay share: the way to end both, and whether one has ended already.</summary>
+    private sealed class Relay(CancellationTokenSource cts)
+    {
+        public CancellationTokenSource Cts { get; } = cts;
+        public volatile bool HalfClosed;
+    }
+
+    private async Task PumpAsync(Stream from, Stream to, bool up, Relay relay)
     {
         var buffer = new byte[BufferSize];
         try
         {
             int n;
-            while ((n = await from.ReadAsync(buffer, cts.Token)) > 0)
+            while ((n = await from.ReadAsync(buffer, relay.Cts.Token)) > 0)
             {
-                await to.WriteAsync(buffer.AsMemory(0, n), cts.Token);
+                // The other direction has ended: each sign of life here postpones giving up on this one.
+                if (relay.HalfClosed) relay.Cts.CancelAfter(HalfClosedSilence);
+                await to.WriteAsync(buffer.AsMemory(0, n), relay.Cts.Token);
                 if (up) Interlocked.Add(ref _up, n); else Interlocked.Add(ref _down, n);
             }
             HalfClose(to);
+            relay.HalfClosed = true;
+            relay.Cts.CancelAfter(HalfClosedSilence);
         }
         catch (Exception)
         {
-            await cts.CancelAsync();
+            await relay.Cts.CancelAsync();
         }
     }
 
