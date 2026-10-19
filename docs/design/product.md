@@ -256,6 +256,13 @@ Choose self-contained Windows x64 .NET 10 publishing. Keep Shenora’s existing 
 
 Install protected versioned files under `%ProgramFiles%\Sallyport`; protected setup journal, release hashes and driver MSI cache under `%ProgramData%\Sallyport`. User profiles/settings remain user-scoped and DPAPI-sealed.
 
+> **Changed by the owner (2026-10-20):** the person chooses the install folder (`%ProgramFiles%\Sallyport` is only the
+> default), and everything Sallyport writes for the machine — setup's record, the driver's installer, the service's
+> logs — goes in `data` inside that folder, not in `%ProgramData%`. Setup gives the folder its own rights (owned by
+> Administrators; SYSTEM and Administrators write, Users read and run; nothing inherited), since a folder off the
+> system drive inherits rights that let users change it, and the service believes only clients run from it. Moving an
+> installed Sallyport is removing it and installing it again.
+
 A BCL-only C# setup executable needs compression, HTTP, hashing, registry access and P/Invoke/COM for elevation, ACLs, Authenticode verification, SCM, Job Objects and Start-menu links. SCM hosting uses native APIs, not `ServiceBase`.
 
 One elevated setup process performs all privileged operations. Refactor `PacketFilterSetup` so that process invokes `msiexec` directly, without nested `runas`. Fetch D18’s pinned official driver release and recheck it after protected staging.

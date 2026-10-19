@@ -14,3 +14,4 @@ local/
 # The client page: its packages, and the bundle it builds into the executable.
 node_modules/
 apps/Sallyport.Client/wwwroot/
+artifacts/

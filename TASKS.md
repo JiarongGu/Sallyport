@@ -202,10 +202,20 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
    the tray, the first run, and the copy that still says games are not routed.
    - **Done when:** Zenless Zone Zero is made from its folder and run with the JP profile from the window; window and
      tray agree with the service's and the server's evidence.
-9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files under
-   `%ProgramFiles%\Sallyport`, the service, the driver on request, a Start-menu entry, `.ovpn` under Open With, start
-   with Windows per user, the uninstall entry, upgrade in place, and removal that leaves the machine as it was (user
-   data only if asked).
+9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files in the
+   folder the person chooses (`%ProgramFiles%\Sallyport` unless they choose otherwise; the owner's is on D:, nothing
+   of it on C:), its data (service log, setup record, driver installer) in `data` inside it, the service, the driver on
+   request, a Start-menu entry, `.ovpn` under Open With, start with Windows per user, the uninstall entry, upgrade in
+   place, and removal that leaves the machine as it was (user data only if asked).
+   - **Begun 2026-10-20, on the owner's machine** (`package.ps1`: 302 files, 145.6 MB unpacked, 55.2 MB zipped, a
+     104.7 MB setup). The window: choose the folder (checked as typed — a fixed NTFS drive, not a drive's root nor
+     Windows' own, empty or Sallyport already, twice the payload free), the driver option (seen as already installed),
+     a progress bar, the end. The owner installed to `D:\Program Files\Sallyport` from it: the folder owned by
+     Administrators, its rights SYSTEM and Administrators full, Users read and run, not inherited — where `D:\Program
+     Files` itself lets Authenticated Users modify; the service `Auto`, running from D: and logging to
+     `data\logs\service.log`; the uninstall entry's `InstallLocation` and `UninstallString` on D:; the Start-menu
+     entry; no `C:\Program Files\Sallyport`, no `C:\ProgramData\Sallyport`. Run again, setup offers only to
+     reinstall where Sallyport is. Not yet: an upgrade across versions, an interrupted install, removal, a clean machine.
    - **Done when:** install, upgrade, an interrupted install and removal are each measured on a clean machine, the
      network usable throughout. **Needs:** a clean Windows machine or VM.
 10. **The long run:** hours on the real server with outages, and the peer-to-peer harness → bounded memory and

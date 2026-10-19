@@ -7,6 +7,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <IsPackable>false</IsPackable>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Drawn by icon.ps1 from the tray's mark: what Explorer, the Start menu and Windows' installed apps show. -->
+    <ApplicationIcon>Sallyport.ico</ApplicationIcon>
     <!-- Shenora's packages and WinForms reference different builds of the same framework assemblies; the newer wins. -->
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>

@@ -94,10 +94,10 @@ public sealed class PacketFilterSetup(string folder)
         var log = Path.Combine(_folder, $"{action}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
         var start = new ProcessStartInfo("msiexec.exe", $"{verb} \"{InstallerPath}\" /qn /norestart /l*v \"{log}\"")
         {
-            // Through the shell so Windows asks for administrator: installing a driver needs it, and nothing else of
-            // Sallyport does.
+            // Through the shell so Windows asks for administrator: installing a driver needs it. A process that has it
+            // already (Sallyport's setup) starts the installer as it is, without a second prompt.
             UseShellExecute = true,
-            Verb = "runas",
+            Verb = Elevated ? "" : "runas",
             WindowStyle = ProcessWindowStyle.Hidden,
         };
         Process? installer;
@@ -110,6 +110,10 @@ public sealed class PacketFilterSetup(string folder)
             return Interpret(installer.ExitCode, action, File.Exists(log) ? log : null);
         }
     }
+
+    private static bool Elevated =>
+        new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent())
+            .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
 
     internal static async Task<bool> MatchesAsync(string path, CancellationToken ct, string expected = PacketFilterRelease.InstallerSha256)
     {

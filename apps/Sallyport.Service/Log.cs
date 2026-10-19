@@ -1,5 +1,5 @@
 /// <summary>The service's log: what it decided and why, never a packet's contents nor a profile's (rule 2). Under the
-/// service manager, a file in %ProgramData%\Sallyport\logs that only administrators and the system can write.</summary>
+/// service manager, a file in the install folder's data\logs, which only administrators and the system can write.</summary>
 sealed class Log(Action<string> write)
 {
     private const long MostBytes = 4 * 1024 * 1024;
@@ -11,7 +11,7 @@ sealed class Log(Action<string> write)
 
     public static Log ToFile()
     {
-        var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sallyport", "logs");
+        var folder = Path.Combine(AppContext.BaseDirectory, "data", "logs");
         Protect(Path.GetDirectoryName(folder)!);
         Directory.CreateDirectory(folder);
         var path = Path.Combine(folder, "service.log");
@@ -30,8 +30,8 @@ sealed class Log(Action<string> write)
         });
     }
 
-    // %ProgramData% lets any user create folders in it, so Sallyport's own is given its rights here, inheritance cut:
-    // the system and administrators write it, users may read it. Run as LocalSystem, this succeeds whoever made it first.
+    // Setup protects the install folder; the data folder is protected again here, inheritance cut — the system and
+    // administrators write it, users may read it — so a development build installed by hand is no weaker.
     private static void Protect(string folder)
     {
         var security = new System.Security.AccessControl.DirectorySecurity();

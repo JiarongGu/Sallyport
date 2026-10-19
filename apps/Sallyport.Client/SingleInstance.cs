@@ -56,15 +56,19 @@ internal sealed class SingleInstance : IDisposable
     {
         try
         {
-            using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.Out, PipeOptions.CurrentUserOnly);
+            // Not CurrentUserOnly here: it compares the pipe's owner with this token's, which for an elevated start (setup
+            // closing the client, say) is Administrators, not the person. The person is checked instead: the server must
+            // run as this same user. The server's own end stays CurrentUserOnly.
+            using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.Out, PipeOptions.None);
             pipe.Connect(3000);
+            if (Sallyport.Windows.Service.PipePeer.ServerOf(pipe).User is not { } owner || owner != System.Security.Principal.WindowsIdentity.GetCurrent().User) return;
             // Paths made whole here: the running client has its own working directory.
             var message = string.Join('\n', args.Select(a => a.StartsWith('-') ? a : Path.GetFullPath(a)));
             pipe.Write(Encoding.UTF8.GetBytes(message));
         }
         // The first is still starting, or already leaving: there is no one to hand to, and nothing worse than a
         // window not shown.
-        catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException) { }
+        catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception) { }
     }
 
     public void Dispose()
