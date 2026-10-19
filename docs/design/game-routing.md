@@ -189,3 +189,91 @@ The current relay is IPv4-only. Observe IPv6, but refuse default routing prepara
 Captive portals or failed direct preflight prevent connection; direct-path loss triggers teardown without claiming the VPN caused it. Network changes invalidate readiness checks.
 
 CDN and anycast destinations can change without notice, and the VPN exit may receive different matchmaking answers from the direct path. Re-learning must remain available while routed. Exact routes limit collateral refusal but cannot guarantee stable coverage or improved latency. Never chase churn by routing an ASN, accepting a default route, or concealing direct fallback.
+
+---
+
+## Amendment 1 — host-based and peer-to-peer games (2026-10-19)
+
+**Why.** The owner: *"even this game is stable connection but for game like helldiver its depending on the host (but we
+cannot run helldiver because it got conflict with bun) so we need to incount of this but use zenless as a test ground
+for now"*, then *"helldiver can even change the host during the game if the host leaves"*.
+
+**How it was made.** Codex, `codex exec -s read-only`, on `local/codex/p2p-brief.md`, which carried the Zenless Zone Zero
+observation below. Its answer follows these notes.
+
+**Measured the same day, for it.**
+- Zenless Zone Zero, CN server, 45 s of a live session, a private session on `Microsoft-Windows-Kernel-Network`
+  attributed by payload PID: gameplay is UDP to one endpoint (38 sent, 33 received) that the TCP table never shows; its
+  TCP is HTTPS to a few gateways plus loopback to local helpers. A dedicated-server game, and the test ground.
+- The VPN server's NAT, through the tunnel (`Sallyport.Probe --nat`, STUN binding requests to three servers of two
+  operators from one tunnel port): one public address and the same public port for all three, and that port equal to
+  the tunnel's own; the next tunnel port mapped one higher. So its **mapping is endpoint-independent and preserves
+  ports**, the behaviour peer-to-peer traversal needs. Its **filtering** — whether a peer never sent to may send in, which
+  hosting needs — could not be checked: no public STUN server answers from a second address. Its mapping lifetime was
+  not measured.
+
+**Adopted, with the owner's second point made explicit.** A host that leaves mid-match hands the session to another
+player: new peer addresses appear *during* a session, not only between sessions. A learned-destination backend sends
+them direct until a session boundary — exactly the moment that matters — so for host-migrating games only first-packet
+selection by process (the driver backend) covers play. The driverless backend labels such a game "Services routed;
+peers may be direct" and never more.
+
+Amendment to `docs/design/game-routing.md`, 2026-10-19. Proposed design; no files changed or tests run. Measurements below are the owner’s supplied evidence.
+
+**1. Extend §§1–2: classify observed behaviour, not the game’s name.**
+
+The Zenless measurement supports the learned-prefix approach: in 45 seconds, gameplay exchanged 38 outbound and 33 inbound UDP packets with `47.123.84.37:20501`, invisible to the TCP table. HTTPS gateways and loopback helpers were separate traffic. This establishes one stable gameplay destination in that interval; it does not establish coverage of future sessions. `HYP.exe` remains a launch target, not automatic routing membership.
+
+For each attributed process instance and local UDP port, record distinct remote endpoints, simultaneous remotes, first/last activity and changes between explicit learning sessions. Compare destination reuse across sessions. One port exchanging with several changing residential-network addresses suggests peers; repeatedly reused hosting-network destinations suggest dedicated servers or relays. Matchmaking HTTPS followed by changing UDP remotes strengthens the peer hypothesis.
+
+These are clues, not identification. Dedicated infrastructure can churn; peers can use cloud hosts; relays can hide peers behind stable destinations. Address-ownership enrichment is optional supporting evidence, with source/date and “unavailable” when absent. Never expand routes from ownership information.
+
+Show **“Stable destinations observed,” “Changing peers suspected,” “Mixed traffic,” or “Insufficient evidence”**, with session counts and reasons. Separately show observation gaps. Permit the person to select “I join” or “I host”; packet observation alone cannot reliably establish the game’s role. Residential peer addresses should remain session-scoped by default, with explicit retention for cross-session comparison.
+
+**2. Amend §2: driverless coverage is conditional.**
+
+`LearnedPrefixVpnBackend` can route validated, previously observed matchmaking or relay destinations. Label that **“Learned services routed; new peers may connect directly.”** Routing matchmaking does not route the peers returned by matchmaking.
+
+A game’s existing relay mode may make stable-destination routing useful, but Sallyport cannot force that mode merely by routing addresses. Measure actual gameplay through the relay, destination stability and direct fallback before describing coverage. Shared platform services need separate executable admission and expose the existing all-instances/shared-destination limitations.
+
+Learning a new peer occurs after its first packet. Even a successful live profile update cannot recover that packet; changing the path can change the source address/port visible to the peer and invalidate traversal or session state. Live updates remain unmeasured. Test their actual packet paths and session effects, but do not make them the peer-routing strategy.
+
+Do not automatically apply newly learned peer routes during a session. Offer application at a deliberate session boundary, while explaining that the next session may choose entirely different peers. Driverless mode cannot promise complete peer coverage, VPN-only gameplay, or hosting reachability. Known-address exceptions require explicit selection and measured results.
+
+**3. Expand §5: `WfpProcessBackend` needs connection ownership and bidirectional forwarding.**
+
+The driver backend must select every supported external destination of admitted processes before the first packet escapes, including previously unseen UDP peers, matchmaking, discovery and relays. Destination learning becomes diagnostic. Prepare enforcement before launch; an already-running game requires a fresh session for a first-packet guarantee.
+
+Process identity, socket/flow ownership and policy must remain associated across asynchronous traffic, process exit and PID reuse. Until ownership or tunnel readiness is established, hold within bounded limits or refuse/drop selected traffic; never silently send it directly. Preserve explicit loopback/local-network policy and transport-loop exclusions. Unsupported address families prevent a complete-coverage claim. System DNS and shared platform processes retain their separately disclosed scope.
+
+NAT discovery, rendezvous and hole-punch traffic owned by admitted processes must traverse the same VPN path as gameplay. The externally discovered address/port must correspond to the mapping peers actually reach. Exact WFP interception, socket semantics, packet reinjection and traversal compatibility are implementation questions requiring measurement, not capabilities established by naming this backend.
+
+Returned tunnel packets need validated reverse-flow delivery. Hosting also needs delivery to an authorized bound socket where no outbound peer flow exists, with explicit listener policy and firewall integration. Do not infer a recipient from an ambiguous port match.
+
+The VPN server must forward the required traffic and provide usable return paths. Outbound NAT mappings may support replies or hole punching; they do not establish unsolicited inbound reachability. Hosting may require an assigned reachable address, explicit port forwarding, or a compatible relay. Server NAT/filtering behaviour, mapping lifetime and port preservation must be measured. Sallyport cannot create unavailable server-side reachability.
+
+Keep traversal mappings and the external identity stable during a session. Tunnel reconnection, exit changes or lost mappings require recovery/rejoining; transparent migration is not promised.
+
+**4. Extend §4’s contract.**
+
+Add host-authored topology assessment, supporting evidence, observation completeness, requested role, coverage scope and inbound reachability. Coverage distinguishes `learnedDestinations`, `servicesOnly` and `processTraffic`; it never derives from topology alone.
+
+Backend capabilities separately describe first-packet enforcement, supported families, return delivery, unsolicited inbound delivery and server forwarding. Each capability/readiness check uses `holds`, `failed` or `unavailable`, with evidence and scope. An inferred topology is not a successful reachability check.
+
+The row must distinguish **“Learned destinations routed,” “Services routed; peers may be direct,”** and **“Process traffic routed.”** Hosting adds **“Inbound verified,” “Inbound failed,”** or **“Inbound not checked.”** “Process traffic routed” requires measured enforcement and does not itself mean hosting works. `partial`, `refused` and recovery states retain concrete reasons. Actions include choosing role, preparing before launch and testing reachability.
+
+**5. Extend §6 and refusals.**
+
+Keep Zenless as the real-game test ground for observation and stable-destination routing. Repeat login, gameplay and relaunch measurements; correlate its actual traffic with tunnel/server evidence. Do not treat it as a peer-hosting test.
+
+Without Helldivers 2, build a BCL-only diagnostic peer application with generated test data, controlled rendezvous/relay fixtures and cooperating external peers behind different NATs. Against a real OpenVPN server, measure:
+
+- Fresh, unpredictable destinations across sessions and multiple remotes sharing one local UDP port; verify the first packet’s source and path.
+- Traversal, replies, idle mapping expiry, peer changes and relay fallback.
+- Hosting with unsolicited inbound traffic, separately from replies after outbound traffic; exercise permitted and blocked server forwarding.
+- Driverless route updates mid-flow: direct first packets, resulting external tuples, continuity, interruption and rollback.
+- Tunnel loss, process reuse and IPv4/IPv6 boundaries; distinguish intentional refusal from missing observation.
+
+Record server configuration, sent/returned metadata, external mappings and cleanup. Missing remote visibility means verification unavailable. Harness success establishes mechanisms; a later runnable peer game must establish game compatibility.
+
+Refuse claims of universal peer support, guaranteed hosting, automatic relay selection, seamless source changes or Helldivers compatibility without measurement. Refuse broad prefix expansion, machine-wide routing/DNS changes, anti-cheat bypasses and unrelated platform-process admission as shortcuts. Helldivers remains untested here; its conflict with bun is not justification to bypass it.

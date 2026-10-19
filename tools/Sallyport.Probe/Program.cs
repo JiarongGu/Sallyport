@@ -9,7 +9,7 @@ using Sallyport.Profile;
 
 if (args.Length < 1 || args[0].StartsWith("--", StringComparison.Ordinal))
 {
-    Console.Error.WriteLine("usage: Sallyport.Probe <profile.ovpn> [--remote N] [--timeout seconds] [--data-half 0|1] [--no-dns] [--fetch] [--concurrent N] [--serve seconds]");
+    Console.Error.WriteLine("usage: Sallyport.Probe <profile.ovpn> [--remote N] [--timeout seconds] [--data-half 0|1] [--no-dns] [--fetch] [--concurrent N] [--serve seconds] [--nat]");
     return 2;
 }
 
@@ -80,6 +80,8 @@ await using (tunnel)
     var c = tunnel.Counters;
     Console.WriteLine($"counters: in {c.PacketsIn} pkt / {c.BytesIn} B, out {c.PacketsOut} pkt / {c.BytesOut} B, pings in {c.PingsIn} out {c.PingsOut}, "
         + $"rejected {c.Rejected}, opposite-direction {c.OppositeDirection}, replayed {c.Replayed}, control dropped {c.ControlDropped}, overflowed {c.Overflowed}");
+    if (answered == checks.Length && args.Contains("--nat"))
+        return await Nat.RunAsync(tunnel);
     if (answered == checks.Length && (args.Contains("--fetch") || args.Contains("--serve") || args.Contains("--concurrent")))
         return await Phase3.RunAsync(tunnel, args.Contains("--fetch"), Option("--serve", 0), Option("--concurrent", 0));
     if (answered == checks.Length)

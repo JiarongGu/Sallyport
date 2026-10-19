@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Sallyport.Tests" />
+    <!-- The probe measures below the public API (raw UDP through the tunnel for STUN): it may build packets as the library does. -->
+    <InternalsVisibleTo Include="Sallyport.Probe" />
   </ItemGroup>
 
 </Project>
