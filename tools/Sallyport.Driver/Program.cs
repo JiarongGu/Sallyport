@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -13,6 +14,7 @@ using Sallyport.Net;
 using Sallyport.Protocol;
 using Sallyport.Windows.PacketFilter;
 using Sallyport.Windows.Routing;
+using Sallyport.Windows.Service;
 
 // Sallyport.Driver status | fetch | install | uninstall | adapters | pass | inject | rtt | reset | guard
 //   The packet driver (Windows Packet Filter, D18) as Sallyport manages it: NT Kernel's pinned release, fetched into
@@ -67,6 +69,17 @@ switch (args.FirstOrDefault())
             new LossPolicy(Text("--loss") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
                 Option("--direct-after", 0) is > 0 and var after ? TimeSpan.FromSeconds(after) : null),
             Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0));
+    case "service-route":
+        return await ServiceRouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60),
+            Text("--child"), Text("--folder"), Text("--workload"),
+            new LossPolicy(Text("--loss") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
+                Option("--direct-after", 0) is > 0 and var directAfter ? TimeSpan.FromSeconds(directAfter) : null));
+    case "service-hello":
+        return await ServiceHelloAsync();
+    case "service-malformed":
+        return await ServiceMalformedAsync();
+    case "service-failure":
+        return await ServiceFailureAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Text("--child"), Text("--case"));
     case "reconnect":
         return await ReconnectAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null,
             Option("--block-after", 15), Option("--block-for", 150));
@@ -100,7 +113,10 @@ switch (args.FirstOrDefault())
             + " | rtt [--count N] | attribute [--seconds N] | guard [--seconds N] [--may-remove]"
             + " | route <profile.ovpn> [--folder <game folder>] [--seconds N] [--workload boundaries|steady [--peer6 <link-local address>] [--oversized split|whole]]"
             + " [--loss hold|direct|stop] [--direct-after S] [--cut-after S --cut-for S] [--ping-restart S]"
-            + " | reconnect <profile.ovpn> [--block-after S] [--block-for S] | stop | reset");
+            + " | reconnect <profile.ovpn> [--block-after S] [--block-for S]"
+            + " | service-route <profile.ovpn> --child <a copy of this exe elsewhere> | --folder <game folder> [--workload steady] [--loss ...] [--seconds N]"
+            + " | service-hello | service-malformed | service-failure <profile.ovpn> --child <exe> --case kill-worker|hang-worker|kill-supervisor|lease"
+            + " | stop | reset");
         return 2;
 }
 
@@ -1079,6 +1095,246 @@ static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGatewa
     }
 }
 
+// Item 2, steps 3 and 4: a run through the router service, this process as its client — the tunnel held here, by a
+// TunnelSession, as the client holds it; each generation committed over the run's pipe and the packets crossing it both
+// ways. The selected program is a copy of this executable kept outside Sallyport's folder (--child; the service
+// refuses to route Sallyport's own), or a game folder's programs (--folder). The profile is never printed (rule 2).
+async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? childExe, string? folder, string? workload, LossPolicy loss)
+{
+    if (profilePath is null || (childExe is null && folder is null)) { Console.Error.WriteLine("usage: Sallyport.Driver service-route <profile.ovpn> --child <exe> | --folder <game folder>"); return 2; }
+    OvpnProfile profile;
+    try { profile = OvpnProfile.Parse(File.ReadAllText(profilePath)); }
+    catch (Exception e) { Console.WriteLine($"could not read the profile ({e.GetType().Name})"); return 2; }
+    var executables = folder is not null ? GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path).ToList() : [Path.GetFullPath(childExe!)];
+    var clock = Stopwatch.StartNew();
+    string T() => $"{Now()} t={clock.Elapsed.TotalSeconds,5:F1}s";
+
+    await using var client = await RouterClient.ConnectAsync(AppContext.BaseDirectory, "driver-tool", TimeSpan.FromSeconds(5));
+    Console.WriteLine($"{T()}  service: version {client.Welcome.Version}, build {client.Welcome.Build}, driver {(client.Welcome.DriverReady ? "ready" : client.Welcome.DriverProblem)}");
+    client.RunEnded += ended => Console.WriteLine($"{T()}  service: RUN ENDED — {ended.Reason}");
+    var prepared = Stopwatch.StartNew();
+    await using var run = await client.PrepareAsync(executables, loss, AppContext.BaseDirectory);
+    Console.WriteLine($"{T()}  service: run {run.RunId[..8]} prepared and attached in {prepared.ElapsedMilliseconds} ms, on {run.Attached.Adapter} (MTU {run.Attached.AdapterMtu}),"
+        + $" {executables.Count} program(s), loss {loss.Mode}");
+    var lastPhase = (RoutePhase?)null;
+    run.StateChanged += state =>
+    {
+        if (state.Phase != lastPhase) Console.WriteLine($"{T()}  route: {state.Phase} (generation {state.Generation})");
+        lastPhase = state.Phase;
+    };
+
+    ServicePump? current = null;
+    await using var session = new TunnelSession(profile, new TunnelSessionOptions
+    {
+        Consumer = (tunnel, generation) =>
+        {
+            var overhead = 20 + (tunnel.Remote.Proto == "tcp" ? 20 + 2 : 8) + DataChannel.Overhead;
+            var pump = new ServicePump(tunnel, generation, run, run.Attached.AdapterMtu - overhead);
+            Volatile.Write(ref current, pump);
+            return pump;
+        },
+    });
+    session.StatusChanged += status => Console.WriteLine($"{T()}  tunnel: {status.State} {status.Remote ?? "-"}, attempts {status.Attempts}, reconnects {status.Reconnects}"
+        + (status.LastError is { } error ? $" ({error})" : ""));
+    using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+    var tunnelling = session.RunAsync(stop.Token);
+    // What the router routed goes into the tunnel of the generation it was routed for, and nowhere else.
+    var sending = Task.Run(async () =>
+    {
+        await foreach (var (generation, packet) in run.ToTunnel.Reader.ReadAllAsync())
+            if (Volatile.Read(ref current) is { } pump && pump.Generation == generation)
+                try { await pump.Tunnel.SendAsync(packet); }
+                catch (Exception e) when (e is TunnelEnded or ObjectDisposedException) { }
+    });
+
+    if (childExe is not null)
+    {
+        while (lastPhase != RoutePhase.Routing && !stop.IsCancellationRequested) await Task.Delay(100);
+        Console.WriteLine("direct — this process, not selected:");
+        string go;
+        if (workload == "steady")
+        {
+            var home = await SeenAsync();
+            Console.WriteLine($"  udp: the far end sees this machine at {home ?? "-"}");
+            go = $"go steady {Math.Max(10, seconds - 15)} {home ?? "-"}";
+        }
+        else
+        {
+            await ExerciseAsync();
+            go = "go";
+        }
+        using var process = Process.Start(new ProcessStartInfo(childExe, "routed-workload") { RedirectStandardInput = true, RedirectStandardOutput = true })!;
+        Console.WriteLine($"routed — child {process.Id} ({Path.GetFileName(Path.GetDirectoryName(childExe))}\\{Path.GetFileName(childExe)}), selected by its path:");
+        await process.StandardInput.WriteLineAsync(go);
+        while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine($"{T()} {line}");
+        await process.WaitForExitAsync();
+        await Task.Delay(500);
+        await stop.CancelAsync();
+    }
+    else
+    {
+        using var stopSignal = new EventWaitHandle(false, EventResetMode.ManualReset, StopEventName);
+        using var stopped = stop.Token.Register(() => stopSignal.Set());
+        while (!stop.IsCancellationRequested)
+        {
+            if (stopSignal.WaitOne(10_000) && !stop.IsCancellationRequested) await stop.CancelAsync();
+            if (run.State is { } s)
+                Console.WriteLine($"{T()}  {s.Phase} (generation {s.Generation}): routed {s.Routed}, handed up {s.HandedUp}, flows routed {s.RoutedFlows},"
+                    + $" held {s.HeldWhileDown}, direct while down {s.DirectWhileDown}, late {s.LateFlows}, blocked {s.Blocked}, stale {s.Stale}, selected {s.Selected}");
+        }
+    }
+    await tunnelling;
+    var final = run.State;
+    await client.StopAsync(run.RunId);
+    await run.DisposeAsync();
+    await sending;
+    if (final is { } f)
+        Console.WriteLine($"{Now()} route: {f.Phase}; routed {f.Routed}, handed up {f.HandedUp}, flows routed {f.RoutedFlows}, held while down {f.HeldWhileDown},"
+            + $" direct while down {f.DirectWhileDown}, late flows {f.LateFlows}, blocked {f.Blocked}, stale {f.Stale}; selected processes {f.Selected}, unreadable {f.Unreadable}");
+    Console.WriteLine($"tunnel: {session.Status.State}, {session.Status.Reconnects} reconnect(s), {session.Status.BytesOut} bytes out, {session.Status.BytesIn} in");
+    return 0;
+}
+
+// Step 3: the service's front door, as this process meets it — who it says it is, or why it refused.
+async Task<int> ServiceHelloAsync()
+{
+    try
+    {
+        await using var client = await RouterClient.ConnectAsync(AppContext.BaseDirectory, "driver-tool", TimeSpan.FromSeconds(5));
+        Console.WriteLine($"welcomed: version {client.Welcome.Version}, build {client.Welcome.Build}, driver {(client.Welcome.DriverReady ? "ready" : client.Welcome.DriverProblem)},"
+            + $" run {client.Welcome.RunId ?? "none"}");
+        return 0;
+    }
+    catch (RouterRefused e) { Console.WriteLine($"refused: {e.Message}"); return 1; }
+    catch (TimeoutException) { Console.WriteLine("no answer: the service's pipe did not open within 5 s"); return 1; }
+}
+
+// Step 3: what the service does with a client of its own that misbehaves — a version it does not speak, a frame past
+// the bound, JSON it cannot read. Each must end that connection and nothing else.
+async Task<int> ServiceMalformedAsync()
+{
+    foreach (var (what, send) in new (string, Func<Stream, Task>)[]
+    {
+        ("hello in version 99", async pipe => await new FrameStream(pipe).SendAsync(new Hello(99, "driver-tool"))),
+        ("a frame of 50,000,000 bytes", async pipe =>
+        {
+            await new FrameStream(pipe).SendAsync(new Hello(RouterProtocol.Version, "driver-tool"));
+            await new FrameStream(pipe).ReadAsync(CancellationToken.None);
+            var head = new byte[5];
+            BinaryPrimitives.WriteInt32LittleEndian(head, 50_000_000);
+            head[4] = RouterProtocol.ControlFrame;
+            await pipe.WriteAsync(head);
+        }),
+        ("JSON it cannot read", async pipe =>
+        {
+            await new FrameStream(pipe).SendAsync(new Hello(RouterProtocol.Version, "driver-tool"));
+            await new FrameStream(pipe).ReadAsync(CancellationToken.None);
+            var body = "{\"type\":\"prepareRun\",\"executables\":"u8.ToArray();
+            var head = new byte[5];
+            BinaryPrimitives.WriteInt32LittleEndian(head, 1 + body.Length);
+            head[4] = RouterProtocol.ControlFrame;
+            await pipe.WriteAsync(head);
+            await pipe.WriteAsync(body);
+        }),
+    })
+    {
+        using var pipe = new NamedPipeClientStream(".", RouterProtocol.ControlPipe, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await pipe.ConnectAsync(5000);
+        await send(pipe);
+        var answer = new List<string>();
+        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        try
+        {
+            var frames = new FrameStream(pipe);
+            while (await frames.ReadAsync(wait.Token) is { } frame) answer.Add(frame.Message?.GetType().Name ?? "packet");
+            answer.Add("then closed");
+        }
+        catch (OperationCanceledException) { answer.Add("still open after 5 s"); }
+        catch (Exception e) when (e is IOException or EndOfStreamException) { answer.Add($"then closed ({e.GetType().Name})"); }
+        Console.WriteLine($"{what}: {string.Join(", ", answer)}");
+    }
+    // And the front door still opens for a well-behaved client.
+    return await ServiceHelloAsync();
+}
+
+// Step 3: a run that fails from outside. A client process routes a steady STUN child through the service; ten seconds
+// into routing, the case is done to it, and this process watches the adapter through its own handle (reading, never
+// setting) and the time until it holds no interception.
+async Task<int> ServiceFailureAsync(string? profilePath, string? childExe, string? failure)
+{
+    if (profilePath is null || childExe is null || failure is null) { Console.Error.WriteLine("usage: Sallyport.Driver service-failure <profile.ovpn> --child <exe> --case <case>"); return 2; }
+    var log = Path.Combine(Path.GetTempPath(), $"sallyport-failure-{Environment.ProcessId}.log");
+    using var client = Process.Start(new ProcessStartInfo(Environment.ProcessPath!,
+        ["service-route", profilePath, "--child", childExe, "--workload", "steady", "--seconds", "70"]) { RedirectStandardOutput = true })!;
+    var lines = new List<string>();
+    var routing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var reading = Task.Run(async () =>
+    {
+        while (await client.StandardOutput.ReadLineAsync() is { } line)
+        {
+            lock (lines) lines.Add(line);
+            if (line.Contains("route: Routing")) routing.TrySetResult();
+        }
+    });
+    if (await Task.WhenAny(routing.Task, Task.Delay(TimeSpan.FromSeconds(60))) != routing.Task) { Console.WriteLine("never routing"); client.Kill(); return 1; }
+    await Task.Delay(TimeSpan.FromSeconds(10));
+
+    // Each look at the adapter opens a handle of its own and closes it: one held open would itself keep the driver from
+    // giving the adapter back (measured, step 3) — and --hold keeps one open, to measure exactly that.
+    var hold = args.Contains("--hold") ? OpenDriver() : null;
+    ulong adapterHandle;
+    using (var look = OpenDriver())
+    {
+        if (look is null) return 1;
+        adapterHandle = look.InternetAdapter()!.Handle;
+    }
+    AdapterMode Mode()
+    {
+        using var look = PacketDriver.Open();
+        return look.Mode(adapterHandle);
+    }
+    var serviceBefore = ServiceControl.Status(RouterProtocol.ServiceName).ProcessId;
+    var worker = Process.GetProcessesByName("Sallyport.Service").FirstOrDefault(p => p.Id != serviceBefore);
+    Console.WriteLine($"{Now()} before: adapter mode {Mode()}, service pid {serviceBefore}, worker pid {worker?.Id}{(hold is null ? "" : "; a handle of this process's own held open")}");
+    var clock = Stopwatch.StartNew();
+    switch (failure)
+    {
+        case "kill-worker": worker?.Kill(); break;
+        case "hang-worker": if (worker is not null) Suspend(worker); break;
+        case "kill-supervisor": Process.GetProcessById(serviceBefore).Kill(); break;
+        case "lease": Suspend(client); break;
+        default: Console.WriteLine($"no case {failure}"); client.Kill(); return 2;
+    }
+    Console.WriteLine($"{Now()} {failure}: done");
+    TimeSpan? given = null;
+    while (clock.Elapsed < TimeSpan.FromSeconds(20))
+    {
+        if (Mode() == AdapterMode.None) { given = clock.Elapsed; break; }
+        await Task.Delay(50);
+    }
+    Console.WriteLine(given is { } g ? $"{Now()} the adapter held no interception {g.TotalSeconds:F2} s after" : $"{Now()} THE ADAPTER STILL INTERCEPTS 20 s after");
+    if (failure == "lease") Resume(client);
+    if (failure == "kill-supervisor")
+    {
+        var back = Stopwatch.StartNew();
+        while (back.Elapsed < TimeSpan.FromSeconds(30) && ServiceControl.Status(RouterProtocol.ServiceName) is var (state, pid) && (state != ServiceState.Running || pid == serviceBefore))
+            await Task.Delay(100);
+        var (stateAfter, pidAfter) = ServiceControl.Status(RouterProtocol.ServiceName);
+        Console.WriteLine($"{Now()} the service: {stateAfter}, pid {pidAfter}, {back.Elapsed.TotalSeconds:F1} s after the kill");
+    }
+    if (failure == "hang-worker" && worker is not null) Console.WriteLine($"{Now()} the frozen worker {(worker.HasExited ? "was ended" : "STILL EXISTS")}");
+    hold?.Dispose();
+    await client.WaitForExitAsync();
+    await reading;
+    Console.WriteLine("the client said:");
+    foreach (var line in lines.Where(l => l.Contains("RUN ENDED") || l.Contains("route:") || l.Contains("steady:")).Select(l => "  " + l))
+        Console.WriteLine(line);
+    return given is null ? 1 : 0;
+
+    static void Suspend(Process process) => _ = NtSuspendProcess(process.SafeHandle);
+    static void Resume(Process process) => _ = NtResumeProcess(process.SafeHandle);
+}
+
 // Item 2, step 1: the connection policy against the real server. A remote that never answers (TEST-NET-1) is put in
 // front of the profile's own, so every round must time out on it and go on; once the tunnel is up, the server's
 // addresses are cut off at the adapter both ways for longer than its ping-restart, then freed — the tunnel must notice,
@@ -1402,6 +1658,48 @@ sealed class TunnelPump : IAsyncDisposable
     }
 }
 
+// One tunnel generation's side of a run through the service: it commits the generation over the run's pipe before
+// anything of it crosses, hands the run what the tunnel returns, and retires the generation when the tunnel goes.
+sealed class ServicePump : IAsyncDisposable
+{
+    private readonly RouterRun _run;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly Task _receiving;
+
+    public ServicePump(Tunnel tunnel, int generation, RouterRun run, int mtu)
+    {
+        Tunnel = tunnel;
+        Generation = generation;
+        _run = run;
+        var committed = tunnel.Config.Address is { AddressFamily: AddressFamily.InterNetwork } address
+            ? run.CommitAsync(generation, address, mtu).AsTask()
+            : Task.CompletedTask;
+        _receiving = ReceiveAsync(committed);
+    }
+
+    public Tunnel Tunnel { get; }
+    public int Generation { get; }
+
+    private async Task ReceiveAsync(Task committed)
+    {
+        try
+        {
+            await committed;
+            await foreach (var packet in Tunnel.Packets.ReadAllAsync(_stop.Token)) await _run.FromTunnelAsync(Generation, packet);
+        }
+        catch (Exception e) when (e is OperationCanceledException or TunnelEnded or IOException or ObjectDisposedException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await _run.RetireAsync(Generation); }
+        catch (Exception e) when (e is IOException or ObjectDisposedException) { }
+        await _stop.CancelAsync();
+        await _receiving;
+        _stop.Dispose();
+    }
+}
+
 // ICMP echoes sent into the tunnel from the tunnel's own address, outside the router, and what answers them picked out
 // of what the tunnel returns before the router sees it (which would refuse it: it belongs to no mapping) — the echo
 // reply, or a router's "time exceeded" quoting the echo when its hop limit ran out there.
@@ -1480,6 +1778,14 @@ sealed class TunnelEcho(uint tunnelAddress, Action<byte[]> send)
 
 static partial class Program
 {
+    // Freezing a process whole, for the measurements of a hung worker or client: ntdll's documented-by-use pair, here
+    // only to measure (never in the product).
+    [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+    private static extern int NtSuspendProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process);
+
+    [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+    private static extern int NtResumeProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process);
+
     // A session-local name: only this user's own console can end its routing session.
     const string StopEventName = @"Local\Sallyport.Driver.route.stop";
 }

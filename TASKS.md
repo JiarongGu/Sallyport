@@ -144,11 +144,30 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
      with that override, Codex's own proposal in the end.
    - Found and fixed on the way: a tunnel's packets end with the error that ended it, which escaped a pump's dispose
      and took the session down; a consumer that throws as it goes now ends itself, not the session (`ConsumerFailed`).
-3. **The service skeleton:** `apps/Sallyport.Service` — the SCM host, a supervisor and a worker in a job object, the
-   guard (D13), the session's pipe and its DACL. Authorized, unauthorized, stale and malformed clients; the worker and
-   the supervisor killed or hung → refused, or cleaned up in bounded time with every adapter direct. ← next
+3. **The service skeleton — measured 2026-10-20** (`apps/Sallyport.Service`, installed from a development build in
+   `%ProgramFiles%\Sallyport`: LocalSystem, automatic, restarted 1/5/30 s after a failure; a supervisor, and a worker
+   per run in a job object that dies with it; `Sallyport.Windows.Service`: the SCM by P/Invoke, the pipe's DACL —
+   system full, interactive users read/write, the network denied — `PipePeer`, `RouterProtocol`, `RouterClient`;
+   `Sallyport.Driver service-hello | service-malformed | service-failure`; a selected copy of the tool outside the
+   folder playing steady STUN; the guard outside, 0 tripped):
+   - **Front door:** the client in the folder welcomed; Python refused ("not Sallyport's own client") before a byte
+     it sent was read; a copy of the tool outside the folder refused by the service, and the service refused by it
+     ("does not run from Sallyport's folder"). A hello of version 99 rejected; a 50,000,000-byte frame and JSON cut
+     short each closed their connection, and the next client was welcomed.
+   - **A run through it:** prepared and attached in ~1 s; the child's STUN 5/5 and HTTPS seen at the VPN's address
+     (its port kept), this process's at home; generations committed and retired over the run's pipe.
+   - **The worker killed:** the adapter given back in 0.06 s. **But the driver gives an adapter back on its own only
+     when the last handle to it closes:** the first run, with the measuring process holding a handle, left the
+     adapter intercepting with 1,845 packets queued — the machine's traffic held 4.2 s, until the guard outside reset
+     it. So the supervisor resets the run's adapter itself on every end: with a handle held, 0.06 s.
+   - **The worker frozen:** everything Windows sent waited in the driver, the machine's traffic with it. The guard's
+     3 s ended it the first time (4.4 s); the worker now reports the router's drains four times a second, and one
+     still for 1 s ends the run: **1.46 s**, the guard not tripping.
+   - **The supervisor killed:** the job object took the worker; the adapter given back in 0.07 s; the service
+     running again 1.3 s later. **The client frozen:** its lease ran out and the run ended in 2.93 s.
+   - In every failure the selected child went from the VPN's address to its own: routing fails open.
 4. **The packet pipe:** gate 4's selected workload through the service beside a direct control, and under load →
-   exits and replies right, the pipe's cost measured, the tunnel's own socket direct.
+   exits and replies right, the pipe's cost measured, the tunnel's own socket direct. ← next
 5. **The router across generations, through the service:** step 2's measurements again with the pipe between the
    tunnel and the router (in one process they hold, above).
 6. **Adapters:** Wi-Fi and Ethernet both up, a handover, sleep, the driver removed → what the packets did, every gap

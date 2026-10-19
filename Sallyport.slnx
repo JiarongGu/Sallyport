@@ -7,6 +7,7 @@
     <Project Path="apps/Sallyport.Client/Sallyport.Client.csproj" />
     <Project Path="apps/Sallyport.Host/Sallyport.Host.csproj" />
     <Project Path="apps/Sallyport.Observer/Sallyport.Observer.csproj" />
+    <Project Path="apps/Sallyport.Service/Sallyport.Service.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Sallyport.Driver/Sallyport.Driver.csproj" />

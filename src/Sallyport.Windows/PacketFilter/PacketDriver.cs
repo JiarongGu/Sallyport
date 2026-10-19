@@ -203,6 +203,21 @@ public sealed unsafe class PacketDriver : IDisposable
         return null;
     }
 
+    /// <summary>The adapter that carries the route to the internet (to 1.1.1.1), or null when none does.</summary>
+    public DriverAdapter? InternetAdapter()
+    {
+        var id = InterfaceFor(IPAddress.Parse("1.1.1.1"));
+        return id is null ? null : Adapters().FirstOrDefault(a => a.InterfaceId == id);
+    }
+
+    /// <summary>The adapter's own IPv4 networks, address and mask as a <see cref="Routing.Flow"/> holds addresses (four
+    /// bytes in network order read as a little-endian uint): what a selected program may not reach through the tunnel.</summary>
+    public static IReadOnlyList<(uint Network, uint Mask)> OnLink(DriverAdapter adapter) =>
+        NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => Guid.TryParse(n.Id, out var id) && id == adapter.InterfaceId)?
+            .GetIPProperties().UnicastAddresses.Where(u => u.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            .Select(u => (BinaryPrimitives.ReadUInt32LittleEndian(u.Address.GetAddressBytes()), BinaryPrimitives.ReadUInt32LittleEndian(u.IPv4Mask.GetAddressBytes())))
+            .ToList() ?? [];
+
     public void Dispose() => _device.Dispose();
 
     private void Control(uint code, void* input, int inputSize, void* output, int outputSize)

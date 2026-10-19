@@ -20,7 +20,7 @@ driver managed by the app.
 - The .NET 10 runtime ships `System.IO.Pipes.AccessControl`, `System.Security.AccessControl` and
   `System.Security.Principal.Windows`, not `ServiceBase`: the service calls the SCM API directly, as Codex says.
 
-**Adopted with five changes.**
+**Adopted with five changes, and two from building it.**
 1. **Packets cross with a small header.** Codex frames every message with the service epoch, the Run and the
    generation (a 64-byte header). Control messages keep those identities; a packet frame carries its type, its
    generation and the packet — a game's small datagrams are most of the traffic.
@@ -39,6 +39,18 @@ driver managed by the app.
    explicit override stands, under OpenVPN's name for it.
 5. **WebView2 is checked, not installed.** Windows 11 carries it; Setup stops with a link where it is missing, rather
    than carrying Microsoft's installer.
+
+6. **One control pipe, not one per session.** The supervisor creates `Sallyport.Router.v1` with
+   `FILE_FLAG_FIRST_PIPE_INSTANCE` at its start — nothing else can hold the name before it — and a DACL that lets
+   interactive users read and write it and denies the network; every client is then checked by its session, account
+   and folder (change 2), and only one run exists on the machine. A run's own pipe is created by its worker, for the
+   one client the run was prepared for. Simpler than a pipe per logon session, for the same refusals (measured, TASKS
+   item 2 step 3).
+7. **Ending a run resets its adapter, always.** The design leaves the adapter to the driver when the worker dies; the
+   driver gives it back on its own only when the last handle to it closes (measured: a measuring process's handle
+   held it intercepting, the machine's traffic queued 4.2 s). So the supervisor resets the run's adapter through a
+   handle of its own whenever a run ends, and judges a worker hung by its router's drains — still for 1 s — before the
+   guard's 3 s of a dead network.
 
 Adopted as written, among the rest: one Run on the machine, a game profile paired with a VPN profile; a dormant
 LocalSystem supervisor and a worker per Run, tied by a job object, the D13 guard in the supervisor; a pipe per session
