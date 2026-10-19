@@ -196,12 +196,24 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
    said, the machine back on its own.
 7. **Zenless through the service:** Run from launch, attach and detach, a real drop under each policy, sleep → the
    game's session and the coverage recorded. **Needs:** the owner, playing.
-8. **The client:** the Games page (a game from a folder through Shenora's folder picker, programs included or left
-   out and why, rescan, rename, remove, a launch target), Run and the running route's view (coverage in three
-   outcomes, flows, ping both ways, the reconnect countdown), each profile's connection settings, the driver panel,
-   the tray, the first run, and the copy that still says games are not routed.
-   - **Done when:** Zenless Zone Zero is made from its folder and run with the JP profile from the window; window and
-     tray agree with the service's and the server's evidence.
+8. **The client — `docs/design/window.md`** (the owner: one Apps list, every routing method in one channel per profile;
+   tabs Apps · Network · Profiles · Settings), in its working increments, each with C# view tests and the real window
+   driven through UI Automation:
+   1. **Four tabs over what exists:** Apps (games and proxy apps together), Network (connections, the running route,
+      routing health), Profiles, Settings (packet routing, startup, how to use, about); the tray's Open Network.
+   2. **One store:** `RoutedItemStore` — an app is a program or a folder, each program with its methods — migrated from
+      games, game choices and proxy apps, IDs kept, read back before it counts.
+   3. **One reader per tunnel:** a dispatcher, the port split (proxy 40960–49151, the router's NAT the rest), pieces to
+      the router; measured with packet TCP/UDP and proxy TCP/DNS through one login at once.
+   4. **`ChannelManager`:** one channel per profile, shared by proxy and packet routing; the "one profile serves a game
+      or a proxy" refusals removed after step 3's measurement; stopping one method leaves the other working.
+   5. **Many channels in the service's one run:** selections on different profiles at once; one channel's outage;
+      the adapters back when the last ends.
+   6. **The Apps editors:** add a program or a folder, methods per program, Route / Launch / Stop, conflicts refused.
+   7. **Network and Settings in full:** retry telemetry and a true countdown, latency through the dispatcher, connection
+      settings as own / override / effective, start with Windows, defaults for new apps.
+   - **Done when:** Zenless Zone Zero is an app from its folder, routed by packets while a browser of the same profile
+     uses its proxy, through one login; window and tray agree with the service's and the server's evidence.
 9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files in the
    folder the person chooses (`%ProgramFiles%\Sallyport` unless they choose otherwise; the owner's is on D:, nothing
    of it on C:), its data (service log, setup record, driver installer) in `data` inside it, the service, the driver on
