@@ -1,88 +1,106 @@
 import { useId, type ReactNode } from 'react';
-import type { AppView, ClientState } from './contract';
+import type { AppItemView, ClientState, ProgramView } from './contract';
 import { post } from './commands';
-import { GameRow } from './Games';
-import type { Empty } from './contract';
-import { ActionButton, Disclosure, Facts, PageHeader } from './ui/shared';
+import { duration } from './format';
+import { RunDetails } from './Run';
+import { ActionButton, Disclosure, EmptyView, Facts, PageHeader, StatusPill } from './ui/shared';
 
-/** Everything the person routes, by how its traffic reaches the VPN: by its packets, or by proxy settings at launch. */
+/** Everything the person routes, one card per app — a program or a folder — each program with its methods. */
 export function Apps({ state, now, expanded, toggle, editorForm }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
-  const packetsId = useId();
-  const proxyId = useId();
-  const gameEditor = state.editor?.kind === 'game' ? editorForm : null;
-  const appEditor = state.editor?.kind === 'app' ? editorForm : null;
+  const editing = state.editor;
+  const subject = editing?.kind === 'program' ? editing.subjectId.split('/')[0] : editing?.subjectId;
   return <section className="page" aria-label="Apps">
-    <PageHeader title="Apps" subtitle="Choose what goes through a VPN profile. Everything else keeps your own connection." />
-
-    <section className="app-section" aria-labelledby={packetsId}>
-      <header className="section-head">
-        <div>
-          <h2 id={packetsId}>All traffic — packet driver</h2>
-          <p className="secondary metadata">Everything a game or program sends, TCP and UDP, goes through the VPN. Added by its folder.</p>
-        </div>
-        <ActionButton action={state.actions.addGame} focusKey="add-game" primary onClick={() => post('ADD_GAME', {})} />
-      </header>
-      {state.gamesEmpty && <SectionEmpty empty={state.gamesEmpty} state={state} />}
-      {gameEditor && !state.games.some((game) => game.id === state.editor?.subjectId) && gameEditor}
-      <div className="rows">
-        {state.games.map((game) => <GameRow key={game.id} game={game} now={now}
-          expanded={expanded.has(`game:${game.id}`)} toggle={() => toggle(`game:${game.id}`)}
-          editorForm={state.editor?.subjectId === game.id ? gameEditor : null} />)}
+    <PageHeader title="Apps" subtitle="Programs and games routed through a VPN profile, by all their traffic or by proxy settings at launch. Everything else keeps your own connection.">
+      <div className="actions">
+        <ActionButton action={state.actions.addProgram} focusKey="add-program" primary onClick={() => post('ADD_APP', { source: 'program' })} />
+        <ActionButton action={state.actions.addFolder} focusKey="add-folder" onClick={() => post('ADD_APP', { source: 'folder' })} />
       </div>
-    </section>
-
-    <section className="app-section" aria-labelledby={proxyId}>
-      <header className="section-head">
-        <div>
-          <h2 id={proxyId}>Proxy settings when launched here</h2>
-          <p className="secondary metadata">Browsers and proxy-aware programs started from Sallyport use the profile’s proxy. TCP only.</p>
-        </div>
-        <ActionButton action={state.actions.addApp} focusKey="add-app" onClick={() => post('ADD_APP', {})} />
-      </header>
-      {state.appsEmpty && <SectionEmpty empty={state.appsEmpty} state={state} />}
-      {appEditor && !state.apps.some((app) => app.id === state.editor?.subjectId) && appEditor}
-      <div className="rows">
-        {state.apps.map((app) => <AppRow key={app.id} app={app} expanded={expanded.has(`app:${app.id}`)}
-          toggle={() => toggle(`app:${app.id}`)} editorForm={state.editor?.subjectId === app.id ? appEditor : null} />)}
-      </div>
-    </section>
+    </PageHeader>
+    {state.appsEmpty && <EmptyView empty={state.appsEmpty} actions={state.actions} />}
+    {editorForm && !state.apps.some((app) => app.id === subject) && editorForm}
+    <div className="rows">
+      {state.apps.map((app) => <AppCard key={app.id} app={app} now={now}
+        expanded={expanded.has(`app:${app.id}`)} toggle={() => toggle(`app:${app.id}`)}
+        editing={subject === app.id ? editing : null} editorForm={subject === app.id ? editorForm : null} />)}
+    </div>
   </section>;
 }
 
-/** A section with nothing in it yet: its own button is in its head, so only an import it cannot offer is offered here. */
-function SectionEmpty({ empty, state }: { empty: Empty; state: ClientState }) {
-  return <div className="section-empty">
-    <p><strong>{empty.title}</strong></p>
-    <p className="secondary">{empty.text}</p>
-    {empty.command === 'IMPORT' && <ActionButton action={state.actions.import} primary onClick={() => post('IMPORT', {})} />}
-  </div>;
-}
-
-function AppRow({ app, expanded, toggle, editorForm }: {
-  app: AppView; expanded: boolean; toggle: () => void; editorForm: ReactNode;
+function AppCard({ app, now, expanded, toggle, editing, editorForm }: {
+  app: AppItemView; now: number; expanded: boolean; toggle: () => void; editing: ClientState['editor']; editorForm: ReactNode;
 }) {
   const detailsId = useId();
-  const settingsId = useId();
   const headingId = useId();
-  return <article className={`card${app.phase === 'blocked' ? ' blocked' : ''}${expanded ? ' expanded' : ''}`} aria-labelledby={headingId}>
+  // The app's own editor sits with its details; a program's beside its row.
+  const appEditor = editing?.kind === 'app' ? editorForm : null;
+  const programEditing = editing?.kind === 'program' ? editing.subjectId.split('/')[1] : null;
+  return <article className={`card tone-border-${app.tone}${expanded ? ' expanded' : ''}`} aria-labelledby={headingId}>
     <div className="row-head">
-      <div className="row-identity"><h3 id={headingId}>{app.name}</h3><p className="metadata secondary">{app.kindLabel}</p></div>
-      <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
+      <div className="row-identity">
+        <h3 id={headingId}>{app.name}</h3>
+        <div className="profile-status">
+          <StatusPill tone={app.tone} announce>{app.statusText}</StatusPill>
+          {app.run?.since && <span className="secondary duration">Routed for {duration(app.run.since, now)}</span>}
+        </div>
+      </div>
+      <div className="actions row-primary">
+        <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
+        <ActionButton action={app.actions.route} onClick={() => post('ROUTE_APP', { id: app.id })} />
+        <ActionButton action={app.actions.stop} onClick={() => post('STOP_RUN', {})} />
+      </div>
     </div>
-    <div className="row-foot"><span className="secondary through">{app.throughText}</span><Disclosure open={expanded} controls={detailsId} onClick={toggle} /></div>
-    <p className={`app-status${app.phase === 'blocked' ? ' tone-trouble' : ' secondary'}`} role="status">{app.statusText}</p>
+    {app.run && <RunDetails run={app.run} />}
+    <div className="row-foot">
+      <span className="secondary through">{[app.throughText, app.methodText, app.lossText].filter(Boolean).join(' · ')}</span>
+      <Disclosure open={expanded} controls={detailsId} onClick={toggle} />
+    </div>
     <div id={detailsId} hidden={!expanded} className="row-details">
-      <Facts facts={[{ label: 'Path', value: app.path }]} />
-      <p className="secondary kind-help">{app.kindHelp}</p>
-      <ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} />
-      <details className="startup-settings">
-        <summary aria-controls={settingsId}>Startup settings</summary>
-        <pre id={settingsId}>{app.startupSettings.join('\n')}</pre>
-      </details>
-      <div className="details-footer"><ActionButton action={app.actions.remove} danger onClick={() => post('REMOVE_APP', { id: app.id })} /></div>
+      <Facts facts={[
+        ...(app.folder ? [{ label: 'Folder', value: app.folder }] : []),
+        ...(app.launchText ? [{ label: 'Launch', value: app.launchText }] : []),
+      ]} />
+      <div className="actions">
+        <ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} />
+        <ActionButton action={app.actions.rescan} onClick={() => post('RESCAN_APP', { id: app.id })} />
+        <ActionButton action={app.actions.addProgram} onClick={() => post('ADD_APP_PROGRAM', { id: app.id })} />
+      </div>
+      {expanded && appEditor}
+      <section className="programs" aria-label="Programs">
+        {app.programsText && <p className="secondary">{app.programsText}</p>}
+        <ul>
+          {app.programs.map((program) => <ProgramRow key={program.id} app={app} program={program}
+            editorForm={programEditing === program.id ? editorForm : null} />)}
+        </ul>
+      </section>
+      <div className="details-footer">
+        <ActionButton action={app.actions.remove} focusKey={`remove-app:${app.id}`} danger onClick={() => post('REQUEST_REMOVE_APP', { id: app.id })} />
+      </div>
     </div>
-    {editorForm}
+    {!expanded && (appEditor ?? (programEditing ? editorForm : null))}
   </article>;
+}
+
+function ProgramRow({ app, program, editorForm }: { app: AppItemView; program: ProgramView; editorForm: ReactNode }) {
+  const settingsId = useId();
+  return <li className={program.included ? 'included' : 'left-out'}>
+    <div className="program-line">
+      <div className="program-name">
+        <span>{program.name}{program.launchTarget && <span className="metadata secondary"> · Launch starts this</span>}</span>
+        <span className={`metadata ${program.missing ? 'tone-trouble' : 'secondary'}`}>{program.missing ? 'Not found where it was added from' : program.statusText}</span>
+        <span className="metadata secondary program-path">{program.path}</span>
+      </div>
+      <div className="actions">
+        <ActionButton action={program.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id, programId: program.id })} />
+        <ActionButton action={program.actions.edit} focusKey={`program:${program.id}`} onClick={() => post('BEGIN_PROGRAM_EDIT', { id: app.id, programId: program.id })} />
+        <ActionButton action={program.actions.toggle} onClick={() => post('SET_APP_PROGRAM', { id: app.id, programId: program.id, included: !program.included })} />
+      </div>
+    </div>
+    {program.startupSettings.length > 0 && <details className="startup-settings">
+      <summary aria-controls={settingsId}>Startup settings</summary>
+      <pre id={settingsId}>{program.startupSettings.join('\n')}</pre>
+    </details>}
+    {editorForm}
+  </li>;
 }

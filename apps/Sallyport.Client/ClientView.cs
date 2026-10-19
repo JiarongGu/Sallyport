@@ -40,19 +40,11 @@ internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
     string EndpointText, int Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions);
 
-internal sealed record AppActions(UiAction Launch, UiAction Edit, UiAction Remove);
-
-internal sealed record AppView(
-    string Id, string Name, AppKind Kind, string KindLabel, string KindHelp, string Path, string? ProfileId, string ThroughText,
-    AppPhase Phase, string? StatusText, IReadOnlyList<string> StartupSettings, AppActions Actions);
-
 internal sealed record PortValues(string PortText);
-
-internal sealed record AppValues(string Name, string? ProfileId, AppKind Kind, string Arguments);
 
 internal sealed record EditorView(
     string Token, string SubjectId, string Phase, IReadOnlyDictionary<string, string> Errors, string? Hint, UiAction Save,
-    UiAction Cancel, UiAction Reset, string Kind, object Values);
+    UiAction Cancel, UiAction Reset, string Kind, object Values, IReadOnlyList<EditorOption>? Options = null);
 
 internal sealed record ConfirmationView(string Token, string Title, string Text, UiAction Confirm, UiAction Cancel);
 
@@ -66,11 +58,9 @@ internal sealed record ClientState(
     ClientState.SummaryView Summary,
     ClientState.TopActions Actions,
     IReadOnlyList<ProfileView> Profiles,
-    IReadOnlyList<AppView> Apps,
-    IReadOnlyList<GameView> Games,
+    IReadOnlyList<AppItemView> Apps,
     EmptyView? ProfilesEmpty,
     EmptyView? AppsEmpty,
-    EmptyView? GamesEmpty,
     NetworkView Network,
     SettingsView Settings,
     Page InitialPage,
@@ -83,7 +73,7 @@ internal sealed record ClientState(
     IReadOnlyList<Notice> Notices)
 {
     internal sealed record SummaryView(string Text, Tone Tone);
-    internal sealed record TopActions(UiAction Import, UiAction AddApp, UiAction AddGame);
+    internal sealed record TopActions(UiAction Import, UiAction AddProgram, UiAction AddFolder);
     internal sealed record ProfileChoice(string Id, string Label, bool Enabled);
     internal sealed record KindChoice(AppKind Value, string Label, string Help);
     internal sealed record GuideView(string EndpointText, string CurlExample, UiAction CopyExample);
@@ -177,25 +167,6 @@ internal static class ClientView
             facts, location, actions);
     }
 
-    public static AppView App(RoutedApp app, StoredProfile? profile, bool found, IReadOnlyList<string> settings, AppPhase? launching)
-    {
-        var (phase, text) =
-            launching is AppPhase.Connecting ? (AppPhase.Connecting, $"Connecting {profile?.Name} before launch…") :
-            launching is AppPhase.Starting ? (AppPhase.Starting, "Starting…") :
-            !found ? (AppPhase.Blocked, "App not found. Remove this shortcut and add the app from its new location.") :
-            profile is null ? (AppPhase.Blocked, "Choose a profile before launching.") :
-            profile.Unsupported is not null ? (AppPhase.Blocked, "This profile cannot connect in this version.") :
-            (AppPhase.Ready, (string?)null);
-        var launchingNow = launching is not null;
-        return new AppView(app.Id, app.Name, app.Kind, KindLabel(app.Kind), KindHelp(app.Kind), app.Path, profile?.Id,
-            profile is null ? "No profile chosen" : $"Through {profile.Name}", phase, text, settings,
-            new AppActions(
-                // A blocked app's reason is its status line already; the button need not say it twice.
-                Launch: UiAction.Shown("Launch", phase == AppPhase.Ready, busy: launchingNow),
-                Edit: UiAction.Shown("Edit", !launchingNow, "Wait for the launch to finish."),
-                Remove: UiAction.Shown("Remove shortcut", !launchingNow, "Wait for the launch to finish.")));
-    }
-
     /// <summary>Failure first, then work under way, then connected: one healthy tunnel must not hide another's
     /// failure. The tray's icon and tooltip use the same.</summary>
     public static ClientState.SummaryView Summary(IReadOnlyList<ProfileView> profiles)
@@ -219,11 +190,6 @@ internal static class ClientView
         "No profiles yet",
         "Import an OpenVPN profile from your VPN provider. Sallyport keeps an encrypted copy for your Windows account.",
         "IMPORT");
-
-    public static EmptyView? AppsEmpty(int profiles, int apps) =>
-        apps > 0 ? null :
-        profiles == 0 ? new("Import a profile first", "Apps need a profile to launch through.", "IMPORT") :
-        new("No apps yet", "Add a browser or proxy-aware program, then launch it here. Sallyport connects its profile first.", "ADD_APP");
 
     public static string KindLabel(AppKind kind) => kind switch
     {

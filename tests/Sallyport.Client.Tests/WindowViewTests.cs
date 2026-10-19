@@ -21,7 +21,8 @@ public class WindowViewTests
             state == TunnelServiceStatus.Up ? "udp/1194" : null, 1, 0, error, state == TunnelServiceStatus.Up ? "10.8.0.2" : null, 2, 2048, 4096, 1088),
             null, false, false, null, false, false));
 
-    private static GameProfile Zenless() => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", [new(@"E:\Games\ZZZ\ZenlessZoneZero.exe", true)], At);
+    private static RoutedItem Zenless() => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", At, Us.Id, LossMode.Hold, null,
+        [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", true, null, false, true, null)]);
 
     private static RunFacts Running(SessionState tunnel) =>
         new(Zenless().Id, Us.Id, new LossPolicy(), At, false,
@@ -29,8 +30,8 @@ public class WindowViewTests
             new RouteState(tunnel == SessionState.Up ? RoutePhase.Routing : RoutePhase.Held, 1, 10, 12, 500, 2, 0, 0, 0, 0, 0, 3, 1, 0),
             At, null, null);
 
-    private static IReadOnlyList<GameView> Games(RunFacts? run) =>
-        [GameViews.Game(Zenless(), new GameChoice(Us.Id, LossMode.Hold, null), Us, run, false, true, false)];
+    private static IReadOnlyList<AppItemView> Games(RunFacts? run) =>
+        [AppViews.Item(new ItemFacts(Zenless(), Us, run, false, true, false, null, _ => []))];
 
     private static readonly IReadOnlyDictionary<string, string?> NoProblems = new Dictionary<string, string?>();
 

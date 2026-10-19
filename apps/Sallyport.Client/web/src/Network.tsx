@@ -2,7 +2,7 @@ import { useId } from 'react';
 import type { ChannelView, ClientState, Page } from './contract';
 import { post } from './commands';
 import { duration } from './format';
-import { RunDetails } from './Games';
+import { RunDetails } from './Run';
 import { ActionButton, Facts, PageHeader, StatusPill } from './ui/shared';
 import { RoutingCard } from './Settings';
 

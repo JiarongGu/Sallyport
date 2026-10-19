@@ -15,10 +15,17 @@ internal sealed record ProxyLaunch(AppKind Kind, string Arguments, string DataKe
 /// One program of an app (docs/design/window.md): an exact executable path, whether it is part of the app — a folder's
 /// scan suggests, the person decides (<see cref="ChosenByPerson"/>) — and its routing methods. <see cref="Packets"/>:
 /// everything it sends goes through the packet driver; <see cref="Proxy"/>: launched from Sallyport with proxy settings.
-/// <see cref="ProfileId"/>, when set, overrides the app's profile for this program alone.
+/// <see cref="ProfileId"/>, when set, overrides the app's profile for this program alone. <see cref="Arguments"/>: what Launch
+/// passes it, whichever its method (a launcher's own options, say).
 /// </summary>
 internal sealed record RoutedProgram(
-    string Id, string Path, bool Included, string? Reason, bool ChosenByPerson, bool Packets, ProxyLaunch? Proxy, string? ProfileId = null);
+    string Id, string Path, bool Included, string? Reason, bool ChosenByPerson, bool Packets, ProxyLaunch? Proxy, string? ProfileId = null,
+    string Arguments = "")
+{
+    /// <summary>What Launch passes it: its own, or what an earlier client kept with its proxy launch.</summary>
+    [JsonIgnore]
+    public string LaunchArguments => Arguments.Length > 0 ? Arguments : Proxy?.Arguments ?? "";
+}
 
 /// <summary>
 /// What the person routes, called an app in the window: a program, or a folder of them (a game). Its VPN profile and what
@@ -145,14 +152,28 @@ internal sealed class RoutedItemStore
         return item;
     }
 
-    /// <summary>A new app from one program, launched with proxy settings; its own browser profile folder named for it.</summary>
-    public RoutedItem CreateFromProgram(string name, string path, AppKind kind, string? profileId)
+    /// <summary>A new app from one program, by its methods: all its traffic by packets, or launched with proxy settings
+    /// (its own browser profile folder named for the app), or both.</summary>
+    public RoutedItem CreateFromProgram(string name, string path, AppKind kind, string? profileId, bool packets = false, bool proxy = true)
     {
         var id = NewId(8);
         var item = new RoutedItem(id, Named(name), null, DateTimeOffset.UtcNow, profileId, LossMode.Hold, null,
-            [new RoutedProgram(NewId(6), Path.GetFullPath(path), true, null, true, Packets: false, new ProxyLaunch(kind, "", id))]);
+            [new RoutedProgram(NewId(6), Path.GetFullPath(path), true, null, true, packets, proxy ? new ProxyLaunch(kind, "", id) : null)]);
         Put(item);
         return item;
+    }
+
+    /// <summary>Adds a program from anywhere — a launcher outside the folder, say — sending all its traffic; one the app
+    /// lists already is included instead.</summary>
+    public RoutedItem AddProgram(string id, string path)
+    {
+        var item = Find(id) ?? throw new FileNotFoundException("no such app");
+        var full = Path.GetFullPath(path);
+        if (!File.Exists(full) || !full.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("not a program", nameof(path));
+        if (item.Programs.Any(p => string.Equals(p.Path, full, StringComparison.OrdinalIgnoreCase))) return Choose(id, full, true);
+        var updated = item with { Programs = [.. item.Programs, new RoutedProgram(NewId(6), full, true, null, true, Packets: true, Proxy: null)] };
+        Put(updated);
+        return updated;
     }
 
     /// <summary>Scans an app's folder again: the person's choice stands for every program still there, a new one takes

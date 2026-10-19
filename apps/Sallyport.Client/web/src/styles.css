@@ -203,7 +203,10 @@ summary { min-height: 36px; padding: 8px; border-radius: 6px; cursor: pointer; }
 .coverage-unavailable .status-symbol { color: var(--busy); }
 .programs { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; display: grid; gap: 8px; }
 .programs ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.programs li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px; border-radius: 6px; }
+.programs li { padding: 6px 8px; border-radius: 6px; }
+.program-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.programs li .startup-settings { margin-top: 4px; }
+.programs li .editor { margin-top: 8px; }
 .programs li:hover { background: var(--hover); }
 .programs li.left-out .program-name > span:first-child { color: var(--secondary); }
 .program-name { display: flex; flex-direction: column; min-width: 0; }

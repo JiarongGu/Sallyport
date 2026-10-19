@@ -6,8 +6,8 @@ using Sallyport.Windows.Service;
 
 namespace Sallyport.Client;
 
-// The Games page's view model (web/src/contract.ts) and its words, as ClientView.cs is the rest's: the page renders this
-// and decides nothing (D15). docs/design/product.md §5.
+// A route's view (its run, whether all of it went through the VPN), the packet driver's, the loss choices and the
+// connection settings' words, as ClientView.cs is the rest's: the page renders them and decides nothing (D15).
 
 internal enum RunPhase { Preparing, Connecting, Routing, Held, Direct, Ended }
 
@@ -16,23 +16,13 @@ internal enum CheckResult { Holds, Failed, Unavailable }
 
 internal enum DriverPhase { Ready, NotInstalled, ServiceMissing, Working, Unknown }
 
-internal sealed record GameProgramView(string Path, string Name, bool Included, string? Reason, UiAction Toggle);
-
 internal sealed record CheckView(CheckResult Result, string Text);
 
 internal sealed record RunView(RunPhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? Since, IReadOnlyList<Fact> Facts,
     CheckView Coverage);
 
-internal sealed record GameActions(UiAction Run, UiAction Stop, UiAction Edit, UiAction Rescan, UiAction Remove);
-
-internal sealed record GameView(
-    string Id, string Name, string? Folder, string ThroughText, string LossText, Tone Tone, string StatusText, string ProgramsText,
-    IReadOnlyList<GameProgramView> Programs, RunView? Run, GameActions Actions);
-
 internal sealed record DriverView(DriverPhase Phase, Tone Tone, string StatusText, string? DetailText, IReadOnlyList<Fact> Facts,
     UiAction Install, UiAction Remove);
-
-internal sealed record GameValues(string Name, string? ProfileId, LossMode Loss, string DirectAfterText);
 
 internal sealed record PolicyValues(
     string RetryWaitText, string RetryWaitMaxText, string RoundsMaxText, bool RandomOrder, string AttemptTimeoutText,
@@ -61,40 +51,6 @@ internal static class GameViews
         _ when choice.DirectAfterSeconds is > 0 and var s => $"If the VPN drops: held, then your own connection after {s} s",
         _ => "If the VPN drops: the game's traffic is held",
     };
-
-    public static GameView Game(GameProfile game, GameChoice choice, StoredProfile? profile, RunFacts? run, bool anotherRunning,
-        bool driverReady, bool busy)
-    {
-        var mine = run?.GameId == game.Id ? run : null;
-        var live = mine is { Ended: null };
-        var included = game.Executables.Count(e => e.Included);
-        var runView = mine is null ? null : Run(game, profile, mine);
-        var (tone, status) = runView is { } r ? (r.Tone, r.StatusText)
-            : profile is null ? (Tone.Off, "Choose a VPN profile to run it")
-            : included == 0 ? (Tone.Off, "No program of the game is included")
-            : (Tone.Off, "Not running");
-
-        string? cannotRun =
-            anotherRunning ? "Another game is being routed. Stop it first." :
-            profile is null ? "Choose a VPN profile for this game first (Edit)." :
-            profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
-            included == 0 ? "Include at least one of its programs." :
-            !driverReady ? "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing." :
-            null;
-        var actions = new GameActions(
-            Run: live ? UiAction.Hidden : UiAction.Shown(mine is { Ended: not null } ? "Run again" : "Run", cannotRun is null && !busy, cannotRun),
-            Stop: live ? UiAction.Shown("Stop routing") : UiAction.Hidden,
-            Edit: UiAction.Shown("Edit", !live, "Stop routing before changing it."),
-            Rescan: UiAction.Shown("Scan folder again", !live && game.Folder is not null, live ? "Stop routing before scanning again." : "This game has no folder."),
-            Remove: UiAction.Shown("Remove game", !live, "Stop routing before removing it."));
-
-        var programs = game.Executables.Select(e => new GameProgramView(e.Path, Path.GetFileName(e.Path), e.Included, e.Included ? null : e.Reason ?? "left out",
-                UiAction.Shown(e.Included ? "Leave out" : "Include", !live, "Stop routing before changing its programs.")))
-            .ToList();
-        var programsText = $"{Plural(included, "program")} routed of {game.Executables.Count}" + (live ? "; changes wait until routing stops." : ".");
-        return new GameView(game.Id, game.Name, game.Folder, profile is null ? "No VPN profile chosen" : $"Through {profile.Name}", LossText(choice),
-            tone, status, programsText, programs, runView, actions);
-    }
 
     public static RunView Run(GameProfile game, StoredProfile? profile, RunFacts run)
     {
@@ -170,11 +126,6 @@ internal static class GameViews
             Install: f.DriverInstalled ? UiAction.Hidden : UiAction.Shown("Install driver…", !f.Working, busy: f.Working),
             Remove: f.DriverInstalled ? UiAction.Shown("Remove driver…", !f.Working, busy: f.Working) : UiAction.Hidden);
     }
-
-    public static EmptyView? GamesEmpty(int games) => games > 0 ? null : new(
-        "No games yet",
-        "Add a game by its folder. Sallyport lists its programs; when you run it with a VPN profile, everything those programs send goes through the VPN.",
-        "ADD_GAME");
 
     // The confirmation said before the driver is installed or removed: the network pauses (D18, measured).
     public const string DriverInstallText =

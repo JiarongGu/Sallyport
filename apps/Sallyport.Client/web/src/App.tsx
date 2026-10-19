@@ -98,7 +98,7 @@ export function App() {
     <main className="content" id="main-content">
       {!state ? <div className="loading secondary" role="status">Loading…</div> :
         shown === 'apps' ? <Apps state={state} now={now} expanded={expanded} toggle={toggle}
-          editorForm={state.editor?.kind === 'game' || state.editor?.kind === 'app' ? editorForm : null} /> :
+          editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
         shown === 'network' ? <Network state={state} now={now} go={setPage} /> :
         shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle}
           editorForm={state.editor?.kind === 'port' || state.editor?.kind === 'policy' ? editorForm : null} /> :

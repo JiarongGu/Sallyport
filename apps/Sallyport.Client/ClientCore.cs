@@ -278,7 +278,7 @@ internal sealed class ClientCore
     {
         var profile = Profile(id);
         if (_connections.IsRunning(id)) throw new ShenoraException("CONNECTED", "id", id, $"Disconnect {profile.Name} before removing it.");
-        if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, "Stop routing the game that uses it first.");
+        if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, "Stop routing the app that uses it first.");
         var inUse = _items.List().Count(i => i.ProfileId == id || i.Programs.Any(p => p.ProfileId == id));
         var text = "Deletes Sallyport's encrypted copy. The original file stays unchanged." +
             (inUse == 0 ? "" : inUse == 1 ? " 1 app will need another profile." : $" {inUse} apps will need another profile.");
@@ -305,7 +305,7 @@ internal sealed class ClientCore
         {
             case "remove-profile": await RemoveProfileAsync(confirmation.SubjectId); break;
             case "disconnect": await TakeDownAsync(confirmation.SubjectId); break;
-            case "remove-game": RemoveGame(confirmation.SubjectId); break;
+            case "remove-app": RemoveApp(confirmation.SubjectId); break;
             case "driver-install": await ManageDriverAsync(install: true); break;
             case "driver-remove": await ManageDriverAsync(install: false); break;
         }
@@ -340,75 +340,118 @@ internal sealed class ClientCore
         Publish();
     }
 
-    // ---- games
+    // ---- apps (docs/design/window.md): a program or a folder, each program with its methods
 
-    /// <summary>Asks for a game's folder and makes a game of it: every program found, the utilities left out.</summary>
-    public async Task AddGameFromDialogAsync()
+    /// <summary>Asks for a game's or program's folder and makes an app of it: every program found, routed by its
+    /// packets, the utilities left out.</summary>
+    public async Task AddFolderFromDialogAsync()
     {
-        var picked = await WithDialogAsync("add-game", () => _dialogs.OpenFolderAsync(new OpenFolderOptions
+        var picked = await WithDialogAsync("add-folder", () => _dialogs.OpenFolderAsync(new OpenFolderOptions
         {
-            Title = "Choose the game's folder",
+            Title = "Choose the folder of the game or program",
             RememberPathKey = "add-game",
         }));
-        if (picked is { Success: true, FilePath: { } folder }) AddGame(folder);
+        if (picked is { Success: true, FilePath: { } folder }) AddFolder(folder);
     }
 
-    /// <summary>A game from its folder (the dialog's choice, or a start's <c>--add-game</c>).</summary>
-    public void AddGame(string folder)
+    /// <summary>An app from a folder (the dialog's choice, or a start's <c>--add-game</c>).</summary>
+    public void AddFolder(string folder)
     {
-        if (!Directory.Exists(folder)) throw new ShenoraException("GAME_FOLDER", "folder", folder, "That folder is not there.");
+        if (!Directory.Exists(folder)) throw new ShenoraException("APP_FOLDER", "folder", folder, "That folder is not there.");
         RoutedItem item;
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
-        if (name.Length == 0) name = "game";
+        if (name.Length == 0) name = "app";
         if (name.Length > LongestName) name = name[..LongestName];
         var profile = _store.List().FirstOrDefault(p => p.Unsupported is null);
         try { item = _items.CreateFromFolder(name, folder, profile?.Id); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        { throw new ShenoraException("GAME_FOLDER", "folder", name, $"{name} could not be read: {e.GetType().Name}."); }
+        { throw new ShenoraException("APP_FOLDER", "folder", name, $"{name} could not be read: {e.GetType().Name}."); }
         var included = item.Programs.Count(p => p.Included);
         Notify(NoticeKind.Info, item.Programs.Count == 0
-            ? $"Added {item.Name}, but its folder holds no program. Scan it again once the game is installed."
-            : $"Added {item.Name}: {included} of its {item.Programs.Count} programs will be routed.", new("game", item.Id));
+            ? $"Added {item.Name}, but its folder holds no program. Scan it again once it is installed."
+            : $"Added {item.Name}: {included} of its {item.Programs.Count} programs will send all their traffic through the VPN.", new("app", item.Id));
     }
 
-    public void RescanGame(string id)
+    /// <summary>Asks for one program and makes an app of it: a browser is launched with proxy settings, its own browser
+    /// profile kept apart; anything else sends all its traffic through the packet driver.</summary>
+    public async Task AddProgramFromDialogAsync()
     {
-        var before = Game(id);
-        if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
-            throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before scanning again.");
+        var path = await PickProgramAsync("add-program", "Choose the program to route");
+        if (path is null) return;
+        var info = FileVersionInfo.GetVersionInfo(path);
+        var name = new[] { info.FileDescription, info.ProductName, Path.GetFileNameWithoutExtension(path) }
+            .First(n => !string.IsNullOrWhiteSpace(n))!.Trim();
+        if (name.Length > LongestName) name = name[..LongestName];
+        var kind = AppLauncher.Guess(path);
+        var browser = kind is AppKind.Chromium or AppKind.Firefox;
+        var item = _items.CreateFromProgram(name, path, kind, _store.List().FirstOrDefault(p => p.Unsupported is null)?.Id, packets: !browser, proxy: browser);
+        Notify(NoticeKind.Info, browser
+            ? $"Added {item.Name}: it is launched with proxy settings, in a browser profile of its own."
+            : $"Added {item.Name}: all its traffic goes through the VPN while it is routed.", new("app", item.Id));
+    }
+
+    /// <summary>Adds one more program to an app — a launcher elsewhere, say — sending all its traffic.</summary>
+    public async Task AddProgramToAppAsync(string id)
+    {
+        var item = Item(id);
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, "Stop routing before changing its programs.");
+        var path = await PickProgramAsync("add-program", $"Choose another program for {item.Name}");
+        if (path is null) return;
+        try { _items.AddProgram(id, path); }
+        catch (ArgumentException) { throw new ShenoraException("APP_PROGRAM", "id", id, "That is not a program."); }
+        Notify(NoticeKind.Info, $"Added {Path.GetFileName(path)} to {item.Name}.", new("app", id));
+    }
+
+    private async Task<string?> PickProgramAsync(string which, string title)
+    {
+        var picked = await WithDialogAsync(which, () => _dialogs.OpenFileAsync(new OpenFileOptions
+        {
+            Title = title,
+            Filters = [new FileDialogFilter { Name = "Programs", Extensions = ["exe"] }],
+            RememberPathKey = "add-app",
+        }));
+        return picked is { Success: true, FilePath: { } path } ? path : null;
+    }
+
+    public void RescanApp(string id)
+    {
+        var before = Item(id);
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, "Stop routing before scanning again.");
         RoutedItem after;
         try { after = _items.Rescan(id); }
-        catch (DirectoryNotFoundException) { throw new ShenoraException("GAME_FOLDER", "id", id, $"{before.Name}'s folder is not there any more."); }
+        catch (DirectoryNotFoundException) { throw new ShenoraException("APP_FOLDER", "id", id, $"{before.Name}'s folder is not there any more."); }
         var added = after.Programs.Count(e => !before.Programs.Any(b => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
         var gone = before.Programs.Count(b => !after.Programs.Any(e => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
         Notify(NoticeKind.Info, added + gone == 0 ? $"{after.Name}'s folder holds the same programs." :
-            $"{after.Name}: {added} new program{(added == 1 ? "" : "s")}, {gone} gone. Your choices for the rest stand.", new("game", id));
+            $"{after.Name}: {added} new program{(added == 1 ? "" : "s")}, {gone} gone. Your choices for the rest stand.", new("app", id));
     }
 
-    public void SetGameProgram(string id, string path, bool included)
+    /// <summary>Includes or leaves out one of an app's programs, by its id: a path from the page is never trusted.</summary>
+    public void SetAppProgram(string id, string programId, bool included)
     {
-        Game(id);
-        if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
-            throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before changing its programs.");
-        try { _items.Choose(id, path, included); }
-        catch (ArgumentException) { throw new ShenoraException("GAME_PROGRAM", "id", id, "That program is not one of this game's."); }
+        var item = Item(id);
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, "Stop routing before changing its programs.");
+        var program = item.Programs.FirstOrDefault(p => p.Id == programId)
+            ?? throw new ShenoraException("APP_PROGRAM", "id", id, "That program is not one of this app's.");
+        _items.Choose(id, program.Path, included);
         Publish();
     }
 
-    public void BeginGameEdit(string id)
+    public void BeginAppEdit(string id)
     {
-        var game = Game(id);
-        var choice = game.Choice;
+        var item = Item(id);
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, "Stop routing before changing it.");
+        if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, "Wait for the launch to finish.");
         lock (_gate)
-            _editor = new OpenEditor(NewToken(), "game", id, new GameValues(game.Name, _store.Find(choice.ProfileId ?? "") is null ? null : choice.ProfileId,
-                choice.Loss, choice.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? ""), Empty);
+            _editor = new OpenEditor(NewToken(), "app", id, new AppEditValues(item.Name, _store.Find(item.ProfileId ?? "") is null ? null : item.ProfileId,
+                item.Loss, item.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? "", AppViews.LaunchTarget(item)?.Id), Empty);
         Publish();
     }
 
-    public void SaveGame(string token, GameValues values)
+    public void SaveApp(string token, AppEditValues values)
     {
-        if (EditorFor(token, "game") is not { } editor) return;
-        var game = Game(editor.SubjectId);
+        if (EditorFor(token, "app") is not { } editor) return;
+        var item = Item(editor.SubjectId);
         var name = values.Name?.Trim() ?? "";
         var directAfterText = values.DirectAfterText?.Trim() ?? "";
         var errors = new Dictionary<string, string>();
@@ -421,7 +464,9 @@ internal sealed class ClientCore
             if (int.TryParse(directAfterText, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) && seconds is >= 5 and <= 3600) directAfter = seconds;
             else errors["directAfterText"] = "Use 5 to 3600 seconds, or leave it empty to hold until the VPN is back.";
         }
-        if (_runner.Facts() is { GameId: var running, Ended: null } && running == game.Id) errors["form"] = "Stop routing before changing it.";
+        if (values.LaunchProgramId is { } launch && !item.Programs.Any(p => p.Id == launch && p.Included))
+            errors["launchProgramId"] = "Choose one of its included programs.";
+        if (IsLive(item.Id)) errors["form"] = "Stop routing before changing it.";
 
         lock (_gate)
         {
@@ -429,47 +474,180 @@ internal sealed class ClientCore
             if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
             else
             {
-                _items.Put(game with { Name = name, ProfileId = values.ProfileId, Loss = values.Loss, DirectAfterSeconds = directAfter });
+                _items.Put(item with { Name = name, ProfileId = values.ProfileId, Loss = values.Loss, DirectAfterSeconds = directAfter, LaunchProgramId = values.LaunchProgramId });
                 _editor = null;
             }
         }
         Publish();
     }
 
-    public void RequestRemoveGame(string id)
+    public void BeginProgramEdit(string id, string programId)
     {
-        var game = Game(id);
-        if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
-            throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before removing it.");
-        Confirm("remove-game", id, $"Remove {game.Name}?", "Removes the game from Sallyport. The game itself is not touched.", "Remove game", "Keep game");
+        var item = Item(id);
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, "Stop routing before changing its methods.");
+        var program = item.Programs.FirstOrDefault(p => p.Id == programId)
+            ?? throw new ShenoraException("APP_PROGRAM", "id", id, "That program is not one of this app's.");
+        lock (_gate)
+            _editor = new OpenEditor(NewToken(), "program", $"{id}/{programId}", new ProgramEditValues(program.Packets, program.Proxy is not null,
+                program.Proxy?.Kind ?? AppLauncher.Guess(program.Path), program.LaunchArguments), Empty);
+        Publish();
     }
 
-    private void RemoveGame(string id)
+    public void SaveProgram(string token, ProgramEditValues values)
+    {
+        if (EditorFor(token, "program") is not { } editor) return;
+        var (id, programId) = (editor.SubjectId[..editor.SubjectId.IndexOf('/')], editor.SubjectId[(editor.SubjectId.IndexOf('/') + 1)..]);
+        var item = Item(id);
+        var arguments = values.Arguments?.Trim() ?? "";
+        var errors = new Dictionary<string, string>();
+        if (!values.Packets && !values.Proxy) errors["form"] = "Choose at least one way for its traffic to reach the VPN, or leave the program out instead.";
+        if (values.Proxy && !Enum.IsDefined(values.Kind)) errors["kind"] = "Choose how the program is told about the proxy.";
+        if (arguments.Length > LongestArguments) errors["arguments"] = $"Use at most {LongestArguments:N0} characters.";
+        if (IsLive(id)) errors["form"] = "Stop routing before changing its methods.";
+
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
+            else
+            {
+                _items.Put(item with
+                {
+                    Programs = [.. item.Programs.Select(p => p.Id != programId ? p : p with
+                    {
+                        Packets = values.Packets,
+                        // A program keeps its own browser folder once it has one, so its sign-ins survive a change of method.
+                        Proxy = values.Proxy ? new ProxyLaunch(values.Kind, arguments, p.Proxy?.DataKey ?? p.Id) : null,
+                        Arguments = arguments,
+                    })],
+                });
+                _editor = null;
+            }
+        }
+        Publish();
+    }
+
+    public void CancelEdit(string token)
+    {
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            _editor = null;
+        }
+        Publish();
+    }
+
+    public void RequestRemoveApp(string id)
+    {
+        var item = Item(id);
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, "Stop routing before removing it.");
+        if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, "Wait for the launch to finish.");
+        Confirm("remove-app", id, $"Remove {item.Name}?", "Removes it from Sallyport. Its programs and files are not touched; a running copy keeps running.",
+            "Remove app", "Keep app");
+    }
+
+    private void RemoveApp(string id)
     {
         var name = _items.Find(id)?.Name;
         if (!_items.Remove(id)) return;
-        Notify(NoticeKind.Info, $"Removed {name} from Sallyport. The game itself is unchanged.");
+        lock (_gate)
+        {
+            if (_editor?.SubjectId.StartsWith(id, StringComparison.Ordinal) == true) _editor = null;
+        }
+        Notify(NoticeKind.Info, $"Removed {name} from Sallyport. Its programs are unchanged.");
     }
 
-    /// <summary>Starts routing a game's programs through its VPN profile. Run before the game, every packet of it is
-    /// routed from the first; run while it plays, its connections move to the VPN and the game may need to rejoin.</summary>
-    public void RunGame(string id)
+    /// <summary>Starts routing an app's programs through its VPN profile's channel. Routed before they start, every
+    /// packet of them goes through it from the first; routed while they run, their connections move to the VPN and a game
+    /// may need to rejoin.</summary>
+    public void RouteApp(string id)
     {
-        var item = Game(id);
+        var item = Item(id);
         var game = item.AsGame();
         var choice = item.Choice;
         if (choice.ProfileId is null || _store.Find(choice.ProfileId) is not { } stored)
-            throw new ShenoraException("GAME_NO_PROFILE", "id", id, $"Choose a VPN profile for {game.Name} first (Edit).");
+            throw new ShenoraException("APP_NO_PROFILE", "id", id, $"Choose a VPN profile for {item.Name} first (Edit).");
         if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, $"This version cannot connect {stored.Name}: {why}.");
-        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, "Another game is being routed. Stop it first.");
-        if (game.IncludedPaths.Count == 0) throw new ShenoraException("GAME_EMPTY", "id", id, $"Include at least one of {game.Name}'s programs.");
+        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, "Another app is being routed. Stop it first.");
+        if (item.PacketPrograms.Count == 0) throw new ShenoraException("APP_EMPTY", "id", id, $"Include at least one of {item.Name}'s programs sending all its traffic.");
 
         // Through the profile's channel: the same login as its proxy, if that is connected (docs/design/window.md).
         _runner.Start(game, stored.Id, choice.Policy);
-        Notify(NoticeKind.Info, $"Routing {game.Name} through {stored.Name}. If the game is running already, it may need to rejoin.", new("game", id));
+        Notify(NoticeKind.Info, $"Routing {item.Name} through {stored.Name}. If it is running already, it may need to reconnect.", new("app", id));
     }
 
     public Task StopRunAsync() => _runner.StopAsync();
+
+    /// <summary>Starts an app as its card says: its packet programs routed first (and ready before it starts, so its
+    /// first packet goes through the VPN), then the program Launch starts — with proxy settings, its profile connected,
+    /// if that is its method. A wait that ends without the route or the tunnel up never launches later.</summary>
+    public async Task LaunchAsync(string id, string? programId, CancellationToken ct)
+    {
+        var item = Item(id);
+        var target = programId is null ? AppViews.LaunchTarget(item) : item.Programs.FirstOrDefault(p => p.Id == programId && p.Included);
+        if (target is null) throw new ShenoraException("APP_NO_TARGET", "id", id, $"Choose what Launch starts for {item.Name} (Edit).");
+        if (!File.Exists(target.Path)) throw new ShenoraException("APP_MISSING", "id", id, $"{Path.GetFileName(target.Path)} is not where it was added from.");
+        var profileId = item.ProfileId ?? throw new ShenoraException("APP_NO_PROFILE", "id", id, $"Choose a VPN profile for {item.Name} first (Edit).");
+        var profile = Profile(profileId);
+        if (!_launching.TryAdd(id, AppPhase.Connecting)) return;
+        Publish();
+        try
+        {
+            try
+            {
+                if (item.PacketPrograms.Count > 0)
+                {
+                    if (!IsLive(id)) RouteApp(id);
+                    await WaitRoutedAsync(id, TimeSpan.FromSeconds(45), ct);
+                }
+                if (target.Proxy is not null)
+                {
+                    Connect(profileId);
+                    await _connections.WaitUpAsync(profileId, TimeSpan.FromSeconds(45), ct);
+                }
+            }
+            catch (ShenoraException e) { throw new ShenoraException(e.Code, "id", id, $"{item.Name} was not started. {Capital(e.Message)}"); }
+            _launching[id] = AppPhase.Starting;
+            Publish();
+            try
+            {
+                if (target.Proxy is { } proxy)
+                    AppLauncher.Launch(new RoutedApp(item.Id, item.Name, target.Path, proxy.Kind, profileId, target.LaunchArguments), _settings.PortOf(profileId),
+                        Path.Combine(_paths.DataDir, "apps", proxy.DataKey));
+                else
+                    // Started as the person, from its own folder, as Explorer would: its packets are routed by its path.
+                    Process.Start(new ProcessStartInfo(target.Path, target.LaunchArguments) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(target.Path)! })?.Dispose();
+            }
+            catch (FileNotFoundException) { throw new ShenoraException("APP_MISSING", "id", id, $"{Path.GetFileName(target.Path)} was not found where it was added from."); }
+            catch (System.ComponentModel.Win32Exception e) { throw new ShenoraException("APP_FAILED", "id", id, $"Windows did not start {Path.GetFileName(target.Path)}: {e.Message}"); }
+        }
+        finally
+        {
+            _launching.TryRemove(id, out _);
+            Publish();
+        }
+        Notify(NoticeKind.Info, target.Proxy is not null
+            ? $"{Path.GetFileName(target.Path)} started with proxy settings for {profile.Name}."
+            : $"{Path.GetFileName(target.Path)} started; its traffic goes through {profile.Name}.", new("app", id));
+    }
+
+    // Until the service routes the app's programs through a generation that is up: what a program then sends is the
+    // VPN's from its first packet.
+    private async Task WaitRoutedAsync(string id, TimeSpan within, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + within;
+        while (true)
+        {
+            var run = _runner.Facts();
+            if (run is null || run.GameId != id) throw new ShenoraException("NOT_ROUTED", "id", id, "routing did not start");
+            if (run.Ended is { } why) throw new ShenoraException("NOT_ROUTED", "id", id, $"routing stopped: {why}");
+            if (run.Route?.Phase == RoutePhase.Routing) return;
+            if (DateTime.UtcNow > deadline) throw new ShenoraException("ROUTE_TIMEOUT", "id", id, $"its routing was not ready within {within.TotalSeconds:0} s");
+            await Task.Delay(200, ct);
+        }
+    }
+
+    private bool IsLive(string id) => _runner.Facts() is { Ended: null } run && run.GameId == id;
 
     // ---- a profile's connection settings
 
@@ -592,123 +770,6 @@ internal sealed class ClientCore
         return facts;
     }
 
-    // ---- apps
-
-    public async Task AddAppFromDialogAsync()
-    {
-        var picked = await WithDialogAsync("add-app", () => _dialogs.OpenFileAsync(new OpenFileOptions
-        {
-            Title = "Choose the app to launch through Sallyport",
-            Filters = [new FileDialogFilter { Name = "Programs", Extensions = ["exe"] }],
-            RememberPathKey = "add-app",
-        }));
-        if (picked is not { Success: true, FilePath: { } path }) return;
-
-        var info = FileVersionInfo.GetVersionInfo(path);
-        var name = new[] { info.FileDescription, info.ProductName, Path.GetFileNameWithoutExtension(path) }
-            .First(n => !string.IsNullOrWhiteSpace(n))!.Trim();
-        if (name.Length > LongestName) name = name[..LongestName];
-        var kind = AppLauncher.Guess(path);
-        var item = _items.CreateFromProgram(name, path, kind, _store.List().FirstOrDefault(p => p.Unsupported is null)?.Id);
-        Notify(NoticeKind.Info, $"Added {item.Name} as a {ClientView.KindLabel(kind).ToLowerInvariant()}.", new("app", item.Id));
-    }
-
-    public void BeginAppEdit(string id)
-    {
-        var app = App(id).AsApp()!;
-        if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, "Wait for the launch to finish.");
-        lock (_gate)
-            _editor = new OpenEditor(NewToken(), "app", id,
-                new AppValues(app.Name, _store.Find(app.ProfileId) is null ? null : app.ProfileId, app.Kind, app.Arguments), Empty);
-        Publish();
-    }
-
-    public void UpdateApp(string token, AppValues values)
-    {
-        if (EditorFor(token, "app") is not { } editor) return;
-        var item = App(editor.SubjectId);
-        var app = item.AsApp()!;
-        var name = values.Name?.Trim() ?? "";
-        var arguments = values.Arguments?.Trim() ?? "";
-        var errors = new Dictionary<string, string>();
-        if (name.Length is 0 or > LongestName) errors["name"] = $"Use 1 to {LongestName} characters.";
-        if (values.ProfileId is null || _store.Find(values.ProfileId) is null) errors["profileId"] = "Choose a profile.";
-        if (!Enum.IsDefined(values.Kind)) errors["kind"] = "Choose how the app is told about the proxy.";
-        if (arguments.Length > LongestArguments) errors["arguments"] = $"Use at most {LongestArguments:N0} characters.";
-        if (_launching.ContainsKey(app.Id)) errors["form"] = "Wait for the launch to finish.";
-
-        lock (_gate)
-        {
-            if (_editor?.Token != token) return;
-            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
-            else
-            {
-                var program = item.ProxyProgram!;
-                _items.Put(item with
-                {
-                    Name = name,
-                    ProfileId = values.ProfileId,
-                    Programs = [.. item.Programs.Select(p => p.Id == program.Id ? p with { Proxy = p.Proxy! with { Kind = values.Kind, Arguments = arguments } } : p)],
-                });
-                _editor = null;
-            }
-        }
-        Publish();
-    }
-
-    public void CancelEdit(string token)
-    {
-        lock (_gate)
-        {
-            if (_editor?.Token != token) return;
-            _editor = null;
-        }
-        Publish();
-    }
-
-    public void RemoveApp(string id)
-    {
-        var app = App(id);
-        if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, "Wait for the launch to finish.");
-        if (!_items.Remove(id)) return;
-        lock (_gate)
-        {
-            if (_editor?.SubjectId == id) _editor = null;
-        }
-        Notify(NoticeKind.Info, $"Removed the shortcut to {app.Name}. A running copy keeps running.");
-    }
-
-    /// <summary>Connects the app's profile if it is not, waits for it to be up, then starts the app through it. A wait
-    /// that ends without the tunnel up never launches later.</summary>
-    public async Task LaunchAsync(string id, CancellationToken ct)
-    {
-        var item = App(id);
-        var app = item.AsApp()!;
-        var profile = _store.Find(app.ProfileId) ?? throw new ShenoraException("APP_NO_PROFILE", "id", id, $"Choose a profile for {app.Name} before launching.");
-        if (!_launching.TryAdd(id, AppPhase.Connecting)) return;
-        Publish();
-        try
-        {
-            try
-            {
-                Connect(app.ProfileId);
-                await _connections.WaitUpAsync(app.ProfileId, TimeSpan.FromSeconds(45), ct);
-            }
-            catch (ShenoraException e) { throw new ShenoraException(e.Code, "id", id, $"{app.Name} was not started. {Capital(e.Message)}"); }
-            _launching[id] = AppPhase.Starting;
-            Publish();
-            try { AppLauncher.Launch(app, _settings.PortOf(app.ProfileId), OwnProfile(item)); }
-            catch (FileNotFoundException) { throw new ShenoraException("APP_MISSING", "id", id, $"{app.Name} was not found where it was added from."); }
-            catch (System.ComponentModel.Win32Exception e) { throw new ShenoraException("APP_FAILED", "id", id, $"Windows did not start {app.Name}: {e.Message}"); }
-        }
-        finally
-        {
-            _launching.TryRemove(id, out _);
-            Publish();
-        }
-        Notify(NoticeKind.Info, $"{app.Name} started with proxy settings for {profile.Name}.", new("app", id));
-    }
-
     public void CopyGuideExample()
     {
         Clipboard(ClientView.CurlExample(GuideEndpoint(Snapshot().Profiles)));
@@ -721,34 +782,27 @@ internal sealed class ClientCore
     {
         var stored = _store.List();
         var items = _items.List();
-        var games = items.Where(i => i.RoutesPackets).ToList();
         var run = _runner.Facts();
         var routedThrough = run is { Ended: null } ? run.ProfileId : null;
-        var routedGame = routedThrough is null ? null : games.FirstOrDefault(g => g.Id == run!.GameId)?.Name ?? "a game";
+        var routedGame = routedThrough is null ? null : items.FirstOrDefault(g => g.Id == run!.GameId)?.Name ?? "an app";
         var profiles = stored.Select(p => ClientView.Profile(new ProfileFacts(
                 p, _settings.PortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
                 routedThrough == p.Id ? routedGame : null, !_settings.PolicyOf(p.Id).IsEmpty)))
             .ToList();
         var driver = GameViews.Driver(Driver());
-        var gameViews = games.Select(g =>
+        var dialog = Volatile.Read(ref _dialog);
+        var apps = items.Select(i =>
             {
-                var choice = g.Choice;
-                var profile = stored.FirstOrDefault(p => p.Id == choice.ProfileId);
-                return GameViews.Game(g.AsGame(), choice, profile, run, run is { Ended: null } && run.GameId != g.Id,
-                    driver.Phase == DriverPhase.Ready, Volatile.Read(ref _dialog) is not null);
-            })
-            .ToList();
-        var apps = items.Where(i => i.ProxyProgram is not null).Select(i =>
-            {
-                var a = i.AsApp()!;
-                var profile = stored.FirstOrDefault(p => p.Id == a.ProfileId);
-                var settings = profile is null ? [] : AppLauncher.Describe(a, _settings.PortOf(profile.Id), OwnProfile(i));
-                return ClientView.App(a, profile, File.Exists(a.Path), settings, _launching.TryGetValue(a.Id, out var phase) ? phase : null);
+                var profile = stored.FirstOrDefault(p => p.Id == i.ProfileId);
+                return AppViews.Item(new ItemFacts(i, profile, run, run is { Ended: null } && run.GameId != i.Id, driver.Phase == DriverPhase.Ready,
+                    dialog is not null, _launching.TryGetValue(i.Id, out var phase) ? phase : null,
+                    p => profile is null || p.Proxy is not { } proxy ? []
+                        : AppLauncher.Describe(new RoutedApp(i.Id, i.Name, p.Path, proxy.Kind, profile.Id, p.LaunchArguments), _settings.PortOf(profile.Id),
+                            Path.Combine(_paths.DataDir, "apps", proxy.DataKey))));
             })
             .ToList();
 
-        var dialog = Volatile.Read(ref _dialog);
         var guideEndpoint = GuideEndpoint(profiles);
         var guide = new ClientState.GuideView(guideEndpoint, ClientView.CurlExample(guideEndpoint), UiAction.Shown("Copy"));
         OpenEditor? editor;
@@ -771,16 +825,13 @@ internal sealed class ClientCore
             ClientView.Summary(profiles),
             new ClientState.TopActions(
                 UiAction.Shown("Import profile…", dialog is null, "A file dialog is open.", busy: dialog == "import"),
-                UiAction.Shown("Add app…", dialog is null && stored.Count > 0, stored.Count == 0 ? "Import a profile first." : "A file dialog is open.",
-                    busy: dialog == "add-app"),
-                UiAction.Shown("Add game…", dialog is null, "A file dialog is open.", busy: dialog == "add-game")),
+                UiAction.Shown("Add a program…", dialog is null, "A file dialog is open.", busy: dialog == "add-program"),
+                UiAction.Shown("Add a folder…", dialog is null, "A file dialog is open.", busy: dialog == "add-folder")),
             profiles,
             apps,
-            gameViews,
             ClientView.ProfilesEmpty(stored.Count),
-            ClientView.AppsEmpty(stored.Count, apps.Count),
-            GameViews.GamesEmpty(games.Count),
-            WindowViews.Network(profiles, gameViews, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id))),
+            AppViews.Empty(stored.Count, apps.Count),
+            WindowViews.Network(profiles, apps, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id))),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere()),
             // Where a first look is useful: with nothing to route through yet, the page that imports one.
             stored.Count == 0 ? Page.Profiles : Page.Apps,
@@ -794,7 +845,11 @@ internal sealed class ClientCore
                 editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : null,
                 UiAction.Shown("Save"), UiAction.Shown("Cancel"),
                 editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown("Use the profile's own") : UiAction.Hidden,
-                editor.Kind, editor.Values),
+                editor.Kind, editor.Values,
+                // What Launch may start: the app's included programs.
+                editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited
+                    ? [.. edited.Programs.Where(p => p.Included).Select(p => new EditorOption(p.Id, Path.GetFileName(p.Path)))]
+                    : null),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),
             notices);
@@ -827,11 +882,8 @@ internal sealed class ClientCore
     private StoredProfile Profile(string id) =>
         _store.Find(id) ?? throw new ShenoraException("PROFILE_GONE", "id", id, "That profile is no longer stored.");
 
-    private RoutedItem App(string id) =>
-        _items.Find(id) is { ProxyProgram: not null } item ? item : throw new ShenoraException("APP_GONE", "id", id, "That app is no longer listed.");
-
-    private RoutedItem Game(string id) =>
-        _items.Find(id) is { RoutesPackets: true } item ? item : throw new ShenoraException("GAME_GONE", "id", id, "That game is no longer listed.");
+    private RoutedItem Item(string id) =>
+        _items.Find(id) ?? throw new ShenoraException("APP_GONE", "id", id, "That app is no longer listed.");
 
     private async Task<FileDialogResult?> WithDialogAsync(string which, Func<Task<FileDialogResult>> show)
     {
@@ -854,6 +906,4 @@ internal sealed class ClientCore
         copying.Join();
     }
 
-    /// <summary>Where a browser started through Sallyport keeps its own profile, apart from the person's usual one.</summary>
-    private string OwnProfile(RoutedItem item) => Path.Combine(_paths.DataDir, "apps", item.ProxyProgram!.Proxy!.DataKey);
 }

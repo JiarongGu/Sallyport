@@ -149,46 +149,30 @@ internal sealed class StatusTray : IDisposable
             _menu.Items.Add(item);
         }
 
-        if (state.Games.FirstOrDefault(g => g.Run is { Phase: not RunPhase.Ended }) is { } routed)
+        // The app being routed, to stop; otherwise every app, to route or launch — as its card in the window offers.
+        if (state.Apps.FirstOrDefault(a => a.Run is { Phase: not RunPhase.Ended }) is { } routed)
         {
             _menu.Items.Add(new ToolStripSeparator());
             var item = new ToolStripMenuItem($"{routed.Name} — {routed.Run!.StatusText}");
             if (routed.Run.DetailText is { } detail) item.DropDownItems.Add(new ToolStripMenuItem(detail) { Enabled = false });
             Add(item, routed.Actions.Stop, _core.StopRunAsync);
+            Add(item, routed.Actions.Launch, () => _core.LaunchAsync(routed.Id, null, CancellationToken.None));
             _menu.Items.Add(item);
         }
-        else if (state.Games.Count > 0)
+        if (state.Apps.Where(a => a.Run is not { Phase: not RunPhase.Ended }).ToList() is { Count: > 0 } apps)
         {
-            var run = new ToolStripMenuItem("Run game");
-            foreach (var game in state.Games)
-            {
-                var id = game.Id;
-                run.DropDownItems.Add(new ToolStripMenuItem($"{game.Name}  ·  {game.ThroughText}", null,
-                    (_, _) => Run(() => { _core.RunGame(id); return Task.CompletedTask; }))
-                {
-                    Enabled = game.Actions.Run.Enabled,
-                    ToolTipText = game.Actions.Run.Reason ?? "",
-                });
-            }
             _menu.Items.Add(new ToolStripSeparator());
-            _menu.Items.Add(run);
-        }
-
-        if (state.Apps.Count > 0)
-        {
-            var launch = new ToolStripMenuItem("Launch app");
-            foreach (var app in state.Apps)
+            var all = new ToolStripMenuItem("Apps");
+            foreach (var app in apps)
             {
                 var id = app.Id;
-                launch.DropDownItems.Add(new ToolStripMenuItem($"{app.Name}  ·  {app.ThroughText}", null,
-                    (_, _) => Run(() => _core.LaunchAsync(id, CancellationToken.None)))
-                {
-                    Enabled = app.Actions.Launch.Enabled,
-                    ToolTipText = app.StatusText ?? "",
-                });
+                var item = new ToolStripMenuItem($"{app.Name}  ·  {app.ThroughText}");
+                Add(item, app.Actions.Launch, () => _core.LaunchAsync(id, null, CancellationToken.None));
+                Add(item, app.Actions.Route, () => { _core.RouteApp(id); return Task.CompletedTask; });
+                if (item.DropDownItems.Count == 0) item.DropDownItems.Add(new ToolStripMenuItem(app.StatusText) { Enabled = false });
+                all.DropDownItems.Add(item);
             }
-            _menu.Items.Add(new ToolStripSeparator());
-            _menu.Items.Add(launch);
+            _menu.Items.Add(all);
         }
 
         _menu.Items.Add(new ToolStripSeparator());

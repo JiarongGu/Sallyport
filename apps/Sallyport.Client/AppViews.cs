@@ -1,0 +1,154 @@
+using Sallyport.Runtime;
+using Sallyport.Windows.Routing;
+
+namespace Sallyport.Client;
+
+// The Apps page's view model and its words (docs/design/window.md, step 6): one card per app — a program or a folder —
+// each program with its methods. The page renders this and decides nothing (D15).
+
+internal sealed record ProgramActions(UiAction Toggle, UiAction Edit, UiAction Launch);
+
+/// <summary>One program of an app, as its row shows it: what it does (<see cref="StatusText"/>: its methods, or why it is
+/// left out), whether it is the one Launch starts, and the flags a proxy launch gives it.</summary>
+internal sealed record ProgramView(string Id, string Name, string Path, bool Included, string StatusText, bool Missing, bool LaunchTarget,
+    IReadOnlyList<string> StartupSettings, ProgramActions Actions);
+
+internal sealed record AppItemActions(UiAction Route, UiAction Stop, UiAction Launch, UiAction Edit, UiAction Rescan, UiAction AddProgram, UiAction Remove);
+
+/// <summary>An app's card: its profile and methods, its routing now (<see cref="Run"/>), and what can be done with it.</summary>
+internal sealed record AppItemView(
+    string Id, string Name, string? Folder, string ThroughText, string MethodText, string? LossText, Tone Tone, string StatusText,
+    string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions);
+
+internal sealed record AppEditValues(string Name, string? ProfileId, LossMode Loss, string DirectAfterText, string? LaunchProgramId);
+
+internal sealed record ProgramEditValues(bool Packets, bool Proxy, AppKind Kind, string Arguments);
+
+internal sealed record EditorOption(string Id, string Label);
+
+/// <summary>What the host knows of an app beyond the store, for <see cref="AppViews.Item"/>.</summary>
+internal sealed record ItemFacts(
+    RoutedItem Item, StoredProfile? Profile, RunFacts? Run, bool AnotherRunning, bool DriverReady, bool Busy, AppPhase? Launching,
+    Func<RoutedProgram, IReadOnlyList<string>> StartupSettings);
+
+internal static class AppViews
+{
+    /// <summary>What Launch starts: the program the person chose, else the one launched with proxy settings, else the
+    /// folder's program named most like the folder, else the only one.</summary>
+    public static RoutedProgram? LaunchTarget(RoutedItem item)
+    {
+        var included = item.Programs.Where(p => p.Included).ToList();
+        if (item.LaunchProgramId is { } chosen && included.FirstOrDefault(p => p.Id == chosen) is { } program) return program;
+        if (item.ProxyProgram is { } proxy) return proxy;
+        if (included.Count == 1) return included[0];
+        if (item.Folder is null) return null;
+        var folder = Simple(Path.GetFileName(Path.TrimEndingDirectorySeparator(item.Folder)));
+        return included
+            .Where(p => Path.GetDirectoryName(p.Path) is { } dir && string.Equals(Path.TrimEndingDirectorySeparator(dir), Path.TrimEndingDirectorySeparator(item.Folder), StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(p => Shared(Simple(Path.GetFileNameWithoutExtension(p.Path)), folder))
+            .FirstOrDefault(p => Shared(Simple(Path.GetFileNameWithoutExtension(p.Path)), folder) >= 4);
+
+        static string Simple(string name) => new([.. name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant)]);
+        static int Shared(string a, string b)
+        {
+            var n = 0;
+            while (n < a.Length && n < b.Length && a[n] == b[n]) n++;
+            return n;
+        }
+    }
+
+    public static string Methods(RoutedProgram p) =>
+        !p.Included ? $"Left out — {p.Reason ?? "by you"}"
+        : (p.Packets, p.Proxy) switch
+        {
+            (true, { } proxy) => $"All traffic · launched with proxy settings ({ClientView.KindLabel(proxy.Kind).ToLowerInvariant()})",
+            (true, null) => "All traffic",
+            (false, { } proxy) => $"Launched with proxy settings ({ClientView.KindLabel(proxy.Kind).ToLowerInvariant()})",
+            _ => "Included, with no method chosen",
+        };
+
+    public static AppItemView Item(ItemFacts f)
+    {
+        var item = f.Item;
+        var profile = f.Profile;
+        var packets = item.PacketPrograms;
+        var proxied = item.Programs.Count(p => p.Included && p.Proxy is not null);
+        var mine = f.Run?.GameId == item.Id ? f.Run : null;
+        var live = mine is { Ended: null };
+        var runView = mine is null ? null : GameViews.Run(item.AsGame(), profile, mine);
+        var target = LaunchTarget(item);
+        var launching = f.Launching is not null;
+
+        var methodText = (packets.Count, proxied) switch
+        {
+            (0, 0) => "No program routed yet",
+            (> 0, 0) => $"All traffic of {Plural(packets.Count, "program")}",
+            (0, > 0) => proxied == 1 ? "Launched with proxy settings" : $"{Plural(proxied, "program")} launched with proxy settings",
+            _ => $"All traffic of {Plural(packets.Count, "program")} · {proxied} launched with proxy settings",
+        };
+
+        string? cannotRoute =
+            f.AnotherRunning ? "Another app is being routed. Stop it first." :
+            profile is null ? "Choose a VPN profile for it first (Edit)." :
+            profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
+            packets.Count == 0 ? "Include at least one program sending all its traffic." :
+            !f.DriverReady ? "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing." :
+            null;
+        string? cannotLaunch =
+            target is null ? "Choose what Launch starts (Edit)." :
+            !File.Exists(target.Path) ? $"{Path.GetFileName(target.Path)} is not where it was added from." :
+            profile is null ? "Choose a VPN profile for it first (Edit)." :
+            profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
+            packets.Count > 0 && !live ? cannotRoute :
+            null;
+
+        var (tone, status) =
+            f.Launching is AppPhase.Connecting ? (Tone.Busy, packets.Count > 0 && !live ? "Routing it before launch…" : $"Connecting {profile?.Name} before launch…") :
+            f.Launching is AppPhase.Starting ? (Tone.Busy, "Starting…") :
+            runView is { } r ? (r.Tone, r.StatusText) :
+            profile is null ? (Tone.Off, "Choose a VPN profile") :
+            item.Programs.Count(p => p.Included) == 0 ? (Tone.Off, "No program included") :
+            packets.Count > 0 ? (Tone.Off, "Not routing") :
+            (Tone.Off, "Ready to launch");
+
+        var programs = item.Programs.Select(p => new ProgramView(p.Id, Path.GetFileName(p.Path), p.Path, p.Included, Methods(p), !File.Exists(p.Path),
+                target?.Id == p.Id, p.Included && p.Proxy is not null ? f.StartupSettings(p) : [],
+                new ProgramActions(
+                    Toggle: UiAction.Shown(p.Included ? "Leave out" : "Include", !live && !launching, "Stop routing before changing its programs."),
+                    // A program left out has no methods to choose until it is included again.
+                    Edit: p.Included ? UiAction.Shown("Methods…", !live && !launching, "Stop routing before changing its methods.") : UiAction.Hidden,
+                    // Its own Launch for a program started with proxy settings beside the app's (a browser in a game's app);
+                    // a folder's helpers are started by the game, not by the person.
+                    Launch: p.Included && p.Proxy is not null && p.Id != target?.Id
+                        ? UiAction.Shown("Launch", cannotLaunchFor(p) is null && !launching, cannotLaunchFor(p)) : UiAction.Hidden)))
+            .ToList();
+
+        string? cannotLaunchFor(RoutedProgram p) =>
+            !File.Exists(p.Path) ? $"{Path.GetFileName(p.Path)} is not where it was added from." :
+            profile is null ? "Choose a VPN profile for it first (Edit)." :
+            packets.Count > 0 && !live ? cannotRoute : null;
+
+        var included = item.Programs.Count(p => p.Included);
+        var programsText = item.Folder is null && item.Programs.Count == 1 ? "" :
+            $"{Plural(included, "program")} included of {item.Programs.Count}" + (live ? "; changes wait until routing stops." : ".");
+        return new AppItemView(item.Id, item.Name, item.Folder, profile is null ? "No VPN profile chosen" : $"Through {profile.Name}", methodText,
+            item.RoutesPackets ? GameViews.LossText(item.Choice) : null, tone, status,
+            target is null ? null : $"Launch starts {Path.GetFileName(target.Path)}", runView, programsText, programs,
+            new AppItemActions(
+                Route: !item.RoutesPackets || live ? UiAction.Hidden
+                    : UiAction.Shown(mine is { Ended: not null } ? "Route again" : "Route", cannotRoute is null && !f.Busy && !launching, cannotRoute),
+                Stop: live ? UiAction.Shown("Stop routing") : UiAction.Hidden,
+                Launch: UiAction.Shown("Launch", cannotLaunch is null && !f.Busy, cannotLaunch, busy: launching),
+                Edit: UiAction.Shown("Edit", !live && !launching, "Stop routing before changing it."),
+                Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown("Scan folder again", !live && !launching, "Stop routing before scanning again."),
+                AddProgram: UiAction.Shown("Add a program…", !live && !launching && !f.Busy, live ? "Stop routing before changing its programs." : "A file dialog is open."),
+                Remove: UiAction.Shown("Remove app", !live && !launching, "Stop routing before removing it.")));
+    }
+
+    public static EmptyView? Empty(int profiles, int apps) =>
+        apps > 0 ? null :
+        profiles == 0 ? new("No apps yet", "Import a VPN profile first, then add the programs or the game folder to route through it.", "IMPORT") :
+        new("No apps yet", "Add a program, or a game's folder. Its traffic can go through your VPN by the packet driver, or by proxy settings when Sallyport launches it.", "ADD_FOLDER");
+
+    private static string Plural(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n:N0} {noun}s";
+}

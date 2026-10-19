@@ -93,6 +93,19 @@ switch (args.FirstOrDefault())
         Console.WriteLine("asked the routing session to stop");
         return 0;
     }
+    case "mixed-to":
+    {
+        // mixed-to <seconds> <file> [home address]: the "mixed" workload, written to a file — for a copy started by
+        // something else (Sallyport's Launch), which no console of this one sees.
+        if (args.Length < 3 || !int.TryParse(args[1], out var mixedSeconds)) return 2;
+        using (var file = new StreamWriter(args[2], append: false) { AutoFlush = true })
+        {
+            Console.SetOut(file);
+            Console.WriteLine($"{Now()} started");
+            await MixedAsync(mixedSeconds, args.Length > 3 ? args[3] : null, null, " launched");
+        }
+        return 0;
+    }
     case "routed-workload":
     {
         // "go", or "go boundaries <tunnel gateway> <LAN gateway> <local address> <IPv6 neighbour> <IPv6 scope>" ("-" for

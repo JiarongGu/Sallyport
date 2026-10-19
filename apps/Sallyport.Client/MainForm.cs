@@ -130,7 +130,7 @@ internal sealed class MainForm : OptimizedForm
         }
         var addGame = Array.IndexOf(args, "--add-game");
         if (addGame >= 0 && addGame + 1 < args.Length)
-            try { _core.AddGame(args[addGame + 1]); }
+            try { _core.AddFolder(args[addGame + 1]); }
             catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
         if (!atStart) _tray.ShowWindow();
         // Hidden only once shown: the window has to exist for the page to load behind it.

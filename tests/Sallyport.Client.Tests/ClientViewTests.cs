@@ -150,25 +150,6 @@ public class ClientViewTests
     }
 
     [Fact]
-    public void An_app_that_is_gone_or_has_no_profile_is_blocked_with_the_reason_on_its_launch_button()
-    {
-        var app = new RoutedApp("a1", "Edge", @"C:\nowhere\msedge.exe", AppKind.Chromium, "ad50a53b0da826ad", "");
-
-        var missing = ClientView.App(app, Stored(), found: false, [], launching: null);
-        var orphan = ClientView.App(app, profile: null, found: true, [], launching: null);
-        var connecting = ClientView.App(app, Stored(), found: true, [], launching: AppPhase.Connecting);
-
-        Assert.Equal(AppPhase.Blocked, missing.Phase);
-        Assert.True(missing.Actions.Launch is { Enabled: false });
-        Assert.Null(missing.Actions.Launch.Reason);
-        Assert.Equal("Choose a profile before launching.", orphan.StatusText);
-        Assert.Equal("No profile chosen", orphan.ThroughText);
-        Assert.Equal("Connecting jp before launch…", connecting.StatusText);
-        Assert.True(connecting.Actions.Launch.Busy);
-        Assert.False(connecting.Actions.Edit.Enabled);
-    }
-
-    [Fact]
     public void The_state_crosses_as_the_contract_spells_it_nulls_included()
     {
         var json = JsonSerializer.Serialize(View(), ClientView.Json);

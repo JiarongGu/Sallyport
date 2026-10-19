@@ -240,7 +240,18 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       traffic the VPN; Stop routing → jp down again.
    5. **Many channels in the service's one run:** selections on different profiles at once; one channel's outage;
       the adapters back when the last ends.
-   6. **The Apps editors:** add a program or a folder, methods per program, Route / Launch / Stop, conflicts refused.
+   6. **The Apps editors — measured 2026-10-20** (`AppViews`): one card per app — a program or a folder — with Launch,
+      Route / Stop, its profile, methods and loss policy; Add a program… (a browser launched with proxy settings, anything
+      else all its traffic) and Add a folder…; each program's row with its methods, Methods… (all traffic, proxy settings
+      at launch, or both; how it is told of the proxy; extra arguments when launched), Include / Leave out, and Launch
+      for a proxy program beside the app's; the app's editor (name, profile, Launch starts, loss policy); removal asked.
+      Launch routes the app first and starts the program only once its generation is committed. On the installed client,
+      through UI Automation: Zenless's card (Launch starts ZenlessZoneZero.exe, all traffic of 3 programs); a stand-in
+      (`childbin`) given both methods, then refused with neither ("Choose at least one way…"), then all traffic only;
+      its Launch with the tool's `mixed-to` as its arguments — the service committed generation 1 at 09:42:46.577, the
+      program started at 09:42:47.569, and from its first 2 s every STUN and HTTPS request was answered and the far end
+      saw the VPN; the run: 49 routed, 48 handed up, 0 late, 1 selected. The stand-in was removed after.
+      Not yet: conflicts between apps naming the same program (one run at a time, today).
    7. **Network and Settings in full:** retry telemetry and a true countdown, latency through the dispatcher, connection
       settings as own / override / effective, start with Windows, defaults for new apps.
    - **Done when:** Zenless Zone Zero is an app from its folder, routed by packets while a browser of the same profile

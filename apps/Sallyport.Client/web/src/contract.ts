@@ -32,8 +32,8 @@ export interface Fact {
 export interface Empty {
   title: string;
   text: string;
-  /** Pressed through the matching top action (`actions.import`, `actions.addApp`, `actions.addGame`), which says its label. */
-  command: 'IMPORT' | 'ADD_APP' | 'ADD_GAME';
+  /** Pressed through the matching top action (`actions.import`, `actions.addProgram`, `actions.addFolder`), which says its label. */
+  command: 'IMPORT' | 'ADD_PROGRAM' | 'ADD_FOLDER';
 }
 
 export type ProfilePhase =
@@ -99,34 +99,6 @@ export interface RunView {
   coverage: CheckView;
 }
 
-export interface GameProgramView {
-  path: string;
-  name: string;
-  included: boolean;
-  /** Why it is left out, when it is: "installs or removes software". */
-  reason: string | null;
-  /** Posts SET_GAME_PROGRAM with the opposite of `included`. */
-  toggle: Action;
-}
-
-export interface GameView {
-  id: string;
-  name: string;
-  folder: string | null;
-  /** "Through jp" */
-  throughText: string;
-  /** "If the VPN drops: the game's traffic is held" */
-  lossText: string;
-  tone: Tone;
-  statusText: string;
-  /** "3 programs routed of 7." */
-  programsText: string;
-  programs: GameProgramView[];
-  /** The run of this game, now or the last one; null when it has not run since the client started. */
-  run: RunView | null;
-  actions: Record<'run' | 'stop' | 'edit' | 'rescan' | 'remove', Action>;
-}
-
 export interface DriverView {
   phase: 'ready' | 'notInstalled' | 'serviceMissing' | 'working' | 'unknown';
   tone: Tone;
@@ -186,41 +158,68 @@ export interface SettingsView {
   about: Fact[];
 }
 
-export interface AppView {
-  id: string;
-  name: string;
-  kind: AppKind;
-  kindLabel: string;
-  kindHelp: string;
-  path: string;
-  profileId: string | null;
-  /** "Through jp" */
-  throughText: string;
-  phase: 'ready' | 'blocked' | 'connecting' | 'starting';
-  /** Why it is blocked, or what it is doing: "App not found", "Connecting jp before launch…" */
-  statusText: string | null;
-  /** The flags, preferences or environment it starts with, one per line. */
-  startupSettings: string[];
-  actions: Record<'launch' | 'edit' | 'remove', Action>;
-}
-
 export interface PortValues {
   portText: string;
 }
 
-export interface AppValues {
+/** One program of an app, as its row shows it. */
+export interface ProgramView {
+  id: string;
+  /** The file's name: "ZenlessZoneZero.exe" */
   name: string;
-  profileId: string | null;
-  kind: AppKind;
-  arguments: string;
+  path: string;
+  included: boolean;
+  /** Its methods — "All traffic", "Launched with proxy settings (Chromium browser)" — or why it is left out. */
+  statusText: string;
+  /** Not where it was added from any more. */
+  missing: boolean;
+  /** The one Launch starts. */
+  launchTarget: boolean;
+  /** The flags, preferences or environment a proxy launch gives it, one per line; empty without one. */
+  startupSettings: string[];
+  /** toggle posts SET_APP_PROGRAM with the opposite of `included`; edit posts BEGIN_PROGRAM_EDIT; launch posts LAUNCH_APP with its id. */
+  actions: Record<'toggle' | 'edit' | 'launch', Action>;
 }
 
-export interface GameValues {
+/** An app — a program, or a folder of them — and its routing (docs/design/window.md). */
+export interface AppItemView {
+  id: string;
+  name: string;
+  folder: string | null;
+  /** "Through jp" */
+  throughText: string;
+  /** "All traffic of 3 programs · 1 launched with proxy settings" */
+  methodText: string;
+  /** "If the VPN drops: …", when it routes packets. */
+  lossText: string | null;
+  tone: Tone;
+  statusText: string;
+  /** "Launch starts ZenlessZoneZero.exe" */
+  launchText: string | null;
+  /** Its routing, now or the last one; null when it has not been routed since the client started. */
+  run: RunView | null;
+  /** "3 programs included of 7."; empty for a lone program. */
+  programsText: string;
+  programs: ProgramView[];
+  actions: Record<'route' | 'stop' | 'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
+}
+
+export interface AppEditValues {
   name: string;
   profileId: string | null;
   loss: LossMode;
-  /** Under 'hold': seconds before the game goes direct after all, or empty to hold until the VPN is back. */
+  /** Under 'hold': seconds before the traffic goes direct after all, or empty to hold until the VPN is back. */
   directAfterText: string;
+  /** What Launch starts: one of the editor's `options`. */
+  launchProgramId: string | null;
+}
+
+/** A program's methods: all its traffic by the packet driver, launched with proxy settings, or both. */
+export interface ProgramEditValues {
+  packets: boolean;
+  proxy: boolean;
+  kind: AppKind;
+  arguments: string;
 }
 
 /** A profile's connection settings, as OpenVPN's directives name them; seeded with what is in force. */
@@ -236,7 +235,7 @@ export interface PolicyValues {
   pingRestartText: string;
 }
 
-export type EditorField = 'form' | 'portText' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText'
+export type EditorField = 'form' | 'portText' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
   | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText';
 
 /** An edit the host opened. Its values seed the fields once (keep what the person types across later STATEs with the
@@ -252,7 +251,9 @@ export type Editor = {
   cancel: Action;
   /** The policy editor's "Use the profile's own": posts RESET_POLICY. */
   reset: Action;
-} & ({ kind: 'port'; values: PortValues } | { kind: 'app'; values: AppValues } | { kind: 'game'; values: GameValues }
+  /** The app editor's choices for what Launch starts. */
+  options: { id: string; label: string }[] | null;
+} & ({ kind: 'port'; values: PortValues } | { kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
   | { kind: 'policy'; values: PolicyValues });
 
 export interface Confirmation {
@@ -267,7 +268,7 @@ export interface Notice {
   id: string;
   kind: 'info' | 'warning' | 'error';
   text: string;
-  subject: { kind: 'profile' | 'app' | 'game'; id: string } | null;
+  subject: { kind: 'profile' | 'app'; id: string } | null;
   createdAt: string;
   /** Posts DISMISS_NOTICE with this notice's id. */
   dismiss: Action;
@@ -278,13 +279,11 @@ export interface ClientState {
   sequence: number;
   /** The title bar's summary: "1 connected · 1 reconnecting", "Not connected". */
   summary: { text: string; tone: Tone };
-  actions: { import: Action; addApp: Action; addGame: Action };
+  actions: { import: Action; addProgram: Action; addFolder: Action };
   profiles: ProfileView[];
-  apps: AppView[];
-  games: GameView[];
+  apps: AppItemView[];
   profilesEmpty: Empty | null;
   appsEmpty: Empty | null;
-  gamesEmpty: Empty | null;
   network: NetworkView;
   settings: SettingsView;
   /** The tab a first look opens on: Profiles while there is nothing to route through, Apps after. */
@@ -310,22 +309,22 @@ export interface Commands {
   COPY_ENDPOINT: { id: string };
   BEGIN_PORT_EDIT: { id: string };
   SET_PORT: { token: string; portText: string };
-  ADD_APP: Record<string, never>;
+  ADD_APP: { source: 'program' | 'folder' };
+  ADD_APP_PROGRAM: { id: string };
+  RESCAN_APP: { id: string };
+  SET_APP_PROGRAM: { id: string; programId: string; included: boolean };
   BEGIN_APP_EDIT: { id: string };
-  UPDATE_APP: { token: string; values: AppValues };
+  SAVE_APP: { token: string; values: AppEditValues };
+  BEGIN_PROGRAM_EDIT: { id: string; programId: string };
+  SAVE_PROGRAM: { token: string; values: ProgramEditValues };
+  REQUEST_REMOVE_APP: { id: string };
+  ROUTE_APP: { id: string };
   CANCEL_EDIT: { token: string };
-  LAUNCH_APP: { id: string };
-  REMOVE_APP: { id: string };
+  /** Without a programId: what the app's Launch starts. */
+  LAUNCH_APP: { id: string; programId?: string };
   REQUEST_REMOVE_PROFILE: { id: string };
-  /** Whatever the open confirmation asks: removing a profile or a game, installing or removing the driver. */
+  /** Whatever the open confirmation asks: removing a profile or an app, disconnecting, installing or removing the driver. */
   CONFIRM: { token: string };
-  ADD_GAME: Record<string, never>;
-  RESCAN_GAME: { id: string };
-  SET_GAME_PROGRAM: { id: string; path: string; included: boolean };
-  BEGIN_GAME_EDIT: { id: string };
-  SAVE_GAME: { token: string; values: GameValues };
-  REQUEST_REMOVE_GAME: { id: string };
-  RUN_GAME: { id: string };
   STOP_RUN: Record<string, never>;
   BEGIN_POLICY_EDIT: { id: string };
   SAVE_POLICY: { token: string; values: PolicyValues };

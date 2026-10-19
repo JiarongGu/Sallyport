@@ -42,7 +42,7 @@ internal static class WindowViews
     /// <summary>What is connected and what goes through it now: one channel per profile in use — its proxy and the apps
     /// routed through it on one card, as they share one login — failure first. <paramref name="proxyProblems"/>: why a
     /// channel's proxy is not listening, by profile.</summary>
-    public static NetworkView Network(IReadOnlyList<ProfileView> profiles, IReadOnlyList<GameView> games, RunFacts? run,
+    public static NetworkView Network(IReadOnlyList<ProfileView> profiles, IReadOnlyList<AppItemView> games, RunFacts? run,
         IReadOnlyList<StoredProfile> stored, DriverView routing, IReadOnlyDictionary<string, string?> proxyProblems)
     {
         var channels = new List<ChannelView>();
@@ -104,7 +104,7 @@ internal static class WindowViews
     }
 
     // The tunnel's own facts are the channel's, said once above the apps it carries.
-    private static SelectionView Selection(GameView game, RunView run) =>
+    private static SelectionView Selection(AppItemView game, RunView run) =>
         new(game.Id, game.Name, run with { Facts = [.. run.Facts.Where(f => f.Label is not ("Connected over" or "Tunnel address" or "Reconnects"))] }, game.Actions.Stop);
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn)
