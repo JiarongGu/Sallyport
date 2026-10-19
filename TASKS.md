@@ -54,9 +54,19 @@ NT Kernel's, free for personal use.
      2.4–4.3 ms. Elsewhere on the machine ~12–24 TCP packets per run were unowned, one each to :443 — final packets
      of connections in TIME_WAIT, whose rows carry PID 0 — so the router decides at a flow's first packet and keeps
      the decision. DNS a game asks for is sent by Windows' DNS Client service, not the game: it stays direct.
-  4. One program routed from its first TCP SYN and UDP datagram through the real VPN; another program direct. ← next
-     With the flow table: a decision per five-tuple at its first packet, held through a refresh (bounded), kept for
-     the flow's life; a periodic refresh rechecks UDP decisions (the reused port above).
+  4. **One program routed from its first packet through the real VPN — measured 2026-10-20** (`Sallyport.Windows.Routing`:
+     `Router`, `Nat`; `Sallyport.Driver route <profile>`: the tunnel to the JP server over UDP in this process, as the
+     client will hold it; the adapter send-only; guard 0 failed; two runs): a child process selected before it sent
+     anything, this process not. **The child's UDP to a STUN server: 5/5 answered, the far end saw the VPN's address
+     with the child's own port** (the NAT kept it, and so did the server's); **its HTTPS to an address echo: the VPN's
+     address.** This process, the same calls at the same time: the home address both ways. Each of the child's two
+     flows was decided "routed" at its first packet — the TCP flow's first is its SYN — none left directly; 13 packets
+     routed, 13 and 14 replies handed up, none refused, none held back, no late flow. STUN round trip p50 21–22 ms
+     direct, 235–281 ms through the VPN in Tokyo.
+     Decisions are made per five-tuple at the first packet, after at most one refresh (2 ms apart), and kept for the
+     flow's life; UDP decisions are rechecked every 250 ms (the reused port of gate 3).
+  Next, before Zenless can be routed whole: **selection by a game profile's executables** (image path and creation
+  time of the owning PID, so it holds from launch), the selected programs' IPv6 blocked, and mapping expiry. ← next
   5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
   6. Zenless routed whole; mid-game attach and detach; tunnel loss, driver removal, sleep.
   7. The peer-to-peer harness.
