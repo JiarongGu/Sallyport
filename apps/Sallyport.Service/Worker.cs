@@ -55,7 +55,14 @@ static class Worker
             {
                 using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
                 var interception = route.Router.Interception;
-                while (await timer.WaitForNextTickAsync(stop.Token)) Say($"beat {interception.Reads + interception.EmptyReads}");
+                var stallsSaid = 0;
+                while (await timer.WaitForNextTickAsync(stop.Token))
+                {
+                    Say($"beat {interception.Reads + interception.EmptyReads}");
+                    var stalls = route.Router.Stalls;
+                    foreach (var stall in stalls.Skip(Math.Max(0, stallsSaid - Math.Max(0, stalls.Count - 32)))) Say($"log the router stood still: {stall}");
+                    stallsSaid = stalls.Count;
+                }
             });
             // The supervisor gone (its end of our standard input closed): nothing is left to answer to.
             var orphaned = Task.Run(async () =>
@@ -87,10 +94,7 @@ static class Worker
                 await frames.SendAsync(new Attached(adapter.Name, adapter.Mtu), stop.Token);
                 Say("log client attached");
 
-                var sending = Task.Run(async () =>
-                {
-                    await foreach (var (generation, packet) in outbound.Reader.ReadAllAsync(stop.Token)) await frames.SendPacketAsync(generation, packet, stop.Token);
-                });
+                var sending = Task.Run(() => frames.PumpPacketsAsync(outbound.Reader, stop.Token));
                 var reporting = Task.Run(async () =>
                 {
                     using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -125,6 +129,7 @@ static class Worker
                 await routing;
             }
             var r = route.Router;
+            foreach (var miss in r.SynMisses) Say($"log a SYN with no owner: {miss}");
             Say($"log ended: routed {r.RoutedPackets}, handed up {r.HandedUp}, held {r.HeldWhileDown}, direct while down {r.DirectWhileDown},"
                 + $" late flows {r.LateFlows}, stale {route.Stale}, selected {selection.Selected.Count()}");
             return 0;

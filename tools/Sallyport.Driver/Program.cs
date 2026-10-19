@@ -98,6 +98,7 @@ switch (args.FirstOrDefault())
         if (go is null || go[0] != "go") return 2;
         if (go.Length > 1 && go[1] == "boundaries") await BoundariesAsync(Word(go, 2), Word(go, 3), Word(go, 4), Word(go, 5), go.Length > 6 ? long.Parse(go[6]) : 0);
         else if (go.Length > 2 && go[1] == "steady") await SteadyAsync(int.Parse(go[2]), go.Length > 3 ? go[3] : null);
+        else if (go.Length > 1 && go[1] == "cost") await CostAsync();
         else await ExerciseAsync();
         return 0;
 
@@ -656,6 +657,10 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder, str
                 Console.WriteLine($"  udp: the far end sees this machine at {home ?? "-"}");
                 go = $"go steady {Math.Max(10, seconds - 15)} {home ?? "-"}";
                 break;
+            case "cost":
+                await CostAsync();
+                go = "go cost";
+                break;
             default:
                 await ExerciseAsync();
                 go = "go";
@@ -723,6 +728,7 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder, str
         Console.WriteLine($"processes whose program could not be read: {(selection.Unreadable.Count == 0 ? "none" : string.Join(", ", selection.Unreadable))}");
     }
     foreach (var (type, code, about) in r.LastErrors) Console.WriteLine($"  ICMP type {type} code {code} handed up, about {about}");
+    foreach (var miss in r.SynMisses) Console.WriteLine($"  a SYN with no owner: {miss}");
     bool Mine(FlowDecision d) => d.Verdict is Verdict.Routed or Verdict.Blocked || (selection is null ? d.Pid == child : selection.Selected.Contains(d.Pid));
     var selected = r.Flows.Where(f => Mine(f.Value)).Select(f => (Text: $"{(f.Key.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{f.Key.LocalPort} -> {f.Key.Remote}:{f.Key.RemotePort}", f.Value))
         .Concat(r.Flows6.Where(f => Mine(f.Value)).Select(f => (Text: $"{(f.Key.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{f.Key.LocalPort} -> [{f.Key.Remote}]:{f.Key.RemotePort}", f.Value)))
@@ -813,6 +819,43 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder, str
         try { using var p = Process.GetProcessById(pid); return p.ProcessName; }
         catch (ArgumentException) { return "(exited)"; }
     }
+}
+
+// The pipe's cost (item 2, step 4): twenty STUN round trips one after another, and 20 MB downloaded over HTTPS —
+// the same from a program routed in one process and one routed through the service.
+static async Task CostAsync()
+{
+    var stun = new IPEndPoint((await Dns.GetHostAddressesAsync("stun.l.google.com", AddressFamily.InterNetwork))[0], 19302);
+    using (var udp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+    {
+        udp.Bind(new IPEndPoint(IPAddress.Any, 0));
+        var buffer = new byte[512];
+        var times = new List<double>();
+        for (var i = 0; i < 20; i++)
+        {
+            var started = Stopwatch.GetTimestamp();
+            await udp.SendToAsync(StunBinding(), stun);
+            using var give = new CancellationTokenSource(2000);
+            try
+            {
+                await udp.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), give.Token);
+                times.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            }
+            catch (OperationCanceledException) { }
+        }
+        times.Sort();
+        Console.WriteLine($"  cost: STUN {times.Count}/20 answered, round trip p50 {(times.Count > 0 ? times[times.Count / 2] : double.NaN):F1} ms,"
+            + $" min {(times.Count > 0 ? times[0] : double.NaN):F1}, max {(times.Count > 0 ? times[^1] : double.NaN):F1}");
+    }
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+    var begun = Stopwatch.GetTimestamp();
+    try
+    {
+        var bytes = await http.GetByteArrayAsync("https://speed.cloudflare.com/__down?bytes=20000000");
+        var seconds = Stopwatch.GetElapsedTime(begun).TotalSeconds;
+        Console.WriteLine($"  cost: downloaded {bytes.Length / 1e6:F1} MB in {seconds:F1} s, {bytes.Length / 1e6 / seconds:F2} MB/s");
+    }
+    catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { Console.WriteLine($"  cost: download failed ({e.GetType().Name})"); }
 }
 
 // What the far end of a UDP flow sees this machine as: one STUN binding request, its XOR-MAPPED-ADDRESS.
@@ -1158,6 +1201,11 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             Console.WriteLine($"  udp: the far end sees this machine at {home ?? "-"}");
             go = $"go steady {Math.Max(10, seconds - 15)} {home ?? "-"}";
         }
+        else if (workload == "cost")
+        {
+            await CostAsync();
+            go = "go cost";
+        }
         else
         {
             await ExerciseAsync();
@@ -1189,7 +1237,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     await run.DisposeAsync();
     await sending;
     if (final is { } f)
-        Console.WriteLine($"{Now()} route: {f.Phase}; routed {f.Routed}, handed up {f.HandedUp}, flows routed {f.RoutedFlows}, held while down {f.HeldWhileDown},"
+        Console.WriteLine($"{Now()} route: {f.Phase}; routed {f.Routed}, handed up {f.HandedUp}, flows routed {f.RoutedFlows}, unowned packets {f.Unowned}, held while down {f.HeldWhileDown},"
             + $" direct while down {f.DirectWhileDown}, late flows {f.LateFlows}, blocked {f.Blocked}, stale {f.Stale}; selected processes {f.Selected}, unreadable {f.Unreadable}");
     Console.WriteLine($"tunnel: {session.Status.State}, {session.Status.Reconnects} reconnect(s), {session.Status.BytesOut} bytes out, {session.Status.BytesIn} in");
     return 0;
@@ -1685,7 +1733,7 @@ sealed class ServicePump : IAsyncDisposable
         try
         {
             await committed;
-            await foreach (var packet in Tunnel.Packets.ReadAllAsync(_stop.Token)) await _run.FromTunnelAsync(Generation, packet);
+            await foreach (var packet in Tunnel.Packets.ReadAllAsync(_stop.Token)) _run.FromTunnel(Generation, packet);
         }
         catch (Exception e) when (e is OperationCanceledException or TunnelEnded or IOException or ObjectDisposedException) { }
     }

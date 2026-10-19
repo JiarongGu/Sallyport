@@ -58,10 +58,15 @@ public sealed class Interception : IDisposable
 
     /// <summary>Everything queued, passed on — except packets <paramref name="keep"/> answers true for, which go no
     /// further. A packet seen by <paramref name="keep"/> is valid only until it returns.</summary>
+    /// <summary>When the batch now being handed to <c>keep</c> came out of the driver (a Stopwatch timestamp): every
+    /// packet in it had been sent by then.</summary>
+    public long BatchTakenAt { get; private set; }
+
     public void Drain(Func<DriverPacket, bool>? keep = null)
     {
         while (_driver.Read(Adapter, _batch) is var count && count > 0)
         {
+            BatchTakenAt = System.Diagnostics.Stopwatch.GetTimestamp();
             Reads++;
             MaxBatch = Math.Max(MaxBatch, count);
             int ups = 0, downs = 0;

@@ -18,8 +18,9 @@ sealed class Supervisor(Log log)
     private static readonly IPEndPoint[] Probes = [new(IPAddress.Parse("1.1.1.1"), 443), new(IPAddress.Parse("8.8.8.8"), 443)];
     /// <summary>A worker silent this long, or whose router has not drained this long, is taken to have hung: while it
     /// hangs, everything Windows sends on its adapter waits in the driver, the whole machine's traffic included
-    /// (measured, step 3) — so this is well inside the guard's 3 s.</summary>
-    private static readonly TimeSpan WorkerSilence = TimeSpan.FromMilliseconds(1500), RouterStill = TimeSpan.FromSeconds(1);
+    /// (measured, step 3) — so this is inside the guard's 3 s. 1 s ended a run on a machine merely starved for a moment
+    /// (step 4: a worker that took 5 s to start, then stood still just over 1 s).</summary>
+    private static readonly TimeSpan WorkerSilence = TimeSpan.FromSeconds(2), RouterStill = TimeSpan.FromSeconds(2);
     /// <summary>The direct path dead this long, with a run intercepting, ends the run (the tool's guard, measured).</summary>
     private static readonly TimeSpan DeadPath = TimeSpan.FromSeconds(3);
 

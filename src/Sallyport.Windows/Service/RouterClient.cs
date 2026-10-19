@@ -139,7 +139,17 @@ public sealed class RouterRun : IAsyncDisposable
         _frames = new FrameStream(pipe);
         Attached = attached;
         _reading = ReadAsync();
+        _writing = Task.Run(async () =>
+        {
+            try { await _frames.PumpPacketsAsync(_fromTunnel.Reader, _stop.Token); }
+            catch (Exception e) when (e is OperationCanceledException or IOException or ObjectDisposedException) { }
+        });
     }
+
+    // What the tunnels returned, on its way to the worker; lossy at its bound like every queue on the packet path.
+    private readonly Channel<(int, byte[])> _fromTunnel =
+        Channel.CreateBounded<(int, byte[])>(new BoundedChannelOptions(4096) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly Task _writing;
 
     public string RunId { get; }
     public Attached Attached { get; }
@@ -183,8 +193,8 @@ public sealed class RouterRun : IAsyncDisposable
 
     public ValueTask RetireAsync(int generation) => _frames.SendAsync(new RetireGeneration(generation));
 
-    /// <summary>A packet a generation's tunnel returned.</summary>
-    public ValueTask FromTunnelAsync(int generation, byte[] packet) => _frames.SendPacketAsync(generation, packet);
+    /// <summary>A packet a generation's tunnel returned: queued for the worker, never waited on.</summary>
+    public void FromTunnel(int generation, byte[] packet) => _fromTunnel.Writer.TryWrite((generation, packet));
 
     private async Task ReadAsync()
     {
@@ -208,8 +218,10 @@ public sealed class RouterRun : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
         await _stop.CancelAsync();
+        _fromTunnel.Writer.TryComplete();
         await _frames.DisposeAsync();
         await _reading;
+        await _writing;
         _stop.Dispose();
     }
 

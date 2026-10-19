@@ -47,6 +47,27 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public async Task Packets_written_in_batches_read_back_one_frame_each_in_order()
+    {
+        var queue = System.Threading.Channels.Channel.CreateUnbounded<(int, byte[])>();
+        var packets = Enumerable.Range(0, 500).Select(i => (Generation: i % 3 + 1, Packet: Enumerable.Repeat((byte)i, 40 + i * 3 % 1460).ToArray())).ToList();
+        foreach (var p in packets) queue.Writer.TryWrite(p);
+        queue.Writer.Complete();
+        var buffer = new MemoryStream();
+
+        await new FrameStream(buffer).PumpPacketsAsync(queue.Reader, CancellationToken.None);
+
+        var reader = new FrameStream(new MemoryStream(buffer.ToArray()));
+        foreach (var (generation, packet) in packets)
+        {
+            var frame = (await reader.ReadAsync(CancellationToken.None))!.Value;
+            Assert.Equal(generation, frame.Generation);
+            Assert.Equal(packet, frame.Packet);
+        }
+        Assert.Null(await reader.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task The_other_end_closing_between_frames_is_the_end_and_inside_one_is_an_error()
     {
         var empty = new FrameStream(new MemoryStream());

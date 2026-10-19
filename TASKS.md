@@ -166,10 +166,26 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
    - **The supervisor killed:** the job object took the worker; the adapter given back in 0.07 s; the service
      running again 1.3 s later. **The client frozen:** its lease ran out and the run ended in 2.93 s.
    - In every failure the selected child went from the VPN's address to its own: routing fails open.
-4. **The packet pipe:** gate 4's selected workload through the service beside a direct control, and under load →
-   exits and replies right, the pipe's cost measured, the tunnel's own socket direct. ← next
+4. **The packet pipe — measured 2026-10-20** (`Sallyport.Driver service-route --workload cost`: a selected copy of
+   the tool times twenty STUN round trips and a 20 MB HTTPS download, the same as `route` in one process; guard 0
+   failed over the last runs):
+   - **Round trips: the pipe adds nothing seen** — STUN p50 193–208 ms through the service, 196–206 ms in one process.
+   - **Downloads:** 5.4–6.6 MB/s in one process; through the service 2.4–4.6 MB/s with a pipe write per packet, then
+     3.0–6.0 MB/s once each side wrote what it had queued in one write (`FrameStream.PumpPacketsAsync`).
+   - **Found: a TCP connection's SYN left unowned, its whole connection direct, in 2 runs of 12** — the selected
+     child's download among them. A miss read the owner tables again only if they were 2 ms old; the guard's two
+     probes, a SYN each at the same moment, used the reading up (logged: "read 0.0 ms before, not read again", no row
+     on the port). Now a miss reads them again unless they were read after the packet's batch left the driver — such a
+     read holds every socket that sent in it: **14 runs since, 0 unowned packets** of any process on the machine,
+     0 SYN misses. Gate 3's harness sent no SYNs in pairs.
+   - **One stall:** on a machine starved for a moment (the worker 5.3 s to start, the direct path slow), the router
+     stood still past 1 s, the machine's traffic held 2–3 s, and the supervisor ended the run. Its threshold is 2 s
+     now, inside the guard's 3, and the worker names each phase of the router's loop that takes over 200 ms. None
+     since, in 6 runs.
+   - The tunnel's own socket stayed direct throughout: the client is never a selection, and the tunnel never carried
+     itself.
 5. **The router across generations, through the service:** step 2's measurements again with the pipe between the
-   tunnel and the router (in one process they hold, above).
+   tunnel and the router (in one process they hold, above). ← next
 6. **Adapters:** Wi-Fi and Ethernet both up, a handover, sleep, the driver removed → what the packets did, every gap
    said, the machine back on its own.
 7. **Zenless through the service:** Run from launch, attach and detach, a real drop under each policy, sleep → the

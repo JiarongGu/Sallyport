@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Channels;
 using Sallyport.Windows.Routing;
 
 namespace Sallyport.Windows.Service;
@@ -126,6 +127,38 @@ public sealed class FrameStream(Stream stream) : IAsyncDisposable
         var head = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(head, generation);
         return WriteAsync(RouterProtocol.PacketFrame, head, packet, ct);
+    }
+
+    /// <summary>Writes every packet <paramref name="reader"/> holds now, as many frames in one write, waiting only when
+    /// it holds none: a pipe write per packet halved a download through the service (measured, item 2 step 4).</summary>
+    public async Task PumpPacketsAsync(ChannelReader<(int Generation, byte[] Packet)> reader, CancellationToken ct)
+    {
+        var buffer = new byte[256 * 1024];
+        while (await reader.WaitToReadAsync(ct))
+        {
+            var used = 0;
+            while (used + 9 + 1600 <= buffer.Length && reader.TryRead(out var item))
+            {
+                if (used + 9 + item.Packet.Length > buffer.Length)
+                {
+                    await FlushAsync(buffer, used, ct);
+                    used = 0;
+                }
+                BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(used), 1 + 4 + item.Packet.Length);
+                buffer[used + 4] = RouterProtocol.PacketFrame;
+                BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(used + 5), item.Generation);
+                item.Packet.CopyTo(buffer.AsSpan(used + 9));
+                used += 9 + item.Packet.Length;
+            }
+            if (used > 0) await FlushAsync(buffer, used, ct);
+        }
+    }
+
+    private async Task FlushAsync(byte[] buffer, int used, CancellationToken ct)
+    {
+        await _writing.WaitAsync(ct);
+        try { await stream.WriteAsync(buffer.AsMemory(0, used), ct); }
+        finally { _writing.Release(); }
     }
 
     private async ValueTask WriteAsync(byte kind, ReadOnlyMemory<byte> first, ReadOnlyMemory<byte> second, CancellationToken ct)

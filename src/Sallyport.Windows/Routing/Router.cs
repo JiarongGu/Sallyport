@@ -45,8 +45,6 @@ public sealed class Router : IDisposable
     /// minutes, as home routers commonly keep a UDP mapping — a game keeps its own alive more often than that.</summary>
     public static readonly TimeSpan Idle = TimeSpan.FromMinutes(2);
 
-    // A miss refreshes the tables, but not more than once per this: a refresh costs 1-4 ms (measured, gate 3).
-    private static readonly TimeSpan RefreshGap = TimeSpan.FromMilliseconds(2);
     private static readonly TimeSpan SweepEvery = TimeSpan.FromSeconds(10);
     // A datagram's pieces leave within microseconds of each other, and through the tunnel within milliseconds.
     private const long PieceLifeMs = 30_000, AheadLifeMs = 2_000;
@@ -169,6 +167,11 @@ public sealed class Router : IDisposable
     public IReadOnlyDictionary<(byte Type, byte Code), long> Errors { get { lock (_injectLock) return new Dictionary<(byte, byte), long>(_errors); } }
     /// <summary>The last ICMP errors handed up: their type and code, and the flow each was about.</summary>
     public IReadOnlyList<(byte Type, byte Code, Flow About)> LastErrors { get { lock (_injectLock) return [.. _lastErrors]; } }
+    /// <summary>TCP connections whose SYN found no owner — decided unowned, so direct, for their whole life — and what
+    /// the owner table held then: the last 16, to say why (rule 6: coverage that failed is named).</summary>
+    public IReadOnlyList<string> SynMisses { get { lock (_synMisses) return [.. _synMisses]; } }
+    private readonly Queue<string> _synMisses = new();
+
     /// <summary>The largest packet routed, before any split.</summary>
     public int LargestRouted { get; private set; }
     public long ExpiredFlows { get; private set; }
@@ -197,13 +200,37 @@ public sealed class Router : IDisposable
         {
             while (!ct.IsCancellationRequested)
             {
+                var started = Stopwatch.GetTimestamp();
                 _interception.Wait(50);
+                var waited = Stopwatch.GetTimestamp();
                 if (Stopwatch.GetElapsedTime(_lastRecheck) >= Recheck) RecheckUdp();
+                Timed("rechecking UDP", waited);
+                var at = Stopwatch.GetTimestamp();
                 if (Stopwatch.GetElapsedTime(_lastSweep) >= SweepEvery) Sweep();
+                Timed($"sweeping {_flows.Count} flows", at);
+                at = Stopwatch.GetTimestamp();
                 _interception.Drain(Decide);
+                Timed("draining", at);
+                Timed("waiting for the driver", started, waited);
             }
         }
         finally { _interception.Stop(); }
+    }
+
+    /// <summary>Moments the router's loop stood still longer than 200 ms, and in what: while it stands, everything Windows
+    /// sends on the adapter waits in the driver (measured, item 2 step 4), so a stall is named. The last 32.</summary>
+    public IReadOnlyList<string> Stalls { get { lock (_stalls) return [.. _stalls]; } }
+    private readonly Queue<string> _stalls = new();
+
+    private void Timed(string what, long since, long? until = null)
+    {
+        var took = Stopwatch.GetElapsedTime(since, until ?? Stopwatch.GetTimestamp());
+        if (took < TimeSpan.FromMilliseconds(200)) return;
+        lock (_stalls)
+        {
+            _stalls.Enqueue($"{DateTime.Now:HH:mm:ss.fff} {what}: {took.TotalMilliseconds:F0} ms");
+            if (_stalls.Count > 32) _stalls.Dequeue();
+        }
     }
 
     /// <summary>A packet the tunnel returned: turned back and handed up, or refused and counted.</summary>
@@ -270,9 +297,9 @@ public sealed class Router : IDisposable
 
     private bool DecideFlow(ReadOnlySpan<byte> frame, in Flow flow)
     {
-        var decision = Decision(flow);
         var link = LinkLength(frame);
         var ip = frame[link..];
+        var decision = Decision(flow, ip);
         if ((ip[6] & 0x20) != 0) _pieces[PieceKey(ip)] = (decision, Environment.TickCount64);
         switch (decision.Verdict)
         {
@@ -382,11 +409,11 @@ public sealed class Router : IDisposable
         }
     }
 
-    private FlowDecision Decision(in Flow flow)
+    private FlowDecision Decision(in Flow flow, ReadOnlySpan<byte> ip)
     {
         if (!_flows.TryGetValue(flow, out var decision))
         {
-            decision = Classify(flow);
+            decision = Classify(flow, flow.Protocol == Flow.Tcp && (ip[(ip[0] & 0x0F) * 4 + 13] & 0x12) == 0x02);
             _flows[flow] = decision;
             if (decision.Verdict == Verdict.Routed)
             {
@@ -437,21 +464,31 @@ public sealed class Router : IDisposable
         if (HandUp(link, ip[0] >> 4 == 6 ? Replies.Reset6(ip, tcpAt) : Replies.Reset(ip))) ResetsSent++;
     }
 
-    private FlowDecision Classify(in Flow flow)
+    private FlowDecision Classify(in Flow flow, bool syn = false)
     {
         var answer = _owners.Owner(flow, out var pid);
-        if (answer == Ownership.Unowned && Stopwatch.GetElapsedTime(_lastRefresh) >= RefreshGap)
+        var since = Stopwatch.GetElapsedTime(_lastRefresh);
+        var refreshed = false;
+        if (answer == Ownership.Unowned && Stale())
         {
             Refresh();
+            refreshed = true;
             answer = _owners.Owner(flow, out pid);
         }
+        if (answer != Ownership.Owned && syn)
+            lock (_synMisses)
+            {
+                _synMisses.Enqueue($"{flow}: {answer}; the table read {since.TotalMilliseconds:F1} ms before{(refreshed ? ", read again" : ", not read again")};"
+                    + $" its rows on port {flow.LocalPort}: {string.Join("; ", _owners.TcpRowsOn(flow.LocalPort).DefaultIfEmpty("none"))}");
+                if (_synMisses.Count > 16) _synMisses.Dequeue();
+            }
         return answer == Ownership.Owned ? Selected(pid, flow.RemoteAddress) : new(Verdict.Unowned, 0);
     }
 
     private FlowDecision Classify(in Flow6 flow)
     {
         var answer = _owners.Owner(flow, out var pid);
-        if (answer == Ownership.Unowned && Stopwatch.GetElapsedTime(_lastRefresh) >= RefreshGap)
+        if (answer == Ownership.Unowned && Stale())
         {
             Refresh();
             answer = _owners.Owner(flow, out pid);
@@ -599,6 +636,11 @@ public sealed class Router : IDisposable
 
     private static (uint, uint, byte, ushort) PieceKey(ReadOnlySpan<byte> ip) =>
         (BinaryPrimitives.ReadUInt32LittleEndian(ip[12..]), BinaryPrimitives.ReadUInt32LittleEndian(ip[16..]), ip[9], BinaryPrimitives.ReadUInt16BigEndian(ip[4..]));
+
+    // A miss reads the tables again unless they were read after this packet's batch left the driver: such a read holds
+    // every socket that sent a packet in it. One read a batch at most, then, and none missed for being a moment old —
+    // a gap of 2 ms between reads instead left SYNs unowned whenever another miss had just read (measured, step 4).
+    private bool Stale() => _lastRefresh < _interception.BatchTakenAt;
 
     private void Refresh()
     {
