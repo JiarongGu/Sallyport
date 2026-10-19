@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sallyport's per-app VPN (D12): two applications. The bridge, a full-trust console run through an execution alias so
+     it carries this package's identity: it manages the plug-in's VPN profile, runs the OpenVPN tunnel and guards the
+     direct path. The plug-in, a vpnClient background task whose class is served in-process by C#/WinRT's host. -->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+         xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap5 desktop4 rescap">
+  <Identity Name="Sallyport.Vpn" Publisher="CN=Sallyport Test" Version="0.1.2.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Sallyport VPN</DisplayName>
+    <PublisherDisplayName>Sallyport</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="Bridge" Executable="Bridge\Sallyport.Vpn.Bridge.exe" EntryPoint="Windows.FullTrustApplication"
+                 desktop4:Subsystem="console" desktop4:SupportsMultipleInstances="true">
+      <uap:VisualElements DisplayName="Sallyport VPN" Description="Sallyport VPN bridge" BackgroundColor="transparent"
+                          Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" AppListEntry="none" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias" Executable="Bridge\Sallyport.Vpn.Bridge.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="sallyport-vpn.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+    <!-- A vpnClient task needs a custom host (Executable) and a class (EntryPoint): the host is our executable, started
+         by the app model like a UWP app; the class is the plug-in component's, served in-process by C#/WinRT's host. -->
+    <Application Id="Plugin" Executable="Plugin\Sallyport.Vpn.PluginHost.exe" EntryPoint="Sallyport.Vpn.PluginHost.App">
+      <uap:VisualElements DisplayName="Sallyport VPN plug-in" Description="Sallyport VPN plug-in" BackgroundColor="transparent"
+                          Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" AppListEntry="none" />
+      <Extensions>
+        <Extension Category="windows.backgroundTasks" Executable="Plugin\Sallyport.Vpn.PluginHost.exe" EntryPoint="Sallyport.Vpn.Plugin.VpnBackgroundTask">
+          <BackgroundTasks>
+            <uap:Task Type="vpnClient" />
+          </BackgroundTasks>
+        </Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <Capability Name="internetClientServer" />
+    <Capability Name="privateNetworkClientServer" />
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="networkingVpnProvider" />
+  </Capabilities>
+  <Extensions>
+    <Extension Category="windows.activatableClass.inProcessServer">
+      <InProcessServer>
+        <Path>Plugin\WinRT.Host.dll</Path>
+        <ActivatableClass ActivatableClassId="Sallyport.Vpn.Plugin.VpnBackgroundTask" ThreadingModel="both" />
+      </InProcessServer>
+    </Extension>
+  </Extensions>
+</Package>

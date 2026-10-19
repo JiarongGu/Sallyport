@@ -37,13 +37,14 @@ src/
 apps/
   Sallyport.Host/            Kobo's headless provider: serve|stop one profile on 127.0.0.1:1080, a status file
   Sallyport.Client/          the tray and window (Shenora 0.21.1, WebView2, frameless), unelevated
+  Sallyport.Vpn/             per-app routing for games: an MSIX holding the VPN plug-in (a loopback relay) and the
+                             bridge (tunnel, relay, guard), test-signed for now (D16)
 tools/
   Sallyport.Probe/           live measurements against a real server
 tests/
 ```
 
-`Sallyport.Windows` (a package that may carry a driver) does not exist: nothing needs one until game routing is
-decided.
+`Sallyport.Windows` (a package that may carry a driver) does not exist: game routing needs no driver of ours (D16).
 
 ## The client
 
@@ -69,22 +70,27 @@ One process per signed-in user (a second start hands its arguments to the first 
 **Proxy mode — what exists.** Applications that honour a proxy, through the SOCKS5 inbound and the userspace TCP. TCP
 only: the proxy implements CONNECT, not UDP ASSOCIATE.
 
-**Packet mode — open (D12, D13).** Games ignore proxies. Measured so far: WinDivert is blocked by Defender on download
-(D10); Windows' per-app VPN runs a .NET 10 plug-in and confines a split route to one program, but a default route takes
-the whole machine, and a program forced into the VPN cannot reach what the VPN does not route. The shapes left:
+**Packet mode — for games (D12, D16).** Games ignore proxies. Windows' own per-app VPN carries them: the VPN plug-in
+is given the listed programs' IP packets for the listed prefixes, and relays each over loopback to the bridge, which
+runs the OpenVPN tunnel and relays the replies back. TCP and UDP alike, measured. The plug-in holds no key; the bridge,
+a full-trust process in the same package, holds the tunnel and guards the direct path (D13).
 
-1. **Per-game server prefixes** (known, or learned from the game's own connections) as split routes with an app filter
-   — what the measurements allow.
-2. **Wintun** (WireGuard's signed adapter, redistributable with software that uses only its API) and routing by
-   destination.
-3. **A driver of our own**, signed — the cost of signing is the obstacle.
+```
+game.exe ──(app filter: its path; routes: its prefixes)──▶ Windows' VPN interface ──▶ plug-in (AppContainer)
+   ▲                                                                                     │ one datagram per packet,
+   └──────────────────────── replies, the same way back ◀──── bridge ◀── 127.0.0.1 ◀─────┘ token-checked
+                                                                 │
+                                                                 └── Sallyport tunnel ── OpenVPN server
+```
 
-Whichever is chosen runs under D13's guard: nothing that can black-hole the machine is connected without a process
-outside the VPN that probes the direct path and disconnects when it fails.
+The routes must be the game's own prefixes: a default route takes the whole machine whatever the app filter says
+(D12), and while a prefix is routed only the listed programs reach it. So what is open is which prefixes a game needs
+(known, or learned from its own connections), and the bridge's place in the client (`TASKS.md`).
 
 ## Order of work
 
 1. ~~Restructure~~, ~~runtime~~ (done).
 2. **Client, proxy mode** — profiles, connections, apps, tray; measured against the real server.
-3. **Decide game routing** among the three shapes above; measure it under the guard.
-4. Phase 4 (`TASKS.md`), then release.
+3. ~~Decide game routing~~: the per-app VPN with the plug-in as a loopback relay, measured (D16).
+4. **A game's prefixes, and the bridge in the client**; a real game measured.
+5. Phase 4 (`TASKS.md`), then release.

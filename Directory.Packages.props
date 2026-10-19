@@ -1,8 +1,12 @@
 <Project>
   <!-- The library itself takes nothing beyond the base library (CLAUDE.md, rule 4). The client takes Shenora by a
-       decision (D9), at a pinned release from nuget.org; the rest are the tests'. -->
+       decision (D9), the VPN plug-in C#/WinRT (D12), at a pinned release from nuget.org; the rest are the tests'. -->
   <ItemGroup>
     <PackageVersion Include="Shenora.Windows" Version="0.21.1" />
+    <!-- The VPN plug-in's component is a WinRT class Windows activates (D12); C#/WinRT authors it. MIT. -->
+    <PackageVersion Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />
+    <!-- Windows' own metadata, which C#/WinRT reads at build time to author the component; nothing of it ships. -->
+    <PackageVersion Include="Microsoft.Windows.SDK.Contracts" Version="10.0.22621.3233" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />

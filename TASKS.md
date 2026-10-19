@@ -25,11 +25,17 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
 
 ## The client and game routing — `docs/design/architecture.md`, `docs/design/client-ui.md`
 The client works in proxy mode (D14, D15). Open:
-- [ ] **Decide how a game's destinations reach the VPN (D12).** Measured: the plug-in runs, and an app filter (with an
-      explicit protocol) confines a split route to the listed program — but a default route takes the whole machine,
-      and a forced program cannot reach what the VPN does not route. Per-game server prefixes, known or learned from the
-      game's own connections, is the shape the measurements allow. Then the real tunnel inside the plug-in: the
-      program reads the server's address while another reads AU. Every run under the guard (D13).
+- [ ] **A game's prefixes (D16).** Routing works for the prefixes it is given; a game's are not known yet. Learn them from
+      the game's own connections (its process's TCP and UDP tables while it runs direct), keep them per game, let the
+      person add known ones. Then route a real game, measured: its servers see the tunnel's address.
+- [ ] **The bridge in the client.** Today `sallyport-vpn route` is a console. The client should drive it: games as an
+      app kind, the guard in the client's process (D13), reconnects through `TunnelSession` rather than one `Tunnel`.
+      Managing the VPN profile needs the package's identity, so either the client joins the package or it drives the
+      bridge.
+- [ ] **Release the package**: a code-signing certificate others trust, the loopback exemption made at install
+      (administrator, once), an installer. Until then the development set-up stays on this machine: the test
+      certificate in LocalMachine\TrustedPeople, the exemption, the package (`apps/Sallyport.Vpn/README.md` says how to
+      remove each).
 - [ ] **What the client's measurement did not reach (2026-10-19).** The file dialogs past opening and cancelling: this
       machine's dialog shows UI Automation no File name box, and typed keys arrived mangled, so the app shortcuts were
       seeded into the settings instead. Firefox and Electron launches. The dark theme of the new window (the machine

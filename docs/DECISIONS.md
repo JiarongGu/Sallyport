@@ -159,7 +159,7 @@ P/Invoke, no package) — not DPAPI's machine scope, which any process on the ma
 sees a profile's name, remotes' transports and status — never its key material. The store itself is platform-neutral
 (`ProfileStore` behind `IProfileProtector`); the DPAPI protector lives in `Sallyport.Windows`.
 
-## D12 — Games are routed by Windows' own per-app VPN: Sallyport as a VPN plug-in (2026-10-19; to be measured)
+## D12 — Games are routed by Windows' own per-app VPN: Sallyport as a VPN plug-in (2026-10-19; measured, see D16)
 
 WinDivert is out (D10: Defender blocks it on download). Chosen by the owner over a driver of our own (C, and Microsoft's
 attestation signature behind an EV certificate) and over Wintun (it routes by destination, not by process): Windows'
@@ -257,4 +257,38 @@ dark, which the client reads from the registry because Shenora.Windows does not 
 No DevTools port on the packaged page. Shenora drops remote-debugging switches outside development since 2026-09-29
 (its `6aed4927`): a port there hands any local process the page's IPC, which for this client is connect and launch.
 Tests drive the development build instead — the same host and page, the page served by Vite.
+
+## D16 — A game's packets reach the tunnel through the plug-in as a loopback relay (2026-10-19; measured)
+
+D12's last open step, measured, and its shape decided. The plug-in carries no tunnel: it relays each IP packet as one
+datagram over loopback to the bridge (`apps/Sallyport.Vpn`), a full-trust process in the same package, run through its
+execution alias. The bridge runs the OpenVPN tunnel (the library, unchanged), relays the replies back, manages the VPN
+profile and guards the direct path (D13). So no key or profile enters the plug-in's AppContainer, and the tunnel lives
+in a process the platform does not suspend between events. Chosen over the tunnel inside the plug-in, which would have
+needed the profile in the AppContainer and a tunnel that keeps its timers in a process that is frozen between packets.
+
+What it took, each measured:
+- **A loopback exemption for the package** (`CheckNetIsolation LoopbackExempt -a -n=<package family>`, administrator,
+  once). Without it the plug-in started its channel and sent, and the bridge received nothing (4 packets sent, 0
+  received, not even its hello). With it, all of it arrived.
+- **Decapsulate copies each datagram into a buffer from `GetVpnReceivePacketBuffer`.** Handing back the transport's own
+  receive buffer ended the host process each time: the platform started the plug-in four times in 60 s, the bridge
+  relayed 12 replies, and none reached the program.
+- **The relay answers only the endpoint that first sends "SPRT" and the run's token**, which the bridge puts in the
+  profile's configuration, so no other socket on the machine can join it.
+- **The guard has to survive the platform.** A profile's `ConnectionStatus` threw `E_HANDLE` while it was being torn
+  down and killed the first guard, after it had disconnected but before it removed the profile. Status reads are now
+  three-outcome (rule 6), the verdict is printed before teardown, and the route is torn down in a `finally`.
+
+Measured 2026-10-19 with Kobo's JP profile, the package test-signed, and only /32 routes:
+- **TCP.** curl copied into a folder of its own and listed, with ipinfo.io's address routed: the listed curl read JP
+  Tokyo, five requests of five, TCP connect 0.22–0.30 s. The same program to an unrouted host read AU. An unlisted
+  program to an unrouted host read AU. An unlisted program to the routed address was refused, as D12 found.
+- **UDP.** nslookup copied and listed, with ns1.google.com routed: the source Google's server saw for its TXT query was
+  the tunnel's exit address, the same one ipinfo saw through the listed curl.
+- **Both legs balanced:** 61 packets out and 61 into the tunnel, 59 back and 59 delivered, in one run. One plug-in process
+  per run. Every run was torn down by the guard with the direct path intact.
+
+Open: which prefixes a game needs (known, or learned from its own connections); the bridge folded into the client; a
+release certificate, and the exemption made at install.
 
