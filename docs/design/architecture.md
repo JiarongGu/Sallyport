@@ -86,7 +86,7 @@ profile directory, a Firefox profile, proxy environment variables for CLI and .N
 | WinDivert's driver loads on this machine (Windows 11, vulnerable-driver blocklist on, memory integrity off) | open a handle; Event Viewer 3023/3033 if refused |
 | injected inbound replies are accepted by the stack and the firewall | one process's TCP and UDP through the NAT: its address reads the server's while another process reads AU |
 | the first packet of a flow is attributed before it leaves | count packets sent direct that belonged to a routed process |
-| anti-cheat refuses a packet driver | the owner's actual games, one by one — unknowable until tried |
+| a real game's traffic is routed whole — its UDP, its pings, its several flows | a game session: its servers see the tunnel's address, the rest of the machine AU |
 | cost of diverting outbound UDP | a game session's CPU and added latency |
 
 WinDivert is LGPLv3 or GPLv2 at the user's choice: an MIT application may load its DLL dynamically and ship the signed
@@ -105,4 +105,7 @@ DLL and driver unmodified with the licence text. Its use is a decision (D-entry)
 
 - Decided: the profile store moves with the service — imported copies held under `%ProgramData%\Sallyport\profiles`,
   SYSTEM and Administrators only, encrypted at rest with DPAPI (D11).
-- Open: which games to measure first — anti-cheat is decided per game.
+- Not a risk: anti-cheat. Nothing touches a game's process — the driver sits in the network stack, as a game VPN's does
+  (WTFast and the like) — so there is nothing to bypass. A game that refused to start beside a listed driver would be a
+  compatibility finding; none is known for WinDivert.
+- Open: which game to measure — for its traffic, not its anti-cheat.

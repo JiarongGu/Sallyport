@@ -125,10 +125,14 @@ callout driver (Mullvad's way) needs Microsoft's attestation signing behind an E
 out; injecting a hook into the game is what anti-cheat exists to refuse. WinDivert is a signed driver that diverts only
 what a filter names, and an OpenVPN tunnel already carries IP packets: a routed process's packets are NAT'd into the
 tunnel and its replies injected back, TCP, UDP and ICMP alike, with no second TCP stack. Costs, accepted by the owner:
-administrator rights (so the runtime moves into a service), a native dependency (LGPLv3 or GPLv2 at our choice — loaded
-dynamically, shipped unmodified with its licence), and anti-cheat that may refuse any packet driver, which only a game
-can answer. The spike (TASKS) measures it before anything is built on it; if the driver will not load here or the
-owner's games refuse it, this is decided again.
+administrator rights (so the runtime moves into a service) and a native dependency (LGPLv3 or GPLv2 at our choice —
+loaded dynamically, shipped unmodified with its licence).
+
+Nothing here works against a game's anti-cheat: as with game VPNs such as WTFast, the driver sits in the network stack,
+outside the game's process, and the game is never touched. The owner's point, and the right frame. What remains is
+compatibility, not bypass — a few anti-cheats refuse to start beside particular drivers they have listed (WinRing0 is
+the known case; none was found for WinDivert) — and a real game is measured for its traffic, not its anti-cheat. The
+spike (TASKS) measures the driver before anything is built on it; if it will not load here, this is decided again.
 
 ## D11 — Imported profiles are held by the service, encrypted (2026-10-19)
 
