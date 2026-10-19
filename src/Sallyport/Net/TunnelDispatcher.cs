@@ -24,7 +24,7 @@ public interface ITunnelRoute : IAsyncDisposable
 }
 
 /// <summary>Where a dispatcher sent what came out of its tunnel.</summary>
-public readonly record struct DispatchCounters(long ToProxy, long ToRouter, long Unclaimed, long NotForUs);
+public readonly record struct DispatchCounters(long ToProxy, long ToRouter, long Unclaimed, long NotForUs, long ToEcho);
 
 /// <summary>
 /// The one reader of a tunnel generation's packets (docs/design/window.md): each goes to the proxy's network or to the
@@ -42,7 +42,7 @@ public sealed class TunnelDispatcher : IAsyncDisposable
     private readonly Task _reading;
     private readonly uint _address;
     private ITunnelRoute? _route;
-    private long _toProxy, _toRouter, _unclaimed, _notForUs;
+    private long _toProxy, _toRouter, _unclaimed, _notForUs, _toEcho;
 
     public TunnelDispatcher(Tunnel tunnel, int generation)
     {
@@ -53,6 +53,7 @@ public sealed class TunnelDispatcher : IAsyncDisposable
             : throw new InvalidOperationException("the server pushed no IPv4 address for this client");
         _address = BinaryPrimitives.ReadUInt32BigEndian(address.GetAddressBytes());
         Network = new TunnelNetwork(tunnel, _proxy.Reader);
+        Echo = new TunnelEcho(address, packet => tunnel.SendAsync(packet));
         _reading = Task.Run(() => ReadAsync(_stop.Token));
     }
 
@@ -62,8 +63,11 @@ public sealed class TunnelDispatcher : IAsyncDisposable
     /// <summary>The proxy's userspace TCP and DNS, fed from here.</summary>
     public TunnelNetwork Network { get; }
 
+    /// <summary>The channel's own echoes, for its latency: their answers are claimed here before any other side sees them.</summary>
+    public TunnelEcho Echo { get; }
+
     public DispatchCounters Counters => new(Interlocked.Read(ref _toProxy), Interlocked.Read(ref _toRouter), Interlocked.Read(ref _unclaimed),
-        Interlocked.Read(ref _notForUs));
+        Interlocked.Read(ref _notForUs), Interlocked.Read(ref _toEcho));
 
     /// <summary>Gives the router side this generation's packets from now on. One route at a time; it is disposed with
     /// the generation unless detached first.</summary>
@@ -88,6 +92,11 @@ public sealed class TunnelDispatcher : IAsyncDisposable
 
     private void Dispatch(byte[] packet)
     {
+        if (Echo.Claim(packet))
+        {
+            Interlocked.Increment(ref _toEcho);
+            return;
+        }
         switch (Classify(packet, _address))
         {
             case Destination.Proxy:

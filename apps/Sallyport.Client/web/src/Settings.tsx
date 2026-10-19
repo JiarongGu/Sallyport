@@ -1,11 +1,11 @@
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { ClientState, DriverView } from './contract';
 import { post } from './commands';
 import { ActionButton, Disclosure, Facts, PageHeader, StatusPill } from './ui/shared';
 
 /** How Sallyport is set up on this computer, and how to use it. */
-export function Settings({ state, expanded, toggle }: {
-  state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void;
+export function Settings({ state, expanded, toggle, editorForm }: {
+  state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
   const settings = state.settings;
   const startupId = useId();
@@ -25,6 +25,18 @@ export function Settings({ state, expanded, toggle }: {
           onChange={() => post('SET_START_WITH_WINDOWS', { enabled: !settings.startup.on })} />
         <span><span>{settings.startup.label}</span><span className="secondary metadata">{settings.startup.text}</span></span>
       </label>
+    </section>
+
+    <section className="settings-group" aria-label="Defaults for new apps">
+      <h2>Defaults for new apps</h2>
+      <p className="secondary metadata">What an app you add starts with. Apps added before keep their own.</p>
+      <div className="card">
+        <div className="row-head">
+          <Facts facts={settings.defaults.facts} />
+          <ActionButton action={settings.defaults.edit} focusKey="defaults" onClick={() => post('BEGIN_DEFAULTS_EDIT', {})} />
+        </div>
+        {editorForm}
+      </div>
     </section>
 
     <section className="settings-group" aria-label="How to use">

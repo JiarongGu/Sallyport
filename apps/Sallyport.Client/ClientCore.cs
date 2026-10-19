@@ -231,6 +231,15 @@ internal sealed class ClientCore
         }
     }
 
+    public async Task CheckLatencyAsync(string id, CancellationToken ct)
+    {
+        Profile(id);
+        try { await _connections.CheckLatencyAsync(id, ct); }
+        // A check that could not be made is said as that, and changes nothing about the channel (rule 6).
+        catch (Exception e) when (e is System.Net.NetworkInformation.PingException or TunnelEnded or ObjectDisposedException)
+        { Notify(NoticeKind.Warning, "Latency could not be checked: the channel changed while it was being measured.", new("profile", id)); }
+    }
+
     public void CopyEndpoint(string id)
     {
         var endpoint = ClientView.Endpoint(_settings.PortOf(Profile(id).Id));
@@ -362,8 +371,7 @@ internal sealed class ClientCore
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
         if (name.Length == 0) name = "app";
         if (name.Length > LongestName) name = name[..LongestName];
-        var profile = _store.List().FirstOrDefault(p => p.Unsupported is null);
-        try { item = _items.CreateFromFolder(name, folder, profile?.Id); }
+        try { item = WithDefaults(_items.CreateFromFolder(name, folder, DefaultProfile()?.Id)); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new ShenoraException("APP_FOLDER", "folder", name, $"{name} could not be read: {e.GetType().Name}."); }
         var included = item.Programs.Count(p => p.Included);
@@ -384,7 +392,7 @@ internal sealed class ClientCore
         if (name.Length > LongestName) name = name[..LongestName];
         var kind = AppLauncher.Guess(path);
         var browser = kind is AppKind.Chromium or AppKind.Firefox;
-        var item = _items.CreateFromProgram(name, path, kind, _store.List().FirstOrDefault(p => p.Unsupported is null)?.Id, packets: !browser, proxy: browser);
+        var item = WithDefaults(_items.CreateFromProgram(name, path, kind, DefaultProfile()?.Id, packets: !browser, proxy: browser));
         Notify(NoticeKind.Info, browser
             ? $"Added {item.Name}: it is launched with proxy settings, in a browser profile of its own."
             : $"Added {item.Name}: all its traffic goes through the VPN while it is routed.", new("app", item.Id));
@@ -400,6 +408,55 @@ internal sealed class ClientCore
         try { _items.AddProgram(id, path); }
         catch (ArgumentException) { throw new ShenoraException("APP_PROGRAM", "id", id, "That is not a program."); }
         Notify(NoticeKind.Info, $"Added {Path.GetFileName(path)} to {item.Name}.", new("app", id));
+    }
+
+    // A new app's profile: the default the person chose, while it can connect; else the first that can.
+    private StoredProfile? DefaultProfile() =>
+        _settings.Defaults.ProfileId is { } chosen && _store.Find(chosen) is { Unsupported: null } profile ? profile
+        : _store.List().FirstOrDefault(p => p.Unsupported is null);
+
+    private RoutedItem WithDefaults(RoutedItem item)
+    {
+        var defaults = _settings.Defaults;
+        if (defaults.Loss == item.Loss && defaults.DirectAfterSeconds == item.DirectAfterSeconds) return item;
+        var updated = item with { Loss = defaults.Loss, DirectAfterSeconds = defaults.DirectAfterSeconds };
+        _items.Put(updated);
+        return updated;
+    }
+
+    public void BeginDefaultsEdit()
+    {
+        var defaults = _settings.Defaults;
+        lock (_gate)
+            _editor = new OpenEditor(NewToken(), "defaults", "defaults", new DefaultsValues(_store.Find(defaults.ProfileId ?? "") is null ? null : defaults.ProfileId,
+                defaults.Loss, defaults.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? ""), Empty);
+        Publish();
+    }
+
+    public void SaveDefaults(string token, DefaultsValues values)
+    {
+        if (EditorFor(token, "defaults") is null) return;
+        var directAfterText = values.DirectAfterText?.Trim() ?? "";
+        var errors = new Dictionary<string, string>();
+        if (values.ProfileId is { } chosen && _store.Find(chosen) is null) errors["profileId"] = "Choose one of your profiles.";
+        if (!Enum.IsDefined(values.Loss)) errors["loss"] = "Choose what happens when the VPN drops.";
+        int? directAfter = null;
+        if (values.Loss == LossMode.Hold && directAfterText.Length > 0)
+        {
+            if (int.TryParse(directAfterText, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) && seconds is >= 5 and <= 3600) directAfter = seconds;
+            else errors["directAfterText"] = "Use 5 to 3600 seconds, or leave it empty to hold until the VPN is back.";
+        }
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
+            else
+            {
+                _settings.Defaults = new AppDefaults(values.ProfileId, values.Loss, directAfter);
+                _editor = null;
+            }
+        }
+        Publish();
     }
 
     private async Task<string?> PickProgramAsync(string which, string title)
@@ -788,7 +845,7 @@ internal sealed class ClientCore
         var profiles = stored.Select(p => ClientView.Profile(new ProfileFacts(
                 p, _settings.PortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
-                routedThrough == p.Id ? routedGame : null, !_settings.PolicyOf(p.Id).IsEmpty)))
+                routedThrough == p.Id ? routedGame : null, !_settings.PolicyOf(p.Id).IsEmpty, _connections.NextAttemptOf(p.Id))))
             .ToList();
         var driver = GameViews.Driver(Driver());
         var dialog = Volatile.Read(ref _dialog);
@@ -831,8 +888,10 @@ internal sealed class ClientCore
             apps,
             ClientView.ProfilesEmpty(stored.Count),
             AppViews.Empty(stored.Count, apps.Count),
-            WindowViews.Network(profiles, apps, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id))),
-            WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere()),
+            WindowViews.Network(profiles, apps, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id)),
+                stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id))),
+            WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(), _settings.Defaults,
+                stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null),
             // Where a first look is useful: with nothing to route through yet, the page that imports one.
             stored.Count == 0 ? Page.Profiles : Page.Apps,
             navigation,

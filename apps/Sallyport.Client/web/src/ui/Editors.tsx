@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, Editor, EditorField, PolicyValues, PortValues, ProgramEditValues } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, PolicyValues, PortValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { ActionButton } from './shared';
 
@@ -7,6 +7,7 @@ export type Draft =
   | { token: string; kind: 'port'; values: PortValues }
   | { token: string; kind: 'app'; values: AppEditValues }
   | { token: string; kind: 'program'; values: ProgramEditValues }
+  | { token: string; kind: 'defaults'; values: DefaultsValues }
   | { token: string; kind: 'policy'; values: PolicyValues };
 
 export function seedDraft(editor: Editor): Draft {
@@ -14,6 +15,7 @@ export function seedDraft(editor: Editor): Draft {
     case 'port': return { token: editor.token, kind: 'port', values: { ...editor.values } };
     case 'app': return { token: editor.token, kind: 'app', values: { ...editor.values } };
     case 'program': return { token: editor.token, kind: 'program', values: { ...editor.values } };
+    case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
     case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
   }
 }
@@ -67,7 +69,8 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
   </label> : null;
 
   return <form ref={form} className="editor" tabIndex={-1}
-    aria-label={editor.kind === 'port' ? 'SOCKS5 port' : editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods' : 'Edit app'}
+    aria-label={editor.kind === 'port' ? 'SOCKS5 port' : editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
+      : editor.kind === 'defaults' ? 'Defaults for new apps' : 'Edit app'}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
       event.preventDefault();
@@ -76,6 +79,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         case 'port': post('SET_PORT', { token: editor.token, portText: draft.values.portText }); break;
         case 'app': post('SAVE_APP', { token: editor.token, values: draft.values }); break;
         case 'program': post('SAVE_PROGRAM', { token: editor.token, values: draft.values }); break;
+        case 'defaults': post('SAVE_DEFAULTS', { token: editor.token, values: draft.values }); break;
         case 'policy': post('SAVE_POLICY', { token: editor.token, values: draft.values }); break;
       }
     }}>
@@ -170,6 +174,37 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, arguments: event.target.value } })} />
         {error('arguments')}
       </div>
+    </div> : draft.kind === 'defaults' ? <div className="editor-fields">
+      <div className="field">
+        <label htmlFor={`${prefix}-profile`}>VPN profile</label>
+        <select id={`${prefix}-profile`} value={draft.values.profileId ?? ''} disabled={saving}
+          aria-invalid={!!editor.errors.profileId} aria-describedby={description('profileId')}
+          onChange={(event) => onChange({ ...draft, values: { ...draft.values, profileId: event.target.value || null } })}>
+          <option value="">The first that can connect</option>
+          {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
+        </select>
+        {error('profileId')}
+      </div>
+      <fieldset className="field full-field loss-choices" aria-describedby={description('loss')}>
+        <legend>When the VPN drops</legend>
+        {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
+          <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={draft.values.loss === choice.value} disabled={saving}
+            onChange={() => onChange({ ...draft, values: { ...draft.values, loss: choice.value } })} />
+          <span><span>{choice.label}</span><span className="secondary metadata">{choice.help}</span></span>
+        </label>)}
+        {error('loss')}
+      </fieldset>
+      {draft.values.loss === 'hold' && <div className="field">
+        <label htmlFor={`${prefix}-after`}>Use my own connection after</label>
+        <div className="unit-field">
+          <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
+            value={draft.values.directAfterText} disabled={saving} placeholder="never"
+            aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
+            onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
+          <span className="secondary">seconds</span>
+        </div>
+        {error('directAfterText')}
+      </div>}
     </div> : draft.kind === 'policy' ? <div className="editor-fields">
       {text('retryWaitText', 'Wait between attempts', 'seconds')}
       {text('retryWaitMaxText', 'Longest wait', 'seconds')}

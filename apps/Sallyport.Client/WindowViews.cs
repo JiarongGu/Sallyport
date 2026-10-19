@@ -3,6 +3,7 @@ using System.Reflection;
 using Microsoft.Win32;
 using Sallyport.Profile;
 using Sallyport.Runtime;
+using Sallyport.Windows.Routing;
 
 namespace Sallyport.Client;
 
@@ -18,13 +19,19 @@ internal sealed record NavigationView(Page Page, long Request);
 /// <summary>An app's routing as the channel it uses shows it.</summary>
 internal sealed record SelectionView(string Id, string Name, RunView Run, UiAction Stop);
 
-internal sealed record ChannelActions(UiAction Disconnect);
+internal sealed record ChannelActions(UiAction Disconnect, UiAction CheckLatency);
+
+internal enum ProbePhase { Unchecked, Checking, Available, Unavailable }
+
+/// <summary>A channel's latency as Network shows it: each path's round trip, or why there is none.</summary>
+internal sealed record LatencyView(ProbePhase Phase, string StatusText, IReadOnlyList<Fact> Paths, DateTimeOffset? CheckedAt);
 
 /// <summary>One profile's connection as Network shows it: what it is, what it carries — its proxy, the apps routed
 /// through it — and how to end it.</summary>
 internal sealed record ChannelView(
     string Id, string ProfileId, string Name, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    IReadOnlyList<Fact> Facts, string? ProxyText, IReadOnlyList<SelectionView> Selections, ChannelActions Actions);
+    IReadOnlyList<Fact> Facts, string? ProxyText, IReadOnlyList<SelectionView> Selections, ChannelActions Actions,
+    DateTimeOffset? NextAttemptAt = null, LatencyView? Latency = null);
 
 internal sealed record NetworkEmpty(string Title, string Text);
 
@@ -32,7 +39,11 @@ internal sealed record NetworkView(string StatusText, Tone Tone, NetworkEmpty? E
 
 internal sealed record StartupView(bool On, string Label, string Text, UiAction Toggle);
 
-internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About);
+internal sealed record DefaultsView(IReadOnlyList<Fact> Facts, UiAction Edit);
+
+internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About, DefaultsView Defaults);
+
+internal sealed record DefaultsValues(string? ProfileId, LossMode Loss, string DirectAfterText);
 
 internal static class WindowViews
 {
@@ -43,7 +54,8 @@ internal static class WindowViews
     /// routed through it on one card, as they share one login — failure first. <paramref name="proxyProblems"/>: why a
     /// channel's proxy is not listening, by profile.</summary>
     public static NetworkView Network(IReadOnlyList<ProfileView> profiles, IReadOnlyList<AppItemView> games, RunFacts? run,
-        IReadOnlyList<StoredProfile> stored, DriverView routing, IReadOnlyDictionary<string, string?> proxyProblems)
+        IReadOnlyList<StoredProfile> stored, DriverView routing, IReadOnlyDictionary<string, string?> proxyProblems,
+        IReadOnlyDictionary<string, (Latency? Last, bool Checking)>? latencies = null)
     {
         var channels = new List<ChannelView>();
         var routedGame = run is { Ended: null } ? games.FirstOrDefault(g => g.Id == run.GameId) : null;
@@ -58,8 +70,11 @@ internal static class WindowViews
             var proxy = p.Phase is ProfilePhase.Refused or ProfilePhase.Stopped ? null
                 : proxyProblems.GetValueOrDefault(p.Id) is { } problem ? $"SOCKS5 proxy not listening: {problem}"
                 : $"SOCKS5 proxy on {p.EndpointText}";
+            var (last, checking) = latencies?.GetValueOrDefault(p.Id) ?? (null, false);
             channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy, selections,
-                new ChannelActions(p.Actions.Disconnect)));
+                new ChannelActions(p.Actions.Disconnect,
+                    p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? "Check latency" : "Check again", busy: checking) : UiAction.Hidden),
+                p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null));
         }
         // A run whose channel is not up yet (the service still preparing it) is shown on its own until it is.
         if (routedGame is { Run: { } routed } game && run is not null && !channels.Any(c => c.ProfileId == run.ProfileId))
@@ -89,7 +104,7 @@ internal static class WindowViews
             }
             channels.Add(new ChannelView($"route:{run.ProfileId}", run.ProfileId, name, tone, text, detail,
                 tunnel is { State: SessionState.Up } ? tunnel.Since : null, facts, null,
-                [Selection(game, routed)], new ChannelActions(UiAction.Hidden)));
+                [Selection(game, routed)], new ChannelActions(UiAction.Hidden, UiAction.Hidden)));
         }
 
         // Trouble first, then work under way: one healthy channel must not hide another's failure.
@@ -103,11 +118,32 @@ internal static class WindowViews
             channels, routing);
     }
 
+    /// <summary>A channel's latency, in words: each path's median round trip and how many of its echoes were answered,
+    /// or that none was — which says nothing of the tunnel (rule 6) — and only a hop's answer marked as the estimate it is.</summary>
+    public static LatencyView Latency(Latency? last, bool checking)
+    {
+        if (last is null) return new(checking ? ProbePhase.Checking : ProbePhase.Unchecked,
+            checking ? "Checking latency…" : $"Round trips to {Connections.LatencyTarget}: from this computer, through the VPN, and to the VPN server.", [], null);
+        string Line(PathSample s) => s.MedianMs is { } ms
+            ? $"{ms:F0} ms ({s.Answered} of {s.Sent} answered{(s.FromDestination ? "" : $"; farthest responding hop {s.Responder} — estimate")})"
+            : "No reply — latency unavailable";
+        var paths = new List<Fact>
+        {
+            new($"Direct to {last.Target}", Line(last.Direct)),
+            new($"Through the VPN to {last.Target}", Line(last.Vpn)),
+        };
+        paths.Add(new("To the VPN server", last.ToGateway is { } g && last.Gateway is { } gateway ? $"{Line(g)} — tunnel gateway {gateway}" : "The server named no tunnel gateway."));
+        var any = last.Direct.Answered + last.Vpn.Answered + (last.ToGateway?.Answered ?? 0) > 0;
+        return new(checking ? ProbePhase.Checking : any ? ProbePhase.Available : ProbePhase.Unavailable,
+            checking ? "Checking latency…" : any ? "Latency" : "No echo was answered, so latency could not be checked. The tunnel itself may still work.", paths, last.Checked);
+    }
+
     // The tunnel's own facts are the channel's, said once above the apps it carries.
     private static SelectionView Selection(AppItemView game, RunView run) =>
         new(game.Id, game.Name, run with { Facts = [.. run.Facts.Where(f => f.Label is not ("Connected over" or "Tunnel address" or "Reconnects"))] }, game.Actions.Stop);
 
-    public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn)
+    public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
+        AppDefaults defaults, StoredProfile? defaultProfile, bool editing)
     {
         // The driver and the service are said once, under Packet routing.
         var about = new List<Fact>
@@ -120,7 +156,12 @@ internal static class WindowViews
             new StartupView(startsWithWindows, "Start Sallyport with Windows",
                 "Opens Sallyport in the notification area when you sign in. Connections and routing start only when you start them.",
                 UiAction.Shown(startsWithWindows ? "Turn off" : "Turn on")),
-            guide, about);
+            guide, about,
+            new DefaultsView(
+            [
+                new("VPN profile", defaultProfile?.Name ?? (defaults.ProfileId is null ? "The first that can connect" : "Not chosen (the one chosen was removed)")),
+                new("If the VPN drops", GameViews.LossText(new GameChoice(null, defaults.Loss, defaults.DirectAfterSeconds))["If the VPN drops: ".Length..]),
+            ], UiAction.Shown("Change…", !editing, "Finish the open edit first.")));
     }
 
     public static string Version =>

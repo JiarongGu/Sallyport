@@ -252,8 +252,20 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       program started at 09:42:47.569, and from its first 2 s every STUN and HTTPS request was answered and the far end
       saw the VPN; the run: 49 routed, 48 handed up, 0 late, 1 selected. The stand-in was removed after.
       Not yet: conflicts between apps naming the same program (one run at a time, today).
-   7. **Network and Settings in full:** retry telemetry and a true countdown, latency through the dispatcher, connection
-      settings as own / override / effective, start with Windows, defaults for new apps.
+   7. **Network and Settings — measured 2026-10-20**, but for connection settings as own / override / effective (the
+      editor still shows what is in force with the profile's own beneath it):
+      - **The retry countdown:** `SessionStatus.NextAttemptAt` and `FailedRounds`, set only while the session waits for
+        a round, and "connecting" until a tunnel has been up once (it said "reconnecting… the connection was lost"
+        before). jp's server cut for 70 s by Windows Firewall (`Sallyport.Driver cut`, its address never printed) and jp
+        connected from Profiles: "Retrying connection… N attempts so far", and "Next attempt in N s" counting down — 2 s
+        waits, then 3, 8, 13 s (doubling after the fifth round, jitter seen) — and connected 3 s after the cut ended.
+      - **Latency:** `TunnelEcho` in the library, the dispatcher claiming its echoes before any other side; Check
+        latency on a channel. jp: direct to 1.1.1.1 14 ms (4 of 4), through the VPN 196 ms (4 of 4), the tunnel gateway
+        172.27.232.1 no reply — said as "No reply — latency unavailable", not as a failed tunnel.
+      - **Defaults for new apps** (Settings): a profile and a loss policy; set to "your own connection", a folder added
+        took it while Zenless kept its own "held"; set back to hold after. Start with Windows was step 1.
+      Could not be checked through UI Automation: adding a program through the file dialog from this elevated shell
+      (the dialog's controls offered no patterns); the folder path took the same defaults.
    - **Done when:** Zenless Zone Zero is an app from its folder, routed by packets while a browser of the same profile
      uses its proxy, through one login; window and tray agree with the service's and the server's evidence.
 9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files in the

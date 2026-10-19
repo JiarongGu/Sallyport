@@ -38,7 +38,7 @@ internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiA
 
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    string EndpointText, int Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions);
+    string EndpointText, int Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null);
 
 internal sealed record PortValues(string PortText);
 
@@ -83,7 +83,7 @@ internal sealed record ClientState(
 /// game being routed through it, which a proxy may not share.</summary>
 internal sealed record ProfileFacts(
     StoredProfile Stored, int Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
-    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false);
+    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false, DateTimeOffset? NextAttemptAt = null);
 
 internal static class ClientView
 {
@@ -163,8 +163,10 @@ internal static class ClientView
                 f.UsedBy is not null ? "Stop routing what goes through it first." : running ? "Disconnect before removing it." : null),
             Settings: UiAction.Shown("Connection settings", !busy && f.Stored.Unsupported is null, "This version cannot connect this profile."));
 
+        // A countdown only while the session waits for a round it has set a time for: never one it would not keep.
+        var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;
         return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null, Endpoint(f.Port), f.Port,
-            facts, location, actions);
+            facts, location, actions, next);
     }
 
     /// <summary>Failure first, then work under way, then connected: one healthy tunnel must not hide another's

@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from 'react';
 import type { ClientState, ProfileView } from './contract';
 import { post } from './commands';
-import { clock, duration } from './format';
+import { clock, countdown, duration } from './format';
 import { ActionButton, Disclosure, EmptyView, Facts, PageHeader, StatusPill } from './ui/shared';
 
 export function Profiles({ state, now, expanded, toggle, editorForm }: {
@@ -41,6 +41,7 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
       </div>
     </div>
     {profile.detailText && <p className="supporting secondary">{profile.detailText}</p>}
+    {countdown(profile.nextAttemptAt, now) && <p className="supporting secondary countdown" role="timer">{countdown(profile.nextAttemptAt, now)}</p>}
     <div className="row-foot">
       <span className="endpoint"><span className="secondary">SOCKS5 · </span><code>{profile.endpointText}</code></span>
       <ActionButton action={profile.actions.copy} onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />

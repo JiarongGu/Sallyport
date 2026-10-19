@@ -21,6 +21,10 @@ internal sealed record GameChoice(string? ProfileId, LossMode Loss, int? DirectA
     public LossPolicy Policy => new(Loss, DirectAfterSeconds is > 0 and var s ? TimeSpan.FromSeconds(s) : null);
 }
 
+/// <summary>What a new app starts with: its VPN profile (null: the first that can connect) and loss policy. Apps made
+/// before keep their own.</summary>
+internal sealed record AppDefaults(string? ProfileId = null, LossMode Loss = LossMode.Hold, int? DirectAfterSeconds = null);
+
 /// <summary>A profile's connection settings the person changed, each null where the profile's own stands (OpenVPN's
 /// directives, read from it: <see cref="ConnectionPolicy"/>). <see cref="RoundsMax"/> 0 is "never give up".</summary>
 internal sealed record PolicyOverride(
@@ -71,6 +75,7 @@ internal sealed class ClientSettings
         public List<RoutedApp> Apps { get; set; } = [];
         public Dictionary<string, GameChoice> Games { get; set; } = [];
         public Dictionary<string, PolicyOverride> Policies { get; set; } = [];
+        public AppDefaults Defaults { get; set; } = new();
     }
 
     public ClientSettings(string file)
@@ -117,6 +122,19 @@ internal sealed class ClientSettings
         {
             // Applications and games bound to it are kept: they show the profile as gone and can be pointed at another.
             if (_saved.Ports.Remove(profileId) | _saved.Policies.Remove(profileId)) Save();
+        }
+    }
+
+    public AppDefaults Defaults
+    {
+        get { lock (_gate) return _saved.Defaults ?? new(); }
+        set
+        {
+            lock (_gate)
+            {
+                _saved.Defaults = value;
+                Save();
+            }
         }
     }
 

@@ -130,13 +130,52 @@ public class WindowViewTests
         Assert.Equal(Tone.Up, channel.Tone);
     }
 
+    [Fact]
+    public void Latency_says_each_paths_round_trip_and_marks_a_hops_answer_as_an_estimate()
+    {
+        var last = new Latency("1.1.1.1", new PathSample(4, 4, 14, "1.1.1.1", true), new PathSample(4, 3, 48, "1.1.1.1", true), "10.8.0.1",
+            new PathSample(4, 2, 35, "10.8.0.5", false), At);
+
+        var view = WindowViews.Latency(last, checking: false);
+
+        Assert.Equal(ProbePhase.Available, view.Phase);
+        Assert.Equal(["14 ms (4 of 4 answered)", "48 ms (3 of 4 answered)", "35 ms (2 of 4 answered; farthest responding hop 10.8.0.5 — estimate) — tunnel gateway 10.8.0.1"],
+            view.Paths.Select(p => p.Value));
+    }
+
+    [Fact]
+    public void No_echo_answered_is_unavailable_not_a_failed_tunnel()
+    {
+        var none = new PathSample(4, 0, null, null, false);
+
+        var view = WindowViews.Latency(new Latency("1.1.1.1", none, none, null, null, At), checking: false);
+
+        Assert.Equal(ProbePhase.Unavailable, view.Phase);
+        Assert.Equal("No echo was answered, so latency could not be checked. The tunnel itself may still work.", view.StatusText);
+        Assert.Equal("No reply — latency unavailable", view.Paths[0].Value);
+        Assert.Equal("The server named no tunnel gateway.", view.Paths[2].Value);
+    }
+
+    [Fact]
+    public void A_retry_countdown_shows_only_while_the_connection_waits_for_one()
+    {
+        var at = DateTimeOffset.UtcNow.AddSeconds(20);
+        ProfileView With(string state, DateTimeOffset? next) => ClientView.Profile(new ProfileFacts(Jp, 1088,
+            new TunnelServiceStatus(state, At, null, 3, 1, "no answer", null, 0, 0, 0, 1088), null, false, false, null, false, false, NextAttemptAt: next));
+
+        Assert.Equal(at, With(TunnelServiceStatus.Reconnecting, at).NextAttemptAt);
+        Assert.Null(With(TunnelServiceStatus.Reconnecting, DateTimeOffset.UtcNow.AddSeconds(-1)).NextAttemptAt);
+        Assert.Null(With(TunnelServiceStatus.Refused, at).NextAttemptAt);
+    }
+
     [Theory]
     [InlineData(false, "Turn on")]
     [InlineData(true, "Turn off")]
     public void Settings_says_how_Sallyport_starts_and_where_it_is(bool on, string toggle)
     {
         var guide = new ClientState.GuideView("127.0.0.1:1088", ClientView.CurlExample("127.0.0.1:1088"), UiAction.Shown("Copy"));
-        var view = WindowViews.Settings(Ready, on, guide, @"D:\Program Files\Sallyport\data\users\S-1-5-21-1", installedIn: null);
+        var view = WindowViews.Settings(Ready, on, guide, @"D:\Program Files\Sallyport\data\users\S-1-5-21-1", installedIn: null,
+            new AppDefaults(Jp.Id, LossMode.Direct, null), Jp, editing: false);
 
         Assert.Equal(on, view.Startup.On);
         Assert.Equal("Start Sallyport with Windows", view.Startup.Label);
@@ -145,6 +184,8 @@ public class WindowViewTests
         Assert.StartsWith("Not installed (a development build in ", view.About.Single(f => f.Label == "Installed in").Value);
         Assert.Equal(@"D:\Program Files\Sallyport\data\users\S-1-5-21-1", view.About.Single(f => f.Label == "Your data").Value);
         Assert.Equal(["Version", "Installed in", "Your data"], view.About.Select(f => f.Label));
+        Assert.Equal(["jp", "your own connection until it is back"], view.Defaults.Facts.Select(f => f.Value));
+        Assert.True(view.Defaults.Edit is { Visible: true, Enabled: true, Label: "Change…" });
     }
 
     [Fact]

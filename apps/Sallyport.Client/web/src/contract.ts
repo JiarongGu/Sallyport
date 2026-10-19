@@ -77,6 +77,8 @@ export interface ProfileView {
   facts: Fact[];
   location: LocationView;
   actions: Record<'connect' | 'disconnect' | 'copy' | 'editPort' | 'locate' | 'remove' | 'settings', Action>;
+  /** ISO time the next round of attempts starts, while the connection waits for it: the page counts down to it. */
+  nextAttemptAt: string | null;
 }
 
 /** Three outcomes, never two (rule 6). */
@@ -132,8 +134,20 @@ export interface ChannelView {
   /** "SOCKS5 proxy on 127.0.0.1:1088", when the channel serves one. */
   proxyText: string | null;
   selections: SelectionView[];
-  /** Disconnect posts DISCONNECT with the channel's profileId. */
-  actions: { disconnect: Action };
+  /** Disconnect posts DISCONNECT with the channel's profileId; checkLatency posts CHECK_LATENCY with it. */
+  actions: { disconnect: Action; checkLatency: Action };
+  /** ISO time the next round of attempts starts, while the channel waits for it. */
+  nextAttemptAt: string | null;
+  /** Round trips, when the channel is up or was checked. */
+  latency: LatencyView | null;
+}
+
+export interface LatencyView {
+  phase: 'unchecked' | 'checking' | 'available' | 'unavailable';
+  statusText: string;
+  /** Each path and its result: "Direct to 1.1.1.1" — "14 ms (4 of 4 answered)", or "No reply — latency unavailable". */
+  paths: Fact[];
+  checkedAt: string | null;
 }
 
 export interface NetworkView {
@@ -154,8 +168,17 @@ export interface SettingsView {
   /** Toggle posts SET_START_WITH_WINDOWS with the opposite of `on`. */
   startup: { on: boolean; label: string; text: string; toggle: Action };
   guide: { endpointText: string; curlExample: string; copyExample: Action };
-  /** Version, where it is installed, where its data is, the driver and the service. */
+  /** Version, where it is installed, where its data is. */
   about: Fact[];
+  /** What a new app starts with; edit posts BEGIN_DEFAULTS_EDIT. */
+  defaults: { facts: Fact[]; edit: Action };
+}
+
+/** What a new app starts with: a profile (null: the first that can connect) and its loss policy. */
+export interface DefaultsValues {
+  profileId: string | null;
+  loss: LossMode;
+  directAfterText: string;
 }
 
 export interface PortValues {
@@ -254,7 +277,7 @@ export type Editor = {
   /** The app editor's choices for what Launch starts. */
   options: { id: string; label: string }[] | null;
 } & ({ kind: 'port'; values: PortValues } | { kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
-  | { kind: 'policy'; values: PolicyValues });
+  | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues });
 
 export interface Confirmation {
   token: string;
@@ -306,6 +329,9 @@ export interface Commands {
   CONNECT: { id: string };
   DISCONNECT: { id: string };
   LOCATE: { id: string };
+  CHECK_LATENCY: { id: string };
+  BEGIN_DEFAULTS_EDIT: Record<string, never>;
+  SAVE_DEFAULTS: { token: string; values: DefaultsValues };
   COPY_ENDPOINT: { id: string };
   BEGIN_PORT_EDIT: { id: string };
   SET_PORT: { token: string; portText: string };

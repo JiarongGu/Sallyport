@@ -191,12 +191,19 @@ public class TunnelSessionTests
         using var stop = new CancellationTokenSource();
         var running = session.RunAsync(stop.Token);
 
-        // A round with no answer ends in a report with no remote: waiting before the next.
-        await log.WaitAsync(s => s.State == SessionState.Reconnecting && s.Remote is null, count: 2);
+        // A round with no answer ends in a report with no remote: waiting before the next, until a time it says.
+        var waiting = await log.WaitAsync(s => s.Remote is null && s.NextAttemptAt is not null, count: 2);
         await stop.CancelAsync();
         await running;
 
         Assert.True(farm.Attempts >= 2);
+        Assert.NotNull(waiting.NextAttemptAt);
+        Assert.InRange(waiting.NextAttemptAt!.Value - waiting.Since, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(250));
+        Assert.True(waiting.FailedRounds >= 1);
+        // Never up: still connecting, not reconnecting.
+        Assert.Equal(SessionState.Connecting, waiting.State);
+        // Trying, it says no time: a countdown is shown only while one is kept.
+        Assert.All(log.All.Where(s => s.Remote is not null), s => Assert.Null(s.NextAttemptAt));
         Assert.Equal(SessionState.Stopped, session.Status.State);
         Assert.DoesNotContain(log.All, s => s.State == SessionState.Up);
     }

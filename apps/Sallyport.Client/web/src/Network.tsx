@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import type { ChannelView, ClientState, Page } from './contract';
 import { post } from './commands';
-import { duration } from './format';
+import { clock, countdown, duration } from './format';
 import { RunDetails } from './Run';
 import { ActionButton, Facts, PageHeader, StatusPill } from './ui/shared';
 import { RoutingCard } from './Settings';
@@ -46,8 +46,17 @@ function Channel({ channel, now }: { channel: ChannelView; now: number }) {
       </div>
     </div>
     {channel.detailText && <p className="supporting secondary">{channel.detailText}</p>}
+    {countdown(channel.nextAttemptAt, now) && <p className="supporting secondary countdown" role="timer">{countdown(channel.nextAttemptAt, now)}</p>}
     {channel.proxyText && <p className="channel-proxy secondary">{channel.proxyText}</p>}
     <Facts facts={channel.facts} />
+    {channel.latency && <section className="latency" aria-label="Latency">
+      <div className="latency-head">
+        <p className={channel.latency.phase === 'unavailable' ? 'location-unavailable' : 'secondary'} role="status">{channel.latency.statusText}</p>
+        <ActionButton action={channel.actions.checkLatency} onClick={() => post('CHECK_LATENCY', { id: channel.profileId })} />
+      </div>
+      <Facts facts={channel.latency.paths} />
+      {channel.latency.checkedAt && <p className="metadata secondary">Checked <time dateTime={channel.latency.checkedAt}>{clock(channel.latency.checkedAt)}</time></p>}
+    </section>}
     {channel.selections.map((selection) => <section key={selection.id} className="selection" aria-label={selection.name}>
       <div className="row-head">
         <div className="row-identity">

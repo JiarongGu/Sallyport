@@ -121,6 +121,30 @@ switch (args.FirstOrDefault())
 
         static IPAddress? Word(string[] words, int at) => at < words.Length && IPAddress.TryParse(words[at], out var a) ? a : null;
     }
+    case "cut":
+    {
+        // cut <profile.ovpn> --for <seconds>: the profile's servers blocked both ways by Windows Firewall for a while — an
+        // outage for whatever connects through it (the client, measured), its addresses never printed.
+        if (args.Length < 2) return 2;
+        OvpnProfile cutProfile;
+        try { cutProfile = OvpnProfile.Parse(File.ReadAllText(args[1])); }
+        catch (Exception e) { Console.WriteLine($"could not read the profile ({e.GetType().Name})"); return 2; }
+        var addresses = new List<string>();
+        foreach (var remote in cutProfile.Remotes)
+            try { addresses.AddRange((await Dns.GetHostAddressesAsync(remote.Host, AddressFamily.InterNetwork)).Select(a => a.ToString())); }
+            catch (SocketException) { }
+        Firewall("delete rule name=\"Sallyport measurement cut\"");
+        foreach (var direction in new[] { "out", "in" })
+            Firewall($"add rule name=\"Sallyport measurement cut\" dir={direction} action=block protocol=any remoteip={string.Join(',', addresses.Distinct())}");
+        Console.WriteLine($"{Now()} CUT: the profile's {addresses.Distinct().Count()} server address(es) blocked both ways for {Option("--for", 30)} s");
+        try { await Task.Delay(TimeSpan.FromSeconds(Option("--for", 30))); }
+        finally
+        {
+            Firewall("delete rule name=\"Sallyport measurement cut\"");
+            Console.WriteLine($"{Now()} FREED");
+        }
+        return 0;
+    }
     case "reset":
         return Reset();
     case "guard":

@@ -10,6 +10,14 @@ namespace Sallyport.Client;
 /// <summary>Where a tunnel comes out, as a public lookup service sees it through the tunnel's own SOCKS port.</summary>
 internal sealed record Location(string? Ip, string? City, string? Region, string? Country, string? Org, DateTimeOffset Checked);
 
+/// <summary>A path's round trips: how many echoes were sent and answered, the median of the answered, and who answered —
+/// the destination, or only a hop on the way.</summary>
+internal sealed record PathSample(int Sent, int Answered, double? MedianMs, string? Responder, bool FromDestination);
+
+/// <summary>A channel's latency, checked when asked: to a public address directly and through the tunnel, and to the
+/// tunnel's gateway (the VPN server's side) when the server named one.</summary>
+internal sealed record Latency(string Target, PathSample Direct, PathSample Vpn, string? Gateway, PathSample? ToGateway, DateTimeOffset Checked);
+
 /// <summary>
 /// The client's channels (docs/design/window.md): one per profile in use, one login each, in this process (D14). A
 /// channel carries its profile's SOCKS5 proxy on the profile's loopback port and the apps routed through it
@@ -46,6 +54,8 @@ internal sealed class Connections : IDisposable
         /// <summary>The routes holding it, by their own key.</summary>
         public HashSet<string> Holders { get; } = [];
         public Location? Location { get; set; }
+        public Latency? Latency { get; set; }
+        public bool CheckingLatency { get; set; }
         /// <summary>The session's attempt count when it was last up: its count runs across the whole run.</summary>
         public int? AttemptsAtUp { get; set; }
 
@@ -88,6 +98,77 @@ internal sealed class Connections : IDisposable
     public Location? LocationOf(string id)
     {
         lock (_gate) return _channels.GetValueOrDefault(id)?.Location;
+    }
+
+    /// <summary>When the channel's next round of attempts starts, while it waits for one; null otherwise.</summary>
+    public DateTimeOffset? NextAttemptOf(string id)
+    {
+        lock (_gate) return _channels.TryGetValue(id, out var channel) ? channel.Session.Status.NextAttemptAt : null;
+    }
+
+    /// <summary>The channel's last latency check, and whether one is under way.</summary>
+    public (Latency? Last, bool Checking) LatencyOf(string id)
+    {
+        lock (_gate) return _channels.TryGetValue(id, out var channel) ? (channel.Latency, channel.CheckingLatency) : (null, false);
+    }
+
+    /// <summary>Round trips now, four of each: to <see cref="LatencyTarget"/> from this computer and through the tunnel
+    /// (both answered by the same server, so the difference is the VPN's), and to the tunnel's gateway. An echo not
+    /// answered is counted, never an error: no answer says nothing of the tunnel itself (rule 6).</summary>
+    public async Task CheckLatencyAsync(string id, CancellationToken ct)
+    {
+        Channel? channel;
+        lock (_gate)
+        {
+            if (!_channels.TryGetValue(id, out channel) || channel.CheckingLatency) return;
+            channel.CheckingLatency = true;
+        }
+        Poll(force: true);
+        try
+        {
+            if (channel.Session.Dispatcher is not { } dispatcher)
+                throw new ShenoraException("NOT_CONNECTED", "id", id, "the profile is not up");
+            var target = IPAddress.Parse(LatencyTarget);
+            var direct = await SampleAsync(async () =>
+            {
+                using var ping = new System.Net.NetworkInformation.Ping();
+                var reply = await ping.SendPingAsync(target, 1500);
+                return reply.Status == System.Net.NetworkInformation.IPStatus.Success
+                    ? new Net.EchoAnswer(reply.Address, reply.RoundtripTime, true) : new Net.EchoAnswer(null, null, false);
+            }, ct);
+            var vpn = await SampleAsync(() => dispatcher.Echo.PingAsync(target, TimeSpan.FromSeconds(1.5), ct: ct), ct);
+            var gateway = dispatcher.Tunnel.Config.Gateway;
+            var toGateway = gateway is null ? null : await SampleAsync(() => dispatcher.Echo.PingAsync(gateway, TimeSpan.FromSeconds(1.5), ct: ct), ct);
+            lock (_gate) channel.Latency = new Latency(LatencyTarget, direct, vpn, gateway?.ToString(), toGateway, DateTimeOffset.Now);
+        }
+        finally
+        {
+            lock (_gate) channel.CheckingLatency = false;
+            Poll(force: true);
+        }
+    }
+
+    /// <summary>The public address latency is measured to: one that answers echoes from anywhere.</summary>
+    public const string LatencyTarget = "1.1.1.1";
+
+    private static async Task<PathSample> SampleAsync(Func<Task<Net.EchoAnswer>> echo, CancellationToken ct)
+    {
+        var times = new List<double>();
+        string? responder = null;
+        var fromDestination = false;
+        for (var i = 0; i < 4; i++)
+        {
+            var answer = await echo();
+            if (answer.Milliseconds is { } ms)
+            {
+                times.Add(ms);
+                responder = answer.From?.ToString();
+                fromDestination |= answer.FromDestination;
+            }
+            await Task.Delay(150, ct);
+        }
+        times.Sort();
+        return new PathSample(4, times.Count, times.Count == 0 ? null : times[times.Count / 2], responder, fromDestination);
     }
 
     /// <summary>Why the profile's proxy is not listening while its channel is up, or null.</summary>

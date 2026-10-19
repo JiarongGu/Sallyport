@@ -258,3 +258,8 @@ h4 { font-size: 1rem; line-height: 1.428571; font-weight: 600; margin: 0; overfl
 .settings-group .check-field { padding: 12px 16px; }
 .settings-group .check-field > span { display: flex; flex-direction: column; gap: 2px; }
 .guide .steps h3 { font-size: 1rem; }
+.latency { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; display: grid; gap: 8px; }
+.latency .facts { margin: 0; }
+.latency-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.countdown { font-variant-numeric: tabular-nums; }
+.settings-group .card .row-head .facts { margin: 0; flex: 1; }
