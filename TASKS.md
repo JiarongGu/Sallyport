@@ -18,7 +18,11 @@ NT Kernel's, free for personal use.
   adapter; the direct path unharmed. **Opening the driver needs administrator** (a basic-user token: access denied), so
   the router runs elevated — a Windows service installed with the driver under the same prompt is the shape that keeps
   one prompt for the person; the profile then has to reach it without its text crossing a command line (D14).
-- Next: Zenless Zone Zero launched with the driver installed; removal through the app, measured; then the router.
+- Also measured: Zenless Zone Zero starts and plays with the driver installed; removal through the app in 30 s and
+  reinstallation in 36 s, cutting the network about 6 s and 2 s while adapters are released and bound (D18).
+  `ndisrd.sys` stays in `System32\drivers` after removal, inert — whether to delete it is open.
+- **Next: the router** — designed with Codex, then built: an elevated service holding the tunnel, taking the game's
+  packets from the driver, matching them to its process, NAT into the tunnel, replies put back; attach mid-game.
 - **Attach mid-game** (the owner: "we should be setup vpn in mid of the game too"): the driver moves a running
   session's packets at once, which Windows' VPN cannot (measured, D16's route, 2026-10-19). Measure whether Zenless's server keeps a session
   whose client address changes mid-game, or reconnects it.

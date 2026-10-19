@@ -376,3 +376,10 @@ filter bound to every adapter; **Defender: no detection and no malware or behavi
 the direct path 10 of 10 after. The driver answered its version request (`0x06023000`). **Opening `\\.\NDISRD` needs
 administrator**: a basic-user token was refused, access denied — so the router runs elevated, not in the client.
 
+Measured next (2026-10-20): Zenless Zone Zero, launched with the driver installed (its anti-cheat starting after it),
+started and played normally. Removal through the app: done in 30 s (Windows Installer exit 0) — the service gone, no
+adapter binding left; `ndisrd.sys` itself stayed in `System32\drivers`, inert without its service. Reinstalled from the
+kept installer in 36 s. A probe of the direct path every 250 ms during both: removal cut the network for about 6 s
+(adapters released by the filter), installation for about 2 s — at those moments only, so the app says so before it
+manages the driver.
+
