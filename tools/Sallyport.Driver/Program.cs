@@ -73,7 +73,8 @@ switch (args.FirstOrDefault())
         return await ServiceRouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60),
             Text("--child"), Text("--folder"), Text("--workload"),
             new LossPolicy(Text("--loss") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
-                Option("--direct-after", 0) is > 0 and var directAfter ? TimeSpan.FromSeconds(directAfter) : null));
+                Option("--direct-after", 0) is > 0 and var directAfter ? TimeSpan.FromSeconds(directAfter) : null),
+            Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0));
     case "service-hello":
         return await ServiceHelloAsync();
     case "service-malformed":
@@ -1142,7 +1143,8 @@ static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGatewa
 // TunnelSession, as the client holds it; each generation committed over the run's pipe and the packets crossing it both
 // ways. The selected program is a copy of this executable kept outside Sallyport's folder (--child; the service
 // refuses to route Sallyport's own), or a game folder's programs (--folder). The profile is never printed (rule 2).
-async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? childExe, string? folder, string? workload, LossPolicy loss)
+async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? childExe, string? folder, string? workload, LossPolicy loss,
+    int cutAfter, int cutFor, int pingRestart)
 {
     if (profilePath is null || (childExe is null && folder is null)) { Console.Error.WriteLine("usage: Sallyport.Driver service-route <profile.ovpn> --child <exe> | --folder <game folder>"); return 2; }
     OvpnProfile profile;
@@ -1167,8 +1169,12 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     };
 
     ServicePump? current = null;
+    var policy = pingRestart > 0
+        ? profile.Policy with { Ping = Math.Max(1, pingRestart / 4), PingRestart = pingRestart, KeepaliveOverridesServer = true }
+        : profile.Policy;
     await using var session = new TunnelSession(profile, new TunnelSessionOptions
     {
+        Policy = policy,
         Consumer = (tunnel, generation) =>
         {
             var overhead = 20 + (tunnel.Remote.Proto == "tcp" ? 20 + 2 : 8) + DataChannel.Overhead;
@@ -1180,7 +1186,33 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     session.StatusChanged += status => Console.WriteLine($"{T()}  tunnel: {status.State} {status.Remote ?? "-"}, attempts {status.Attempts}, reconnects {status.Reconnects}"
         + (status.LastError is { } error ? $" ({error})" : ""));
     using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+    session.TunnelUp += (tunnel, generation) => Console.WriteLine($"{T()}  tunnel: generation {generation} up, tunnel address {tunnel.Config.Address}");
+    // Under the Stop policy the route is over when its tunnel is lost: so are the tunnel's retries.
+    run.StateChanged += state =>
+    {
+        if (state.Phase == RoutePhase.Stopped && !stop.IsCancellationRequested) _ = Task.Run(() => stop.Cancel());
+    };
     var tunnelling = session.RunAsync(stop.Token);
+    // An outage, measured: the server's addresses blocked both ways by Windows Firewall for a while — the router's
+    // adapter belongs to the service's worker, which a second handle would disturb (gate 1). Never printed.
+    var cut = cutFor > 0 ? Task.Run(async () =>
+    {
+        var addresses = new List<string>();
+        foreach (var remote in profile.Remotes)
+            try { addresses.AddRange((await Dns.GetHostAddressesAsync(remote.Host, AddressFamily.InterNetwork)).Select(a => a.ToString())); }
+            catch (SocketException) { }
+        await Task.Delay(TimeSpan.FromSeconds(cutAfter));
+        Firewall("delete rule name=\"Sallyport measurement cut\"");
+        foreach (var direction in new[] { "out", "in" })
+            Firewall($"add rule name=\"Sallyport measurement cut\" dir={direction} action=block protocol=any remoteip={string.Join(',', addresses.Distinct())}");
+        Console.WriteLine($"{T()}  CUT: the server's {addresses.Distinct().Count()} address(es) blocked both ways by the firewall for {cutFor} s");
+        try { await Task.Delay(TimeSpan.FromSeconds(cutFor)); }
+        finally
+        {
+            Firewall("delete rule name=\"Sallyport measurement cut\"");
+            Console.WriteLine($"{T()}  FREED");
+        }
+    }) : Task.CompletedTask;
     // What the router routed goes into the tunnel of the generation it was routed for, and nowhere else.
     var sending = Task.Run(async () =>
     {
@@ -1232,6 +1264,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         }
     }
     await tunnelling;
+    await cut;
     var final = run.State;
     await client.StopAsync(run.RunId);
     await run.DisposeAsync();
@@ -1241,6 +1274,12 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             + $" direct while down {f.DirectWhileDown}, late flows {f.LateFlows}, blocked {f.Blocked}, stale {f.Stale}; selected processes {f.Selected}, unreadable {f.Unreadable}");
     Console.WriteLine($"tunnel: {session.Status.State}, {session.Status.Reconnects} reconnect(s), {session.Status.BytesOut} bytes out, {session.Status.BytesIn} in");
     return 0;
+}
+
+static void Firewall(string arguments)
+{
+    using var netsh = Process.Start(new ProcessStartInfo("netsh", "advfirewall firewall " + arguments) { RedirectStandardOutput = true, RedirectStandardError = true })!;
+    netsh.WaitForExit();
 }
 
 // Step 3: the service's front door, as this process meets it — who it says it is, or why it refused.

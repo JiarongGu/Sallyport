@@ -184,8 +184,14 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
      since, in 6 runs.
    - The tunnel's own socket stayed direct throughout: the client is never a selection, and the tunnel never carried
      itself.
-5. **The router across generations, through the service:** step 2's measurements again with the pipe between the
-   tunnel and the router (in one process they hold, above). ← next
+5. **The router across generations, through the service — measured 2026-10-20** (`service-route --workload steady
+   --ping-restart 15`; the outage now made by Windows Firewall blocking the server's address both ways — it stops a
+   UDP flow already open, and the worker's adapter is not disturbed by a second handle; guard 0 failed): the loss
+   noticed 15 s after each cut, as in one process, and every reconnect with a new tunnel address, nothing stale.
+   - **Hold:** no answer until generation 2, up 2 s after the cut was freed (53 packets held).
+   - **Direct:** the home address from the moment the loss was noticed (65 packets direct), the VPN's again 3 s after.
+   - **Stop:** the home address from then on (117 direct); the client ends its tunnel too.
+   - **Hold, direct after 15 s:** 15 s held (29), then home (36), then the VPN's 2.6 s after the cut was freed.
 6. **Adapters:** Wi-Fi and Ethernet both up, a handover, sleep, the driver removed → what the packets did, every gap
    said, the machine back on its own.
 7. **Zenless through the service:** Run from launch, attach and detach, a real drop under each policy, sleep → the
