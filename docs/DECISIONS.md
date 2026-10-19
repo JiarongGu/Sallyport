@@ -329,3 +329,22 @@ torn down by 7.4 s, the direct path back 4.1 s after. The same nine /32s without
 with no trip. So exclusion routes are gone from the bridge and the plug-in; the probe and the server stay direct only
 because no prefix may cover them, which the bridge refuses.
 
+## D18 — Per-process routing starts on Windows Packet Filter; our code stays MIT (2026-10-19)
+
+The owner, asked to choose how a game's every packet is routed (D17): *"so how hard is to develop our own with
+everything working properly and it need to be easy to install for end user"*, then, after the answer (our own driver
+is weeks to months of kernel C, and installable by others only once Microsoft attestation-signs it, which needs an EV
+certificate issued to a registered organisation): *"I think we can use a free one for now because this is not for
+commercal rn and just the code need to stay MIT"*.
+
+So Stage 1 uses NT Kernel's Windows Packet Filter driver (`ndisrd.sys`), free for personal, educational and non-profit
+use; its user-mode library (`ndisapi`) is MIT. Sallyport's own code — matching packets to processes, the NAT into the
+tunnel, putting replies back — is MIT as everything else (D1), and the driver sits behind the seam the game-routing
+design names (§5), so our own WFP driver can replace it (Stage 2) without changing what is above. The driver is the
+owner's to install from NT Kernel; it is not copied into this repository or shipped with Sallyport. Sallyport is not
+offered commercially while this holds; distributing it with the driver to others would need NT Kernel's licence or
+Stage 2.
+
+First measured before anything is built on it: that Defender accepts the driver (it blocked WinDivert, D10), that
+Zenless Zone Zero runs beside it, and whether opening it needs administrator.
+

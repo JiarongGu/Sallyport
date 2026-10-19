@@ -12,41 +12,43 @@ bridge (`sallyport-vpn route --folder`), started before the game.
   which UDP server each session used is recorded, so it is known whether learning once is enough for this game.
 - **Needs:** the owner launches and plays the game while the route is up.
 
-## 2. Observer hardening
-- A killed observer leaves its private ETW session running: on start, find `Sallyport-Observer-<pid>-*` sessions whose
-  process is gone and stop them; never touch any other session.
-- Short-lived children and a launcher's handoff (the game started by `HYP.exe`), measured.
-- **Done when:** a killed observer's session is gone after the next start (measured with `logman query -ets`); a game
-  launched from its launcher is attributed from its first connection.
-
-## 3. The bridge opens stored VPN profiles
-`route` takes a `.ovpn` path today. For the client it must open a profile from the sealed store by id (D14, DPAPI under
-the same user), so no profile's text crosses a command line or a pipe.
-- **Done when:** the packaged bridge opens a stored profile by id and connects — which also measures whether a packaged
-  process sees `%LOCALAPPDATA%\Sallyport` or a virtualised copy (game-routing design, "not yet measured").
-
-## 4. Games in the client
-A Games page — a game profile made from a folder, each program included or left out, rescan, its learned destinations
-— and **Run**: one game profile and one VPN profile, driving the bridge, the guard supervised. Designed with Codex in
-the window's contract style (D15), built, measured.
-- **Done when:** Zenless Zone Zero is created from its folder, learned, and run with the JP profile from the window,
-  every state shown by the host; window and tray agree.
-
-## 5. Stage 1 — every packet of a game's programs, on Windows Packet Filter
+## 2. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,
 matched to their process through the owner tables, NAT'd into the tunnel, replies put back. Our code MIT; the driver
 NT Kernel's, free for personal use.
 - **Done when:** Defender accepts the driver; Zenless Zone Zero runs beside it; a routed program's TCP and UDP leave
   through the tunnel from their first packet while another program stays direct; a peer-to-peer harness (one side
   behind the home NAT, one behind the VPN's) connects through it.
-- **Needs:** the owner's approval to install `ndisrd.sys`.
+- Approved (D18): free for personal use while Sallyport is not commercial; the owner installs the driver from NT Kernel.
+- First: Defender's verdict, Zenless beside it, whether opening the driver needs administrator — that decides where
+  the router runs (an elevated helper or a service, or the client), so it comes before games in the client.
+
+## 3. Observer hardening
+- A killed observer leaves its private ETW session running: on start, find `Sallyport-Observer-<pid>-*` sessions whose
+  process is gone and stop them; never touch any other session.
+- Short-lived children and a launcher's handoff (the game started by `HYP.exe`), measured.
+- **Done when:** a killed observer's session is gone after the next start (measured with `logman query -ets`); a game
+  launched from its launcher is attributed from its first connection.
+
+## 4. The bridge opens stored VPN profiles
+`route` takes a `.ovpn` path today. For the client it must open a profile from the sealed store by id (D14, DPAPI under
+the same user), so no profile's text crosses a command line or a pipe.
+- **Done when:** the packaged bridge opens a stored profile by id and connects — which also measures whether a packaged
+  process sees `%LOCALAPPDATA%\Sallyport` or a virtualised copy (game-routing design, "not yet measured").
+
+## 5. Games in the client
+A Games page — a game profile made from a folder, each program included or left out, rescan, its learned destinations
+— and **Run**: one game profile and one VPN profile, driving the bridge, the guard supervised. Designed with Codex in
+the window's contract style (D15), built, measured.
+- **Done when:** Zenless Zone Zero is created from its folder, learned, and run with the JP profile from the window,
+  every state shown by the host; window and tray agree.
 
 ## 6. Stage 2 — our own WFP driver behind the same seam
 Replaces `ndisrd.sys`; nothing above the seam changes.
 - **Needs:** a registered business for an EV code-signing certificate and a Microsoft Hardware Dev Center account
   (attestation signing; drivers are not signed by Microsoft's cloud signing service); a test VM, because development
   needs test-signing mode, which anti-cheats refuse.
-- **Done when:** the attestation-signed driver passes item 5's measurements, and Zenless Zone Zero runs beside it.
+- **Done when:** the attestation-signed driver passes item 2's measurements, and Zenless Zone Zero runs beside it.
 
 ## 7. What the client's measurement did not reach (2026-10-19)
 The file dialogs past opening and cancelling (this machine's dialog shows UI Automation no File name box; app shortcuts
@@ -55,7 +57,7 @@ were seeded instead), Firefox and Electron launches, the dark theme of the new w
 
 ## 8. Ship
 An installer: the client, and the game-routing part (the VPN package with its loopback exemption today, the driver
-after item 5 or 6), one administrator prompt. A Start-menu entry, `.ovpn` files opened with the client, start with
+after item 2 or 6), one administrator prompt. A Start-menu entry, `.ovpn` files opened with the client, start with
 Windows (`--tray`). The development set-up comes off this machine: the test certificate, the exemption, the package
 (`apps/Sallyport.Vpn/README.md`).
 - **Needs:** a certificate others trust, for the package and the installer.
