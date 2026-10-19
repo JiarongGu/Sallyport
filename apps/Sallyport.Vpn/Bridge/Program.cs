@@ -9,7 +9,7 @@ using Windows.ApplicationModel;
 using Windows.Networking.Vpn;
 using Windows.Storage;
 
-// sallyport-vpn route <profile.ovpn> (--app <program.exe> | --folder <game folder>)... --prefix <a.b.c.d/n>... --for <1..600 s> [--probe <ip:port>]
+// sallyport-vpn route <profile.ovpn> (--app <program.exe> | --folder <game folder>)... --prefix <a.b.c.d/n>... --for <1..600 s> [--probe <ip:port>]...
 //                     [--policy split|force] [--default-route allow]
 //               list | log [clear] | panic
 // Run through the package's execution alias, so it has the package's identity and its networkingVpnProvider capability.
@@ -68,8 +68,12 @@ async Task<int> RouteAsync(string profilePath)
     if (policy is not ("split" or "force")) return Fail("--policy is split or force");
     if (!int.TryParse(Values("--for").FirstOrDefault(), out var seconds) || seconds is < 1 or > 600)
         return Fail("route needs --for <1..600 seconds>: an unguarded, unbounded route is not offered");
-    var probe = IPEndPoint.Parse(Values("--probe").FirstOrDefault() ?? "1.1.1.1:443");
-    if (routes.Any(r => r.Length > 0 && Covers(r, probe.Address))) return Fail("a --prefix covers the guard's probe: it must stay direct to mean anything");
+    // Two operators by default: one host that stops answering must not read as the machine's path failing, and a path that
+    // has failed fails for both.
+    var given = Values("--probe");
+    IPEndPoint[] probes = [.. (given.Count > 0 ? given : ["1.1.1.1:443", "8.8.8.8:443"]).Select(IPEndPoint.Parse)];
+    if (probes.Any(p => routes.Any(r => r.Length > 0 && Covers(r, p.Address))))
+        return Fail("a --prefix covers one of the guard's probes: they must stay direct to mean anything");
     // No exclusion routes: on this platform an excluded address is carried INTO the VPN (the guard's own probe was, twice:
     // D17's default-route run and a split run of /32s, which tripped 2.1 s after connecting). The probe and the server
     // are kept off the VPN by refusing any prefix that covers them, above and below.
@@ -81,8 +85,8 @@ async Task<int> RouteAsync(string profilePath)
     if (Tunnel.Unsupported(profile) is { } why) return Fail($"this version cannot connect the profile: {why}");
 
     // A direct path that fails before connecting says nothing about the VPN; refuse rather than judge by it.
-    if (!await Reaches(probe) && !await Reaches(probe) && !await Reaches(probe))
-        return Fail($"the direct path to {probe} fails before connecting: not connecting");
+    if (!(await ProbeAsync(probes)).Ok && !(await ProbeAsync(probes)).Ok && !(await ProbeAsync(probes)).Ok)
+        return Fail($"the direct path to {string.Join(" and ", probes.Select(p => p.ToString()))} fails before connecting: not connecting");
 
     Tunnel? tunnel = null;
     foreach (var remote in profile.Remotes)
@@ -141,7 +145,7 @@ async Task<int> RouteAsync(string profilePath)
     Console.WriteLine($"vpn: {(defaultRoute ? "the default route" : $"{routes.Count} prefix(es)")}, {policy} policy, for {string.Join(", ", apps.Select(Path.GetFileName))}");
 
     int verdict;
-    try { verdict = await GuardAsync(vpn, probe, seconds, tunnel); }
+    try { verdict = await GuardAsync(vpn, probes, seconds, tunnel); }
     catch (Exception e)
     {
         // The guard itself failed: whatever it was doing, the VPN comes down (D13).
@@ -217,10 +221,10 @@ static Task Relay(UdpClient relay, Tunnel tunnel, byte[] token, Counts counts, C
     return Task.WhenAll(fromPlugin, fromTunnel);
 }
 
-// Connects the VPN profile, then watches the direct path until the time is up: three failed probes in a row (or four of
+// Connects the VPN profile, then watches the direct path until the time is up: three failed rounds in a row (or four of
 // the last six), the platform dropping the connection, the tunnel ending, Ctrl+C or the end of --for all end in a
-// disconnect and the profile's removal.
-async Task<int> GuardAsync(VpnPlugInProfile profile, IPEndPoint probe, int seconds, Tunnel tunnel)
+// disconnect and the profile's removal. A round fails only when every probe target fails.
+async Task<int> GuardAsync(VpnPlugInProfile profile, IPEndPoint[] probes, int seconds, Tunnel tunnel)
 {
     using var stop = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
@@ -228,6 +232,8 @@ async Task<int> GuardAsync(VpnPlugInProfile profile, IPEndPoint probe, int secon
     var clock = Stopwatch.StartNew();
     var failures = 0;
     var recent = new Queue<bool>();
+    // What the probes saw, kept so a trip says WHAT failed and how — not only that it did.
+    var trace = new Queue<string>();
     string verdict;
     while (true)
     {
@@ -241,13 +247,15 @@ async Task<int> GuardAsync(VpnPlugInProfile profile, IPEndPoint probe, int secon
             verdict = $"the platform reports {now}";
             break;
         }
-        var ok = await Reaches(probe);
-        failures = ok ? 0 : failures + 1;
-        recent.Enqueue(ok);
+        var round = await ProbeAsync(probes);
+        trace.Enqueue($"{clock.Elapsed.TotalSeconds,7:0.00} s  {round.Text}");
+        if (trace.Count > 24) trace.Dequeue();
+        failures = round.Ok ? 0 : failures + 1;
+        recent.Enqueue(round.Ok);
         if (recent.Count > 6) recent.Dequeue();
         if (failures >= 3 || recent.Count == 6 && recent.Count(r => !r) >= 4)
         {
-            verdict = $"the direct path to {probe} failed while connected: the VPN is taking traffic it must not";
+            verdict = "the direct path failed while connected: the VPN is taking traffic it must not";
             failures = Math.Max(failures, 3);
             break;
         }
@@ -256,6 +264,11 @@ async Task<int> GuardAsync(VpnPlugInProfile profile, IPEndPoint probe, int secon
     var decided = clock.Elapsed.TotalSeconds;
     // Said before anything else is tried: a teardown that fails must not take the reason with it.
     Console.WriteLine($"guard: {verdict}, {decided:0.0} s after connecting");
+    if (failures >= 3)
+    {
+        Console.WriteLine("guard: the last rounds (time since connecting, then each target):");
+        foreach (var line in trace) Console.WriteLine($"guard:   {line}");
+    }
     var disconnected = await agent.DisconnectProfileAsync(profile);
     // Removed only once the platform says it is down: removing while it still tears down is refused (measured, D13). A
     // profile object's handle can go stale while it does (E_HANDLE, measured): unreadable counts as not down yet.
@@ -267,7 +280,7 @@ async Task<int> GuardAsync(VpnPlugInProfile profile, IPEndPoint probe, int secon
     // Windows withdraws the VPN's routes a moment after the disconnect: the direct path is given time to come back.
     var recovery = Stopwatch.StartNew();
     var after = false;
-    while (!(after = await Reaches(probe)) && recovery.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(500);
+    while (!(after = (await ProbeAsync(probes)).Ok) && recovery.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(500);
     Console.WriteLine($"guard: torn down by {clock.Elapsed.TotalSeconds:0.0} s: disconnect {disconnected}, remove {removed}; "
         + $"direct path {(after ? $"works within {recovery.Elapsed.TotalSeconds:0.0} s" : "STILL FAILS after 10 s")}");
     return failures >= 3 || !after ? 1 : 0;
@@ -283,13 +296,27 @@ async Task<VpnManagementConnectionStatus?> StatusAsync()
     catch (Exception) { return null; }
 }
 
-static async Task<bool> Reaches(IPEndPoint endpoint)
+// One round: every target at once. The direct path holds when any of them answers.
+static async Task<(bool Ok, string Text)> ProbeAsync(IPEndPoint[] targets)
+{
+    var answers = await Task.WhenAll(targets.Select(ReachAsync));
+    return (answers.Any(a => a.Ok), string.Join("   ", targets.Zip(answers, (t, a) => $"{t}: {a.Outcome} {a.Ms} ms")));
+}
+
+static async Task<(bool Ok, string Outcome, long Ms)> ReachAsync(IPEndPoint endpoint)
 {
     using var client = new TcpClient(endpoint.AddressFamily);
     // Half a second: a direct path that is up answers well inside it, and three misses must not take long to count.
     using var limit = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
-    try { await client.ConnectAsync(endpoint, limit.Token); return true; }
-    catch (Exception) { return false; }
+    var clock = Stopwatch.StartNew();
+    try
+    {
+        await client.ConnectAsync(endpoint, limit.Token);
+        return (true, "ok", clock.ElapsedMilliseconds);
+    }
+    catch (OperationCanceledException) { return (false, "timed out", clock.ElapsedMilliseconds); }
+    catch (SocketException e) { return (false, e.SocketErrorCode.ToString(), clock.ElapsedMilliseconds); }
+    catch (Exception e) { return (false, e.GetType().Name, clock.ElapsedMilliseconds); }
 }
 
 static (IPAddress Network, int Length) Prefix(string text)

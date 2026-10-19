@@ -5,11 +5,23 @@ says under **Done when** has been measured — against the real server where a s
 **Needs** names what only the owner can give.
 
 ## 1. Zenless Zone Zero routed in a fresh session (driverless)
-The game's learned destinations (`docs/design/game-routing.md`) routed for its game profile's programs, through the
-bridge (`sallyport-vpn route --folder`), started before the game.
-- **Done when:** a fresh session is played with the route up and the guard holding; the bridge's counters show the
-  game's UDP gameplay going through the tunnel, or show that this session's server was a new one that went direct;
-  which UDP server each session used is recorded, so it is known whether learning once is enough for this game.
+The game's profile (`--folder`: the game, its in-game browser, a launcher plug-in) routed through the bridge.
+**Measured 2026-10-19:**
+- **Learning once is not enough.** Three sessions, three UDP gameplay servers, one port: `47.123.84.37`,
+  `47.123.65.37`, `47.123.65.17` (`:20501`), all inside `47.123.0.0/16`; the HTTPS endpoints churn too (a session
+  used five `43.248.231.x` never seen before). /32s learned in one session missed the next session's gameplay.
+- **Routed TCP works:** a launch under the route sent the game's HTTPS to routed addresses through the tunnel
+  (28 packets out, 36 back) until the guard tore down.
+- **A route started mid-game does not move the running session:** 10 minutes with `47.123.0.0/16` routed while the
+  game was already in the world — its UDP (450 events) kept leaving from the home address, nothing through the
+  tunnel, no trip. Windows' VPN carries only connections opened after it is up.
+- **The guard trips when the game LAUNCHES under the route** (138 s into a run, about 23 s after the launch), and only
+  then: the same launch with no VPN kept 1,274 probes of 1.1.1.1:443 clean, and the VPN up with the game already
+  running held 600 s. Cause not yet known; the guard now probes two operators and prints its last 24 rounds on a trip.
+
+Still to do:
+- **Done when:** one launch under the route with the guard's trace (why the direct path fails at launch), and the
+  fresh session's gameplay UDP measured through the tunnel with `47.123.0.0/16` routed.
 - **Needs:** the owner launches and plays the game while the route is up.
 
 ## 2. Stage 1 — every packet of a game's programs, on Windows Packet Filter
@@ -22,6 +34,9 @@ NT Kernel's, free for personal use.
 - Approved (D18): free for personal use while Sallyport is not commercial; the owner installs the driver from NT Kernel.
 - First: Defender's verdict, Zenless beside it, whether opening the driver needs administrator — that decides where
   the router runs (an elevated helper or a service, or the client), so it comes before games in the client.
+- **Attach mid-game** (the owner: "we should be setup vpn in mid of the game too"): the driver moves a running
+  session's packets at once, which Windows' VPN cannot (item 1). Measure whether Zenless's server keeps a session
+  whose client address changes mid-game, or reconnects it.
 
 ## 3. Observer hardening
 - A killed observer leaves its private ETW session running: on start, find `Sallyport-Observer-<pid>-*` sessions whose
