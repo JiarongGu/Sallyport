@@ -11,9 +11,14 @@ NT Kernel's, free for personal use.
 - **Done when:** Defender accepts the driver; Zenless Zone Zero runs beside it; a routed program's TCP and UDP leave
   through the tunnel from their first packet while another program stays direct; a peer-to-peer harness (one side
   behind the home NAT, one behind the VPN's) connects through it.
-- Approved (D18): free for personal use while Sallyport is not commercial; the owner installs the driver from NT Kernel.
-- First: Defender's verdict, Zenless beside it, whether opening the driver needs administrator — that decides where
-  the router runs (an elevated helper or a service, or the client), so it comes before games in the client.
+- Approved (D18): free for personal use while Sallyport is not commercial. The app manages the driver
+  (`Sallyport.Windows`, `tools/Sallyport.Driver`): NT Kernel's pinned installer fetched and checked, installed and
+  removed with one administrator prompt.
+- **Measured 2026-10-20:** installed in 25 s; Defender: no detection; signed by Microsoft (WHCP); bound to every
+  adapter; the direct path unharmed. **Opening the driver needs administrator** (a basic-user token: access denied), so
+  the router runs elevated — a Windows service installed with the driver under the same prompt is the shape that keeps
+  one prompt for the person; the profile then has to reach it without its text crossing a command line (D14).
+- Next: Zenless Zone Zero launched with the driver installed; removal through the app, measured; then the router.
 - **Attach mid-game** (the owner: "we should be setup vpn in mid of the game too"): the driver moves a running
   session's packets at once, which Windows' VPN cannot (measured, D16's route, 2026-10-19). Measure whether Zenless's server keeps a session
   whose client address changes mid-game, or reconnects it.

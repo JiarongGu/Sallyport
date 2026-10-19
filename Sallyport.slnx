@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Sallyport/Sallyport.csproj" />
+    <Project Path="src/Sallyport.Windows/Sallyport.Windows.csproj" />
   </Folder>
   <Folder Name="/apps/">
     <Project Path="apps/Sallyport.Client/Sallyport.Client.csproj" />
@@ -8,11 +9,13 @@
     <Project Path="apps/Sallyport.Observer/Sallyport.Observer.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/Sallyport.Driver/Sallyport.Driver.csproj" />
     <Project Path="tools/Sallyport.Probe/Sallyport.Probe.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Sallyport.Client.Tests/Sallyport.Client.Tests.csproj" />
     <Project Path="tests/Sallyport.Observer.Tests/Sallyport.Observer.Tests.csproj" />
     <Project Path="tests/Sallyport.Tests/Sallyport.Tests.csproj" />
+    <Project Path="tests/Sallyport.Windows.Tests/Sallyport.Windows.Tests.csproj" />
   </Folder>
 </Solution>

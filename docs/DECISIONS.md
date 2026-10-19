@@ -360,3 +360,19 @@ import table: twenty WFP functions (`fwpkclnt.sys`) — callouts and filters (`F
 gRPC. So WTFast selects a game's traffic in a WFP driver of its own: connections redirected to its local engine at
 connect time, packets cloned and injected for the rest — the shape of Stage 2 here (D18).
 
+**Amended 2026-10-20: the app manages the driver, from NT Kernel's own release.** The owner: *"you can bundle that in
+since if we need that we need to install it so the app need to mamaged the install and uninstall of it"*. NT Kernel's
+free tier excludes only commercial redistribution and says nothing of a free application carrying the driver, so
+Sallyport carries none of it: `Sallyport.Windows` fetches the official installer from NT Kernel's own repository
+(`wiresock/ndisapi`, release v3.6.2) on the person's machine when they ask, checks it against a pinned SHA-256, and
+installs or removes it through Windows Installer with one administrator prompt; the installer is kept for removal.
+Pinned after reading it, 2026-10-20: the MSI and `ndisrd.sys` signed by "The Anti-Cloud Corporation" (EV), the
+driver's catalog by Microsoft Windows Hardware Compatibility Publisher, `ndisrd.sys` 3.6.2.1 "NT KERNEL | NDIS Filter
+driver", an NDIS lightweight filter (`nt_ndisrd`, service `ndisrd`).
+
+Measured on this machine the same night, through `tools/Sallyport.Driver install`: done in 25 s (Windows Installer exit
+0); the service running; the installed `ndisrd.sys` signed by Microsoft Windows Hardware Compatibility Publisher; the
+filter bound to every adapter; **Defender: no detection and no malware or behaviour event** — unlike WinDivert (D10);
+the direct path 10 of 10 after. The driver answered its version request (`0x06023000`). **Opening `\\.\NDISRD` needs
+administrator**: a basic-user token was refused, access denied — so the router runs elevated, not in the client.
+
