@@ -21,8 +21,18 @@ NT Kernel's, free for personal use.
 - Also measured: Zenless Zone Zero starts and plays with the driver installed; removal through the app in 30 s and
   reinstallation in 36 s, cutting the network about 6 s and 2 s while adapters are released and bound (D18).
   `ndisrd.sys` stays in `System32\drivers` after removal, inert — whether to delete it is open.
-- **Next: the router** — designed with Codex, then built: an elevated service holding the tunnel, taking the game's
-  packets from the driver, matching them to its process, NAT into the tunnel, replies put back; attach mid-game.
+- **The router is designed** (`docs/design/router.md`, Codex's, checked and adopted with three changes): a LocalSystem
+  service takes, attributes, NATs and injects; the tunnel stays in the client and only packets cross the pipe. Built
+  in the design's gates, each measured before the next:
+  1. **The driver's interface and recovery** — adapters listed, events, one adapter in tunnel mode passing every packet
+     back unchanged under a guard that can undo it; what a closed handle leaves behind; whether a second handle can
+     reset a mode. ← next
+  2. Unchanged forwarding on every adapter: cost (CPU, latency p50/p95/p99, loss) against the direct baseline.
+  3. Attribution: short-lived, reused and shared sockets — owner found, or counted as unattributed.
+  4. One program routed from its first TCP SYN and UDP datagram through the real VPN; another program direct.
+  5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
+  6. Zenless routed whole; mid-game attach and detach; tunnel loss, driver removal, sleep.
+  7. The peer-to-peer harness.
 - **Attach mid-game** (the owner: "we should be setup vpn in mid of the game too"): the driver moves a running
   session's packets at once, which Windows' VPN cannot (measured, D16's route, 2026-10-19). Measure whether Zenless's server keeps a session
   whose client address changes mid-game, or reconnects it.
