@@ -5,7 +5,9 @@ using Sallyport.Proxy;
 
 namespace Sallyport.Runtime;
 
-public enum SessionState { Connecting, Up, Reconnecting, Stopped, Refused }
+/// <summary><see cref="Refused"/>: the profile cannot be served, or the server refused its credentials and the policy
+/// does not retry that. <see cref="GaveUp"/>: the policy's rounds ran out (connect-retry-max).</summary>
+public enum SessionState { Connecting, Up, Reconnecting, Stopped, Refused, GaveUp }
 
 /// <summary>Where a <see cref="TunnelSession"/> is. No secret and no host name — what a status file or a window may
 /// show. <see cref="Remote"/> is the transport and port only; <see cref="BytesIn"/> and <see cref="BytesOut"/> count the
@@ -17,24 +19,30 @@ public sealed record SessionStatus(
 /// <summary>Options a session's host rarely sets.</summary>
 public sealed class TunnelSessionOptions
 {
-    public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(30);
-    /// <summary>The wait after a round in which no remote answered; doubled each time up to <see cref="LongestBackoff"/>.</summary>
-    public TimeSpan FirstBackoff { get; init; } = TimeSpan.FromSeconds(2);
-    public TimeSpan LongestBackoff { get; init; } = TimeSpan.FromSeconds(30);
+    /// <summary>How the tunnel is kept up; null, the profile's own (<see cref="OvpnProfile.Policy"/>).</summary>
+    public ConnectionPolicy? Policy { get; init; }
     public TunnelOptions Tunnel { get; init; } = new();
+    /// <summary>What each tunnel's packets go to, given the tunnel and its generation (1 for the first): the one reader
+    /// of <see cref="Tunnel.Packets"/>, disposed when that tunnel goes. Null: a <see cref="TunnelNetwork"/> — the
+    /// userspace TCP a proxy dials through (<see cref="TunnelSession.Network"/>).</summary>
+    public Func<Tunnel, int, IAsyncDisposable>? Consumer { get; init; }
     /// <summary>How a tunnel to a remote is opened; tests put an in-process server here.</summary>
-    internal Func<Remote, CancellationToken, Task<Tunnel>>? Connect { get; init; }
+    internal Func<Remote, TimeSpan, CancellationToken, Task<Tunnel>>? Connect { get; init; }
+    /// <summary>The order of remotes under <see cref="ConnectionPolicy.RandomOrder"/>; tests fix it.</summary>
+    internal Random Random { get; init; } = Random.Shared;
 }
 
 /// <summary>
-/// One profile's tunnel, kept up: the remotes tried in turn, and when the tunnel ends — the server restarted or
-/// renegotiated, or the network dropped — connected again with backoff. A host attaches what it serves (a proxy, a packet
-/// router) to <see cref="Network"/>, which is null between two tunnels.
+/// One profile's tunnel, kept up as its <see cref="ConnectionPolicy"/> says: the remotes tried in rounds, and when the
+/// tunnel ends — the server restarted or renegotiated, or the network dropped — connected again. Each tunnel is a
+/// generation; what consumes its packets is built for it and disposed with it (<see cref="TunnelSessionOptions.Consumer"/>).
 /// </summary>
 public sealed class TunnelSession : IAsyncDisposable
 {
     private readonly OvpnProfile _profile;
     private readonly TunnelSessionOptions _options;
+    private readonly ConnectionPolicy _policy;
+    private volatile IAsyncDisposable? _consumer;
     private SessionStatus _status = new(SessionState.Connecting, DateTimeOffset.UtcNow, null, 0, 0, null, null, 0, 0);
     private volatile Tunnel? _tunnel;
     private volatile TunnelNetwork? _network;
@@ -45,7 +53,10 @@ public sealed class TunnelSession : IAsyncDisposable
     {
         _profile = profile;
         _options = options ?? new TunnelSessionOptions();
+        _policy = _options.Policy ?? profile.Policy;
     }
+
+    public ConnectionPolicy Policy => _policy;
 
     /// <summary>Raised on every change of state, on the session's own loop; byte counts move between raises, so read
     /// <see cref="Status"/> for them.</summary>
@@ -54,6 +65,12 @@ public sealed class TunnelSession : IAsyncDisposable
     /// <summary>Raised with each new tunnel's network BEFORE the session reports <see cref="SessionState.Up"/>, so what a
     /// host attaches here — a proxy, a packet router — is ready by the time anyone sees "up".</summary>
     public event Action<TunnelNetwork>? NetworkUp;
+
+    /// <summary>Raised with each new tunnel and its generation once its consumer is built, BEFORE "up" is reported.</summary>
+    public event Action<Tunnel, int>? TunnelUp;
+
+    /// <summary>Raised when a generation's tunnel has gone and its consumer is disposed, with why it went.</summary>
+    public event Action<int, string?>? TunnelDown;
 
     public SessionStatus Status
     {
@@ -76,8 +93,9 @@ public sealed class TunnelSession : IAsyncDisposable
     /// <summary>The tunnel itself, for tests that put a packet straight into it.</summary>
     internal Tunnel? CurrentTunnel => _tunnel;
 
-    /// <summary>Runs until <paramref name="ct"/> is cancelled. Returns early only when the profile cannot be served at
-    /// all (it names no remote, or asks for what this version does not do) — retrying that would only repeat it.</summary>
+    /// <summary>Runs until <paramref name="ct"/> is cancelled, or until the session cannot go on: the profile cannot be
+    /// served (it names no remote, or asks for what this version does not do), the server refused its credentials and the
+    /// policy does not retry that, or the policy's rounds ran out.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
         if (_profile.Remotes.Count == 0 || Tunnel.Unsupported(_profile) is not null)
@@ -85,24 +103,27 @@ public sealed class TunnelSession : IAsyncDisposable
             Report(SessionState.Refused, null, 0, 0, Tunnel.Unsupported(_profile) ?? "the profile names no remote");
             return;
         }
-        var connect = _options.Connect ?? ((remote, token) => Tunnel.ConnectAsync(_profile, remote, _options.ConnectTimeout, _options.Tunnel, ct: token));
-        var backoff = _options.FirstBackoff;
+        var connect = _options.Connect ?? ((remote, timeout, token) => Tunnel.ConnectAsync(_profile, remote, timeout,
+            _options.Tunnel with { Ping = _policy.Ping, PingRestart = _policy.PingRestart }, ct: token));
         var attempts = 0;
         var reconnects = 0;
+        var failedRounds = 0;
         string? lastError = null;
+        var end = SessionState.Stopped;
         try
         {
             while (!ct.IsCancellationRequested)
             {
                 Tunnel? tunnel = null;
-                foreach (var remote in _profile.Remotes)
+                var refused = false;
+                foreach (var remote in Order())
                 {
                     attempts++;
                     // "connecting" until a tunnel has been up once, as Kobo's status file has always said.
                     Report(reconnects == 0 ? SessionState.Connecting : SessionState.Reconnecting, Label(remote), attempts, reconnects, lastError);
                     try
                     {
-                        tunnel = await connect(remote, ct);
+                        tunnel = await connect(remote, _policy.AttemptTimeout, ct);
                         break;
                     }
                     catch (HandshakeFailed e) when (e.Stage == HandshakeStage.Profile)
@@ -112,30 +133,50 @@ public sealed class TunnelSession : IAsyncDisposable
                     }
                     catch (HandshakeFailed e)
                     {
-                        // This server, this time: it may answer the next attempt, or the next remote may.
+                        // This server, this time: it may answer the next attempt, or the next remote may — unless it
+                        // refused the credentials, which every remote of one profile shares.
                         lastError = e.Message;
+                        if (e.AuthenticationRefused && !_policy.RetryAfterAuthFailure) { refused = true; break; }
                     }
                 }
+                if (refused) { end = SessionState.Refused; break; }
                 if (tunnel is null)
                 {
+                    failedRounds++;
+                    if (_policy.RoundsMax is { } most && failedRounds >= most) { end = SessionState.GaveUp; break; }
                     Report(SessionState.Reconnecting, null, attempts, reconnects, lastError);
-                    await Task.Delay(backoff, ct);
-                    backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, _options.LongestBackoff.Ticks));
+                    await Task.Delay(_policy.WaitAfter(failedRounds, _options.Random), ct);
                     continue;
                 }
 
-                backoff = _options.FirstBackoff;
+                failedRounds = 0;
                 lastError = null;
+                var generation = reconnects + 1;
                 _tunnel = tunnel;
-                var network = new TunnelNetwork(tunnel);
-                _network = network;
-                NetworkUp?.Invoke(network);
+                if (_options.Consumer is { } consume) _consumer = consume(tunnel, generation);
+                else
+                {
+                    var network = new TunnelNetwork(tunnel);
+                    _network = network;
+                    _consumer = network;
+                    NetworkUp?.Invoke(network);
+                }
+                TunnelUp?.Invoke(tunnel, generation);
                 Report(SessionState.Up, Label(tunnel.Remote), attempts, reconnects, null);
 
+                var authRefused = false;
                 try { await tunnel.Completion.WaitAsync(ct); }
-                catch (TunnelEnded e) { lastError = e.Message; }
+                catch (TunnelEnded e)
+                {
+                    lastError = e.Message;
+                    authRefused = e.AuthenticationRefused;
+                }
+                // Stopped while up: this generation still goes down, and is said to.
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
                 await DropTunnelAsync();
+                TunnelDown?.Invoke(generation, lastError);
                 if (ct.IsCancellationRequested) break;
+                if (authRefused && !_policy.RetryAfterAuthFailure) { end = SessionState.Refused; break; }
                 reconnects++;
                 Report(SessionState.Reconnecting, null, attempts, reconnects, lastError);
             }
@@ -145,15 +186,25 @@ public sealed class TunnelSession : IAsyncDisposable
             // Stopped while connecting or waiting to retry: nothing was up to take down.
         }
         await DropTunnelAsync();
-        Report(SessionState.Stopped, null, attempts, reconnects, lastError);
+        Report(end, null, attempts, reconnects, lastError);
+    }
+
+    // The remotes for one round: as listed, or shuffled afresh (remote-random).
+    private IEnumerable<Remote> Order()
+    {
+        if (!_policy.RandomOrder) return _profile.Remotes;
+        var order = _profile.Remotes.ToArray();
+        _options.Random.Shuffle(order);
+        return order;
     }
 
     private async Task DropTunnelAsync()
     {
-        var network = _network;
+        var consumer = _consumer;
         var tunnel = _tunnel;
         _network = null;
-        if (network is not null) await network.DisposeAsync();
+        _consumer = null;
+        if (consumer is not null) await consumer.DisposeAsync();
         if (tunnel is null) return;
         await tunnel.DisposeAsync();
         // Detached before its bytes join the totals, so a status read in between counts them at most once.

@@ -149,6 +149,8 @@ internal sealed class FakeServer
     public int DataSendHalf = 1;
     /// <summary>When completed, the server tells the client RESTART, as a real server does before it goes down.</summary>
     public TaskCompletionSource? RestartWhen;
+    /// <summary>The server answers the push request with AUTH_FAILED, as one that no longer accepts the client does.</summary>
+    public bool RefuseAuthentication;
 
     public async Task RunAsync(ITransport transport, byte[] staticKey, X509Certificate2 certificate, CancellationToken ct)
     {
@@ -178,6 +180,11 @@ internal sealed class FakeServer
         await tls.WriteAsync(KeyMethod2Message.Write(mine, "V4,dev-type tun,tls-server"), ct);
 
         Assert.Equal("PUSH_REQUEST", await inbox.ReadTextAsync(ct));
+        if (RefuseAuthentication)
+        {
+            await tls.WriteAsync("AUTH_FAILED\0"u8.ToArray(), ct);
+            await Task.Delay(Timeout.Infinite, ct);
+        }
         await tls.WriteAsync("PUSH_REPLY,route 10.0.0.0 255.0.0.0,push-continuation 2\0"u8.ToArray(), ct);
         await tls.WriteAsync("PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0,auth-token SESSION-SECRET,peer-id 3,cipher AES-256-GCM,explicit-exit-notify,protocol-flags cc-exit,push-continuation 1\0"u8.ToArray(), ct);
 

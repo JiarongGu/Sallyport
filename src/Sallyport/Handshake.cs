@@ -18,6 +18,8 @@ public sealed class HandshakeFailed(HandshakeStage stage, Outcome outcome, strin
 {
     public HandshakeStage Stage { get; } = stage;
     public Outcome Outcome { get; } = outcome;
+    /// <summary>The server said AUTH_FAILED: it knows this client and will not have it.</summary>
+    public bool AuthenticationRefused { get; init; }
 }
 
 /// <summary>What a completed control-channel handshake established.</summary>

@@ -11,7 +11,11 @@ using Sallyport.Profile;
 namespace Sallyport;
 
 /// <summary>The tunnel stopped after it was up: the server went silent, said to stop, or the transport failed.</summary>
-public sealed class TunnelEnded(string message, Exception? inner = null) : Exception(message, inner);
+public sealed class TunnelEnded(string message, Exception? inner = null) : Exception(message, inner)
+{
+    /// <summary>The server ended it with AUTH_FAILED (as when it renegotiates and no longer accepts the client).</summary>
+    public bool AuthenticationRefused { get; init; }
+}
 
 /// <summary>A snapshot of what has crossed the tunnel. <see cref="OppositeDirection"/> counts packets that authenticate
 /// only under this side's own sending key — both sides chose the same key half, which no other fault produces.</summary>
@@ -23,11 +27,15 @@ public readonly record struct TunnelCounters(
     long Rejected, long OppositeDirection, long Replayed, int ControlDropped, long MissingIn, long Overflowed);
 
 /// <summary>Options a caller rarely sets.</summary>
-public sealed class TunnelOptions
+public sealed record TunnelOptions
 {
     /// <summary>Which half of the derived key block this client sends data with. 0 unless measured otherwise —
     /// <see cref="TunnelCounters.OppositeDirection"/> says when it is wrong.</summary>
     public int DataSendHalf { get; init; }
+    /// <summary>The keepalive when the server pushes none (<see cref="ConnectionPolicy.Ping"/>,
+    /// <see cref="ConnectionPolicy.PingRestart"/>): a pushed value outranks the client's, as in OpenVPN.</summary>
+    public int? Ping { get; init; }
+    public int? PingRestart { get; init; }
 }
 
 /// <summary>
@@ -50,6 +58,8 @@ public sealed class Tunnel : IAsyncDisposable
     private readonly List<string> _other;
     private Task _loops = Task.CompletedTask;
     private long _lastSent, _lastReceived;
+    // The keepalive in force: the server's, or the client's own where it pushed none.
+    private int _ping, _pingRestart;
     private long _packetsIn, _packetsOut, _bytesIn, _bytesOut, _pingsIn, _pingsOut, _rejected, _opposite, _replayed, _overflowed;
     private int _disposed;
 
@@ -202,7 +212,7 @@ public sealed class Tunnel : IAsyncDisposable
                     }
                     if (!more) break;
                 }
-                else if (Stop(text) is { } why) throw new HandshakeFailed(stage, Outcome.Failed, why);
+                else if (Stop(text) is { } why) throw new HandshakeFailed(stage, Outcome.Failed, why) { AuthenticationRefused = text.StartsWith("AUTH_FAILED", StringComparison.Ordinal) };
                 else other.Add(text);
                 reading = inbox.ReadTextAsync(token);
             }
@@ -228,6 +238,8 @@ public sealed class Tunnel : IAsyncDisposable
                 Config = config,
                 ConnectTime = clock.Elapsed,
             };
+            tunnel._ping = config.Ping > 0 ? config.Ping : options.Ping ?? 0;
+            tunnel._pingRestart = config.PingRestart > 0 ? config.PingRestart : options.PingRestart ?? 0;
             tunnel.Start();
             log?.Invoke($"data channel ready: {cipher}, peer-id {peerId}");
             return tunnel;
@@ -300,12 +312,12 @@ public sealed class Tunnel : IAsyncDisposable
             while (await timer.WaitForNextTickAsync(ct))
             {
                 var now = Environment.TickCount64;
-                if (Config.PingRestart > 0 && now - Volatile.Read(ref _lastReceived) >= Config.PingRestart * 1000L)
+                if (_pingRestart > 0 && now - Volatile.Read(ref _lastReceived) >= _pingRestart * 1000L)
                 {
-                    End(new TunnelEnded($"nothing from the server for {Config.PingRestart} s (its ping-restart)"));
+                    End(new TunnelEnded($"nothing from the server for {_pingRestart} s (ping-restart)"));
                     return;
                 }
-                if (Config.Ping > 0 && now - Volatile.Read(ref _lastSent) >= Config.Ping * 1000L)
+                if (_ping > 0 && now - Volatile.Read(ref _lastSent) >= _ping * 1000L)
                 {
                     await SendPayloadAsync(Signals.Ping, ct);
                     Interlocked.Increment(ref _pingsOut);
@@ -323,7 +335,7 @@ public sealed class Tunnel : IAsyncDisposable
             while (true)
             {
                 var text = await _inbox.ReadTextAsync(ct);
-                if (Stop(text) is { } why) { End(new TunnelEnded(why)); return; }
+                if (Stop(text) is { } why) { End(new TunnelEnded(why) { AuthenticationRefused = text.StartsWith("AUTH_FAILED", StringComparison.Ordinal) }); return; }
                 lock (_other) _other.Add(text);
             }
         }

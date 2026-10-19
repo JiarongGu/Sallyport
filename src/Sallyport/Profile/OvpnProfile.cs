@@ -27,6 +27,10 @@ public sealed class OvpnProfile
     public bool AuthUserPass { get; init; }
     public bool RemoteCertTlsServer { get; init; }
     public string Dev { get; init; } = "tun";
+    /// <summary>The reconnection directives the profile carries, over this client's defaults.</summary>
+    public ConnectionPolicy Policy { get; init; } = new();
+    /// <summary><c>persist-tun</c>: the profile's author wants nothing to leave outside the tunnel while it reconnects.</summary>
+    public bool PersistTun { get; init; }
 
     public static OvpnProfile Parse(string text)
     {
@@ -34,7 +38,8 @@ public sealed class OvpnProfile
         var blocks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string proto = "udp", cipher = "AES-256-CBC", auth = "SHA1", dev = "tun";
         var dataCiphers = new List<string>();
-        bool userPass = false, certTls = false;
+        bool userPass = false, certTls = false, persistTun = false;
+        var policy = new ConnectionPolicy();
 
         string? block = null;
         var body = new System.Text.StringBuilder();
@@ -65,6 +70,25 @@ public sealed class OvpnProfile
                 case "auth-user-pass": userPass = true; break;
                 case "remote-cert-tls" when parts.Length >= 2 && parts[1] == "server": certTls = true; break;
                 case "dev" when parts.Length >= 2: dev = parts[1]; break;
+                case "persist-tun": persistTun = true; break;
+                case "remote-random": policy = policy with { RandomOrder = true }; break;
+                case "connect-retry" when parts.Length >= 2 && Seconds(parts[1]) is { } wait:
+                    policy = policy with { RetryWait = wait, RetryWaitMax = parts.Length >= 3 && Seconds(parts[2]) is { } max ? max : policy.RetryWaitMax };
+                    break;
+                case "connect-retry-max" when parts.Length >= 2 && int.TryParse(parts[1], out var rounds) && rounds > 0:
+                    policy = policy with { RoundsMax = rounds };
+                    break;
+                case "server-poll-timeout" or "connect-timeout" when parts.Length >= 2 && Seconds(parts[1]) is { } timeout:
+                    policy = policy with { AttemptTimeout = timeout };
+                    break;
+                case "auth-retry" when parts.Length >= 2:
+                    policy = policy with { RetryAfterAuthFailure = parts[1].Equals("nointeract", StringComparison.OrdinalIgnoreCase) };
+                    break;
+                case "ping" when parts.Length >= 2 && int.TryParse(parts[1], out var ping) && ping > 0: policy = policy with { Ping = ping }; break;
+                case "ping-restart" when parts.Length >= 2 && int.TryParse(parts[1], out var restart) && restart > 0: policy = policy with { PingRestart = restart }; break;
+                case "keepalive" when parts.Length >= 3 && int.TryParse(parts[1], out var every) && int.TryParse(parts[2], out var dead) && every > 0 && dead > 0:
+                    policy = policy with { Ping = every, PingRestart = dead };
+                    break;
             }
         }
 
@@ -87,8 +111,21 @@ public sealed class OvpnProfile
             AuthUserPass = userPass,
             RemoteCertTlsServer = certTls,
             Dev = dev,
+            Policy = policy,
+            PersistTun = persistTun,
         };
     }
+
+    /// <summary>This profile with other remotes: a measurement puts a server that never answers in front of the real ones.</summary>
+    internal OvpnProfile WithRemotes(IReadOnlyList<Remote> remotes) => new()
+    {
+        Remotes = remotes, CaPem = CaPem, CertPem = CertPem, KeyPem = KeyPem, TlsCryptKey = TlsCryptKey, TlsAuthKey = TlsAuthKey,
+        TlsCryptV2 = TlsCryptV2, Cipher = Cipher, DataCiphers = DataCiphers, Auth = Auth, AuthUserPass = AuthUserPass,
+        RemoteCertTlsServer = RemoteCertTlsServer, Dev = Dev, Policy = Policy, PersistTun = PersistTun,
+    };
+
+    // A whole number of seconds, at least one.
+    private static TimeSpan? Seconds(string text) => int.TryParse(text, out var s) && s > 0 ? TimeSpan.FromSeconds(s) : null;
 
     // udp, udp4, udp6 → udp; tcp, tcp-client, tcp4 → tcp.
     private static string Normalise(string proto) => proto.StartsWith("tcp", StringComparison.Ordinal) ? "tcp" : "udp";

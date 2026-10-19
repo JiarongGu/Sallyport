@@ -101,66 +101,88 @@ NT Kernel's, free for personal use.
      connection opened. **Its ping:** the server answers nothing but the game, so the farthest hop that does answer
      stands for it — through the VPN, hop 9 (China Telecom, Shanghai) p50 267 ms, of which the VPN server itself
      195 ms; direct (by way of the US) the same network at hops 16–17, p50 311–350 ms. The game's own datagrams waited
-     p50 ~300 ms for its server's next. Still to measure: the tunnel lost, the driver removed and sleep, during a
-     game. ← next
-  7. The peer-to-peer harness.
+     p50 ~300 ms for its server's next. The tunnel lost, the driver removed and sleep during a game: item 2, steps
+     5–7.
+  7. The peer-to-peer harness: item 2, step 10.
 
 - **If Defender refuses the driver,** the driverless route (D16) is what remains, and its relay's inbound loss comes first:
   in the last Zenless run the bridge sent 3,870 packets to the plug-in and Windows delivered 2,100 — about 45% lost on
   the loopback leg, under bursts (HTTPS downloads); gameplay alone stayed well below it.
 
-## 2. Observer hardening
-- A killed observer leaves its private ETW session running: on start, find `Sallyport-Observer-<pid>-*` sessions whose
-  process is gone and stop them; never touch any other session.
-- Short-lived children and a launcher's handoff (the game started by `HYP.exe`), measured.
-- **Done when:** a killed observer's session is gone after the next start (measured with `logman query -ets`); a game
-  launched from its launcher is attributed from its first connection.
+## 2. The product — `docs/design/product.md`, built in its steps
+One install; a game profile and a VPN profile, **Run**. The tunnel reconnects by its profile's connection policy
+(OpenVPN's directives, which the person can override); while it is down, the game's traffic is held, sent direct, or
+the route stops, as the game profile says (the owner: *"there can be auto reconnect mode with different config (this
+is more like openvpn)"*). The app manages the driver. Each step is measured before the next (rule 3).
+1. **The connection policy and the session's rounds:** `connect-retry`, `connect-retry-max`, `remote-random`,
+   `server-poll-timeout`, `auth-retry`, `ping`/`ping-restart`/`keepalive` read from the profile (`ConnectionPolicy`);
+   `TunnelSession` keeping to them, with a consumer built for each tunnel generation.
+   - **Measured 2026-10-20** (`Sallyport.Driver reconnect`: the JP profile behind a remote that never answers,
+     TEST-NET-1; attempts 5 s; once up, the server's address dropped at the adapter both ways for 150 s; the guard
+     outside, 0 failed): the dead remote timed out at 5 s and the server was up 1.4 s after. The server pushes
+     `ping 12`, `ping-restart 50`; **the cut was noticed 48 s in** — its ping-restart, from the last packet received.
+     Each round then went dead remote, udp/1194, tcp/443 (5 s each) and waited 1.9–2.1 s (2 s ±10%), 3.8 s after the
+     fifth failed round and 8.2 s after the sixth — the manual's doubling after five; **up again 14.3 s after the cut
+     was freed**, as generation 2 (that 8 s wait, then the dead remote's 5 s). **An authentication refusal could not be
+     checked against the server**, which refuses nobody; the session ends on one in tests (`FakeServer`).
+2. **Consumer generations:** a game route's packet consumer on a session; the tunnel dropped and reopened → one reader
+   for each tunnel, nothing of the old generation handed on. ← next
+3. **The service skeleton:** `apps/Sallyport.Service` — the SCM host, a supervisor and a worker in a job object, the
+   guard (D13), the session's pipe and its DACL. Authorized, unauthorized, stale and malformed clients; the worker and
+   the supervisor killed or hung → refused, or cleaned up in bounded time with every adapter direct.
+4. **The packet pipe:** gate 4's selected workload through the service beside a direct control, and under load →
+   exits and replies right, the pipe's cost measured, the tunnel's own socket direct.
+5. **The router across generations:** the tunnel dropped under Hold, Direct and Stop, and back with the same and with
+   a changed address → held, direct or stopped as chosen; fresh mappings; nothing stale injected.
+6. **Adapters:** Wi-Fi and Ethernet both up, a handover, sleep, the driver removed → what the packets did, every gap
+   said, the machine back on its own.
+7. **Zenless through the service:** Run from launch, attach and detach, a real drop under each policy, sleep → the
+   game's session and the coverage recorded. **Needs:** the owner, playing.
+8. **The client:** the Games page (a game from a folder through Shenora's folder picker, programs included or left
+   out and why, rescan, rename, remove, a launch target), Run and the running route's view (coverage in three
+   outcomes, flows, ping both ways, the reconnect countdown), each profile's connection settings, the driver panel,
+   the tray, the first run, and the copy that still says games are not routed.
+   - **Done when:** Zenless Zone Zero is made from its folder and run with the JP profile from the window; window and
+     tray agree with the service's and the server's evidence.
+9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files under
+   `%ProgramFiles%\Sallyport`, the service, the driver on request, a Start-menu entry, `.ovpn` under Open With, start
+   with Windows per user, the uninstall entry, upgrade in place, and removal that leaves the machine as it was (user
+   data only if asked).
+   - **Done when:** install, upgrade, an interrupted install and removal are each measured on a clean machine, the
+     network usable throughout. **Needs:** a clean Windows machine or VM.
+10. **The long run:** hours on the real server with outages, and the peer-to-peer harness → bounded memory and
+    handles; NAT and replies right.
 
-## 3. The bridge opens stored VPN profiles
-`route` takes a `.ovpn` path today. For the client it must open a profile from the sealed store by id (D14, DPAPI under
-the same user), so no profile's text crosses a command line or a pipe.
-- **Done when:** the packaged bridge opens a stored profile by id and connects — which also measures whether a packaged
-  process sees `%LOCALAPPDATA%\Sallyport` or a virtualised copy (game-routing design, "not yet measured").
+- The observer (`apps/Sallyport.Observer`) and the VPN package (`apps/Sallyport.Vpn`) are not in the product: they
+  stay the driverless route, for if Defender ever refuses the driver (item 1). Hardening the observer (its ETW session
+  left behind when killed) belongs to that route.
 
-## 4. Games in the client
-A Games page — a game profile made from a folder, each program included or left out, rescan, its learned destinations
-— and **Run**: one game profile and one VPN profile, driving the bridge, the guard supervised; the game's ping shown
-both ways (its own replies, and the farthest hop that answers each way, as item 1 measured it). Designed with Codex in
-the window's contract style (D15), built, measured.
-- **Done when:** Zenless Zone Zero is created from its folder, learned, and run with the JP profile from the window,
-  every state shown by the host; window and tray agree.
-
-## 5. Stage 2 — our own WFP driver behind the same seam
+## 3. Stage 2 — our own WFP driver behind the same seam
 Replaces `ndisrd.sys`; nothing above the seam changes.
 - **Needs:** a registered business for an EV code-signing certificate and a Microsoft Hardware Dev Center account
   (attestation signing; drivers are not signed by Microsoft's cloud signing service); a test VM, because development
   needs test-signing mode, which anti-cheats refuse.
 - **Done when:** the attestation-signed driver passes item 1's measurements, and Zenless Zone Zero runs beside it.
 
-## 6. What the client's measurement did not reach (2026-10-19)
+## 4. What the client's measurement did not reach (2026-10-19)
 The file dialogs past opening and cancelling (this machine's dialog shows UI Automation no File name box; app shortcuts
 were seeded instead), Firefox and Electron launches, the dark theme of the new window, the tray driven by hand.
 - **Done when:** each is measured, or recorded as could-not-be-checked with the reason.
 
-## 7. Ship
-An installer: the client, and the game-routing part (the VPN package with its loopback exemption today, the driver
-after item 1 or 5), one administrator prompt. A Start-menu entry, `.ovpn` files opened with the client, start with
-Windows (`--tray`). The development set-up comes off this machine: the test certificate, the exemption, the package
-(`apps/Sallyport.Vpn/README.md`).
-- **Needs:** a certificate others trust, for the package and the installer.
-
-## 8. Phase 4 — the long run (the library)
+## 5. Phase 4 — the long run (the library)
 Renegotiation (`ControlStream` refuses a soft reset, so a server that renegotiates costs a reconnect; the owner's did
 not in a 75-minute run on 2026-10-13, though OpenVPN's default is hourly), `auth-user-pass`, `tls-auth`, `tls-crypt-v2`
 and `P_DATA_V1` profiles, uploads at volume (the send side has no SACK of its own), and allocation on the receive path
 (about 300 MB allocated per 64 MB downloaded, D7; gen 0/1 collections of 5–11 ms now stall the network's single
 reader).
-- **Written but never run against a server:** the reconnect path (nothing ended the tunnel in 75 minutes); whether the
-  server acts on the exit notices (`explicit-exit-notify`, `EXIT`).
+- **Written but never run against a server:** whether the server acts on the exit notices (`explicit-exit-notify`,
+  `EXIT`). The reconnect path is item 2's first step.
 - **Unexplained:** a 112-minute idle tunnel on 2026-10-20 dropped 225 control packets (`ControlDropped`: failed
   tls-crypt or named another session), about one every 30 s; the next sessions that night dropped none.
 - **Measured already:** the keepalive (75 minutes up, idle 5 minutes between probes, never dropped); the TCP transport
   (`tcp/443`, TLS 1.3, ipinfo JP Tokyo, 10 MB at 1.34 MB/s, TCP inside TCP).
 - Kobo runs the library as a provider process (`Sallyport.Host.exe serve|stop`); in-process hosting waits for the release.
 
-## 9. Release
+## 6. Release
+- **Needs:** a certificate others trust, for the setup and the binaries (until then SmartScreen and UAC show an unknown
+  publisher, and peers are checked by install path, not by signature — `docs/design/product.md`, change 2).

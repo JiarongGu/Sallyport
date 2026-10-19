@@ -20,19 +20,29 @@ internal sealed class ServerFarm(TestPki pki, byte[] key) : IAsyncDisposable
     public Func<int, FakeServer?> ServerFor { get; init; } = _ => new FakeServer();
     public int Attempts => Volatile.Read(ref _attempts);
 
-    public TunnelSessionOptions Options(OvpnProfile profile, TimeSpan? connectTimeout = null) => new()
+    public TunnelSessionOptions Options(OvpnProfile profile, TimeSpan? connectTimeout = null, ConnectionPolicy? policy = null,
+        Func<Tunnel, int, IAsyncDisposable>? consumer = null, Random? random = null) => new()
     {
-        FirstBackoff = TimeSpan.FromMilliseconds(50),
-        LongestBackoff = TimeSpan.FromMilliseconds(200),
-        Connect = (remote, ct) =>
+        Policy = policy ?? new ConnectionPolicy
         {
+            RetryWait = TimeSpan.FromMilliseconds(50),
+            RetryWaitMax = TimeSpan.FromMilliseconds(200),
+            AttemptTimeout = connectTimeout ?? TimeSpan.FromSeconds(30),
+        },
+        Consumer = consumer,
+        Random = random ?? Random.Shared,
+        Connect = (remote, timeout, ct) =>
+        {
+            Connected.Enqueue(remote);
             var (client, server) = MemoryTransport.Pair();
             if (ServerFor(Interlocked.Increment(ref _attempts)) is { } fake)
                 lock (_serving) _serving.Add(fake.RunAsync(server, key, pki.Server, _stop.Token));
-            return Tunnel.ConnectAsync(profile, remote, _ => Task.FromResult<ITransport>(client), connectTimeout ?? TimeSpan.FromSeconds(30),
-                new TunnelOptions(), null, ct);
+            return Tunnel.ConnectAsync(profile, remote, _ => Task.FromResult<ITransport>(client), timeout, new TunnelOptions(), null, ct);
         },
     };
+
+    /// <summary>Every remote an attempt went to, in order.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<Remote> Connected { get; } = new();
 
     public async ValueTask DisposeAsync()
     {
@@ -150,7 +160,7 @@ public class TunnelSessionTests
         var profile = OvpnProfile.Parse(pki.Profile(key) + "\nremote vpn2.example.test 443 tcp\n");
         Assert.Equal(2, profile.Remotes.Count);
         await using var farm = new ServerFarm(pki, key) { ServerFor = n => n == 1 ? null : new FakeServer() };
-        await using var session = new TunnelSession(profile, farm.Options(profile, connectTimeout: TimeSpan.FromSeconds(1)));
+        await using var session = new TunnelSession(profile, farm.Options(profile, connectTimeout: TimeSpan.FromSeconds(3)));
         var log = new StatusLog();
         session.StatusChanged += log.Add;
         using var stop = new CancellationTokenSource();
@@ -189,6 +199,172 @@ public class TunnelSessionTests
         Assert.True(farm.Attempts >= 2);
         Assert.Equal(SessionState.Stopped, session.Status.State);
         Assert.DoesNotContain(log.All, s => s.State == SessionState.Up);
+    }
+
+    [Fact]
+    public async Task ARoundLimitEndsTheSessionAsGivenUp()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key) + "\nremote vpn2.example.test 443 tcp\n");
+        await using var farm = new ServerFarm(pki, key) { ServerFor = _ => null };
+        var policy = new ConnectionPolicy
+        {
+            RetryWait = TimeSpan.FromMilliseconds(20), RetryWaitMax = TimeSpan.FromMilliseconds(20),
+            AttemptTimeout = TimeSpan.FromMilliseconds(200), RoundsMax = 3,
+        };
+        await using var session = new TunnelSession(profile, farm.Options(profile, policy: policy));
+        var log = new StatusLog();
+        session.StatusChanged += log.Add;
+
+        await session.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(SessionState.GaveUp, session.Status.State);
+        // Three rounds of both remotes, and no fourth.
+        Assert.Equal(6, farm.Attempts);
+    }
+
+    [Fact]
+    public async Task AnAuthenticationRefusalEndsTheSessionUnlessThePolicyRetriesIt()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key) + "\nremote vpn2.example.test 443 tcp\n");
+
+        await using (var farm = new ServerFarm(pki, key) { ServerFor = _ => new FakeServer { RefuseAuthentication = true } })
+        {
+            await using var session = new TunnelSession(profile, farm.Options(profile));
+            await session.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.Equal(SessionState.Refused, session.Status.State);
+            Assert.Contains("refused authentication", session.Status.LastError);
+            // The second remote is not tried: the credentials are the profile's, not the server's.
+            Assert.Equal(1, farm.Attempts);
+        }
+
+        await using (var farm = new ServerFarm(pki, key) { ServerFor = n => n == 1 ? new FakeServer { RefuseAuthentication = true } : new FakeServer() })
+        {
+            var policy = new ConnectionPolicy { RetryWait = TimeSpan.FromMilliseconds(20), RetryAfterAuthFailure = true };
+            await using var session = new TunnelSession(profile, farm.Options(profile, policy: policy));
+            var log = new StatusLog();
+            session.StatusChanged += log.Add;
+            using var stop = new CancellationTokenSource();
+            var running = session.RunAsync(stop.Token);
+            await log.WaitAsync(s => s.State == SessionState.Up);
+            await stop.CancelAsync();
+            await running;
+            Assert.Equal(2, farm.Attempts);
+        }
+    }
+
+    [Fact]
+    public async Task RemoteRandomShufflesEachRound()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key) + "\nremote b.example.test 1194 udp\nremote c.example.test 1194 udp\nremote-random\n");
+        Assert.True(profile.Policy.RandomOrder);
+        await using var farm = new ServerFarm(pki, key) { ServerFor = _ => null };
+        var policy = profile.Policy with
+        {
+            RetryWait = TimeSpan.FromMilliseconds(10), RetryWaitMax = TimeSpan.FromMilliseconds(10),
+            AttemptTimeout = TimeSpan.FromMilliseconds(100), RoundsMax = 4,
+        };
+        await using var session = new TunnelSession(profile, farm.Options(profile, policy: policy, random: new Random(7)));
+
+        await session.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+
+        var hosts = farm.Connected.Select(r => r.Host).ToList();
+        var rounds = Enumerable.Range(0, 4).Select(i => string.Join(",", hosts.Skip(i * 3).Take(3))).ToList();
+        Assert.All(rounds, r => Assert.Equal(3, r.Split(',').Distinct().Count()));
+        Assert.True(rounds.Distinct().Count() > 1, "four rounds in one order: not shuffled");
+    }
+
+    [Fact]
+    public async Task EachTunnelGetsItsOwnConsumerAndItsGenerationIsSaid()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key));
+        var restart = new TaskCompletionSource();
+        await using var farm = new ServerFarm(pki, key) { ServerFor = n => n == 1 ? new FakeServer { RestartWhen = restart } : new FakeServer() };
+        var consumers = new List<Consumer>();
+        var events = new List<string>();
+        await using var session = new TunnelSession(profile, farm.Options(profile, consumer: (tunnel, generation) =>
+        {
+            var consumer = new Consumer(generation);
+            lock (consumers) consumers.Add(consumer);
+            return consumer;
+        }));
+        session.TunnelUp += (_, generation) => { lock (events) events.Add($"up {generation}"); };
+        session.TunnelDown += (generation, _) => { lock (events) events.Add($"down {generation}"); };
+        var log = new StatusLog();
+        session.StatusChanged += log.Add;
+        using var stop = new CancellationTokenSource();
+        var running = session.RunAsync(stop.Token);
+        await log.WaitAsync(s => s.State == SessionState.Up);
+        restart.SetResult();
+        await log.WaitAsync(s => s.State == SessionState.Up, count: 2);
+        await stop.CancelAsync();
+        await running;
+
+        Assert.Equal([1, 2], consumers.Select(c => c.Generation));
+        Assert.All(consumers, c => Assert.True(c.Disposed));
+        Assert.Equal(["up 1", "down 1", "up 2", "down 2"], events);
+        // A consumer of its own instead of the proxy's network.
+        Assert.Null(session.Network);
+    }
+
+    private sealed class Consumer(int generation) : IAsyncDisposable
+    {
+        public int Generation { get; } = generation;
+        public bool Disposed { get; private set; }
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public void TheProfilesReconnectionDirectivesBecomeItsPolicy()
+    {
+        var policy = OvpnProfile.Parse(string.Join("\n",
+            "client", "remote vpn.example.test 1194 udp", "connect-retry 5 120", "connect-retry-max 8", "remote-random",
+            "server-poll-timeout 12", "auth-retry nointeract", "keepalive 15 90", "persist-tun"));
+
+        Assert.Equal(TimeSpan.FromSeconds(5), policy.Policy.RetryWait);
+        Assert.Equal(TimeSpan.FromSeconds(120), policy.Policy.RetryWaitMax);
+        Assert.Equal(8, policy.Policy.RoundsMax);
+        Assert.True(policy.Policy.RandomOrder);
+        Assert.Equal(TimeSpan.FromSeconds(12), policy.Policy.AttemptTimeout);
+        Assert.True(policy.Policy.RetryAfterAuthFailure);
+        Assert.Equal((15, 90), (policy.Policy.Ping, policy.Policy.PingRestart));
+        Assert.True(policy.PersistTun);
+
+        var plain = OvpnProfile.Parse("remote vpn.example.test 1194 udp\nauth-retry none\n").Policy;
+        Assert.Equal(new ConnectionPolicy(), plain);
+    }
+
+    [Theory]
+    [InlineData(1, 2)]
+    [InlineData(4, 2)]
+    [InlineData(5, 4)]
+    [InlineData(6, 8)]
+    [InlineData(9, 30)]
+    public void TheWaitHoldsForFourRoundsThenDoublesToItsCeiling(int failedRounds, int seconds)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(seconds), new ConnectionPolicy().WaitAfter(failedRounds));
+    }
+
+    [Fact]
+    public void JitterStaysWithinItsFraction()
+    {
+        var policy = new ConnectionPolicy();
+        var random = new Random(1);
+        var waits = Enumerable.Range(0, 200).Select(_ => policy.WaitAfter(1, random).TotalSeconds).ToList();
+        Assert.All(waits, w => Assert.InRange(w, 1.8, 2.2));
+        Assert.True(waits.Distinct().Count() > 100);
     }
 
     [Fact]

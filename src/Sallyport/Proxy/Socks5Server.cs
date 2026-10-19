@@ -114,7 +114,11 @@ public sealed class Socks5Server : IAsyncDisposable
             using var hello = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             hello.CancelAfter(HandshakeTimeout);
             var target = await NegotiateAsync(client, hello.Token);
-            if (target is not var (host, port)) return;
+            if (target is not var (host, port))
+            {
+                await LingerAsync(socket);
+                return;
+            }
             try
             {
                 remote = await _connector.ConnectAsync(host, port, _cts.Token);
@@ -122,6 +126,7 @@ public sealed class Socks5Server : IAsyncDisposable
             catch (Exception e) when (!_cts.IsCancellationRequested)
             {
                 await ReplyAsync(client, ReplyFor(e), _cts.Token);
+                await LingerAsync(socket);
                 return;
             }
             await ReplyAsync(client, 0x00, _cts.Token);
@@ -188,6 +193,21 @@ public sealed class Socks5Server : IAsyncDisposable
         await s.ReadExactlyAsync(port, ct);
         if (host.Length == 0) { await ReplyAsync(s, 0x01, ct); return null; }
         return (host, (port[0] << 8) | port[1]);
+    }
+
+    // A refusal is followed by FIN, and what the client still sends is read and dropped for a moment: closed with its
+    // request's tail unread, the socket would answer with a reset, which can reach the client before the reply it was
+    // owed (measured: a SOCKS test failing "forcibly closed" one run in four under load).
+    private static async Task LingerAsync(Socket socket)
+    {
+        try
+        {
+            socket.Shutdown(SocketShutdown.Send);
+            using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var drain = new byte[512];
+            while (await socket.ReceiveAsync(drain, SocketFlags.None, wait.Token) > 0) { }
+        }
+        catch (Exception e) when (e is SocketException or OperationCanceledException or ObjectDisposedException) { }
     }
 
     /// <summary>BND.ADDR 0.0.0.0 and port 0: a CONNECT client does not use them.</summary>

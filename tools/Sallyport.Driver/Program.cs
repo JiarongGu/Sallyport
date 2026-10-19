@@ -64,6 +64,9 @@ switch (args.FirstOrDefault())
     case "route":
         return await RouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60), Text("--folder"),
             Text("--workload") == "boundaries", Text("--peer6") is { } peer6 ? IPAddress.Parse(peer6) : null, Text("--oversized") == "split");
+    case "reconnect":
+        return await ReconnectAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null,
+            Option("--block-after", 15), Option("--block-for", 150));
     case "stop":
     {
         if (!EventWaitHandle.TryOpenExisting(StopEventName, out var running)) { Console.WriteLine("no routing session is running"); return 1; }
@@ -91,7 +94,7 @@ switch (args.FirstOrDefault())
             + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
             + " | rtt [--count N] | attribute [--seconds N] | guard [--seconds N] [--may-remove]"
             + " | route <profile.ovpn> [--folder <game folder>] [--seconds N] [--workload boundaries [--peer6 <link-local address>] [--oversized split|whole]]"
-            + " | stop | reset");
+            + " | reconnect <profile.ovpn> [--block-after S] [--block-for S] | stop | reset");
         return 2;
 }
 
@@ -909,6 +912,89 @@ static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGatewa
         }
         return [.. query];
     }
+}
+
+// Item 2, step 1: the connection policy against the real server. A remote that never answers (TEST-NET-1) is put in
+// front of the profile's own, so every round must time out on it and go on; once the tunnel is up, the server's
+// addresses are cut off at the adapter both ways for longer than its ping-restart, then freed — the tunnel must notice,
+// keep trying in rounds, and come back. Nothing of the profile is printed, the server's addresses included (rule 2).
+async Task<int> ReconnectAsync(string? profilePath, int blockAfter, int blockFor)
+{
+    if (profilePath is null) { Console.Error.WriteLine("usage: Sallyport.Driver reconnect <profile.ovpn> [--block-after S] [--block-for S]"); return 2; }
+    OvpnProfile profile;
+    try { profile = OvpnProfile.Parse(File.ReadAllText(profilePath)); }
+    catch (Exception e) { Console.WriteLine($"could not read the profile ({e.GetType().Name})"); return 2; }
+    using var driver = OpenDriver();
+    if (driver is null) return 1;
+    var adapter = RouteAdapter(driver);
+    if (adapter is null) { Console.WriteLine("no adapter carries the route to the internet"); return 1; }
+
+    var dead = new Remote("192.0.2.1", 1194, "udp");
+    var policy = profile.Policy with { AttemptTimeout = TimeSpan.FromSeconds(5) };
+    var withDead = profile.WithRemotes([dead, .. profile.Remotes]);
+    Console.WriteLine($"{Now()} reconnect: {profile.Remotes.Count} remote(s) of the profile behind one that never answers; policy: wait {policy.RetryWait.TotalSeconds:F0} s"
+        + $" to {policy.RetryWaitMax.TotalSeconds:F0} s, rounds {policy.RoundsMax?.ToString() ?? "unlimited"}, {(policy.RandomOrder ? "random order" : "in order")},"
+        + $" attempt timeout {policy.AttemptTimeout.TotalSeconds:F0} s");
+
+    var clock = Stopwatch.StartNew();
+    await using var session = new TunnelSession(withDead, new TunnelSessionOptions { Policy = policy });
+    var ups = 0;
+    var up = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var upAgain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    session.StatusChanged += status =>
+        Console.WriteLine($"{Now()} t={clock.Elapsed.TotalSeconds,5:F1}s  {status.State,-12} {status.Remote ?? "-",-9} attempts {status.Attempts,3}, reconnects {status.Reconnects}"
+            + (status.LastError is { } error ? $"  ({error})" : ""));
+    session.TunnelUp += (tunnel, generation) =>
+    {
+        Console.WriteLine($"{Now()} t={clock.Elapsed.TotalSeconds,5:F1}s  generation {generation} up in {tunnel.ConnectTime.TotalSeconds:F1} s;"
+            + $" the server pushed ping {tunnel.Config.Ping} s, ping-restart {tunnel.Config.PingRestart} s");
+        (++ups == 1 ? up : upAgain).TrySetResult();
+    };
+    session.TunnelDown += (generation, why) => Console.WriteLine($"{Now()} t={clock.Elapsed.TotalSeconds,5:F1}s  generation {generation} down: {why ?? "stopped"}");
+    using var stop = new CancellationTokenSource();
+    var running = session.RunAsync(stop.Token);
+    if (await Task.WhenAny(up.Task, Task.Delay(TimeSpan.FromSeconds(120))) != up.Task) { Console.WriteLine("never up in 120 s"); await stop.CancelAsync(); await running; return 1; }
+
+    await Task.Delay(TimeSpan.FromSeconds(blockAfter));
+    var blocked = new HashSet<uint>();
+    foreach (var remote in profile.Remotes)
+        try
+        {
+            foreach (var address in await Dns.GetHostAddressesAsync(remote.Host, AddressFamily.InterNetwork))
+                blocked.Add(BinaryPrimitives.ReadUInt32LittleEndian(address.GetAddressBytes()));
+        }
+        catch (SocketException) { }
+    long droppedOut = 0, droppedIn = 0;
+    var cutAt = clock.Elapsed;
+    Console.WriteLine($"{Now()} t={cutAt.TotalSeconds,5:F1}s  CUT: the server's {blocked.Count} address(es) dropped both ways for {blockFor} s");
+    using (var cut = new Interception(driver, adapter.Handle, 64, receivePath: true))
+    {
+        var until = Stopwatch.StartNew();
+        while (until.Elapsed < TimeSpan.FromSeconds(blockFor))
+        {
+            cut.Wait(50);
+            cut.Drain(packet =>
+            {
+                var frame = packet.Frame;
+                if (frame.Length < 34 || BinaryPrimitives.ReadUInt16BigEndian(frame[12..]) != 0x0800) return false;
+                var to = packet.Direction == PacketDirection.Send;
+                if (!blocked.Contains(BinaryPrimitives.ReadUInt32LittleEndian(frame[(to ? 30 : 26)..]))) return false;
+                if (to) droppedOut++; else droppedIn++;
+                return true;
+            });
+        }
+        cut.Stop();
+    }
+    var freedAt = clock.Elapsed;
+    Console.WriteLine($"{Now()} t={freedAt.TotalSeconds,5:F1}s  FREED: dropped {droppedOut} out, {droppedIn} in");
+    var back = await Task.WhenAny(upAgain.Task, Task.Delay(TimeSpan.FromSeconds(180))) == upAgain.Task;
+    Console.WriteLine(back
+        ? $"{Now()} reconnect: up again {(clock.Elapsed - freedAt).TotalSeconds:F1} s after the cut was freed"
+        : $"{Now()} reconnect: NOT up again within 180 s of the cut being freed");
+    await Task.Delay(TimeSpan.FromSeconds(5));
+    await stop.CancelAsync();
+    await running;
+    return back ? 0 : 1;
 }
 
 // What a game does, measured from both ends: UDP to a STUN server (which says the address it saw) and HTTPS to an
