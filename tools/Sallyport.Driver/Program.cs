@@ -76,7 +76,7 @@ switch (args.FirstOrDefault())
             Text("--child"), Text("--folder"), Text("--workload"),
             new LossPolicy(Text("--loss") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
                 Option("--direct-after", 0) is > 0 and var directAfter ? TimeSpan.FromSeconds(directAfter) : null),
-            Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0));
+            Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0), Option("--proxy", 0));
     case "service-hello":
         return await ServiceHelloAsync();
     case "service-malformed":
@@ -96,11 +96,12 @@ switch (args.FirstOrDefault())
     case "routed-workload":
     {
         // "go", or "go boundaries <tunnel gateway> <LAN gateway> <local address> <IPv6 neighbour> <IPv6 scope>" ("-" for
-        // none), or "go steady <seconds> <home address>".
+        // none), or "go steady <seconds> <home address>", or "go mixed <seconds> <home address>".
         var go = Console.ReadLine()?.Split(' ');
         if (go is null || go[0] != "go") return 2;
         if (go.Length > 1 && go[1] == "boundaries") await BoundariesAsync(Word(go, 2), Word(go, 3), Word(go, 4), Word(go, 5), go.Length > 6 ? long.Parse(go[6]) : 0);
         else if (go.Length > 2 && go[1] == "steady") await SteadyAsync(int.Parse(go[2]), go.Length > 3 ? go[3] : null);
+        else if (go.Length > 2 && go[1] == "mixed") await MixedAsync(int.Parse(go[2]), go.Length > 3 ? go[3] : null, null, " routed");
         else if (go.Length > 1 && go[1] == "cost") await CostAsync();
         else await ExerciseAsync();
         return 0;
@@ -930,6 +931,80 @@ static async Task SteadyAsync(int seconds, string? home)
     await receiving;
 }
 
+// UDP and TCP at once, from one program: a STUN request every 500 ms, and every 2 s an HTTPS request for the address the
+// far end sees — said as the VPN's or this machine's own (home), never printed. With a proxy, only the HTTPS part, through it.
+static async Task MixedAsync(int seconds, string? home, IWebProxy? proxy, string label)
+{
+    using var http = new HttpClient(new SocketsHttpHandler { Proxy = proxy, UseProxy = proxy is not null, PooledConnectionLifetime = TimeSpan.FromSeconds(10) })
+    { Timeout = TimeSpan.FromSeconds(5) };
+    var clock = Stopwatch.StartNew();
+    int tcpOk = 0, tcpFailed = 0, udpSent = 0, udpAnswered = 0;
+    var seen = new SortedSet<string>();
+    string? lastFailure = null;
+    Socket? udp = null;
+    IPEndPoint? stun = null;
+    Task receiving = Task.CompletedTask;
+    if (proxy is null)
+    {
+        stun = new IPEndPoint((await Dns.GetHostAddressesAsync("stun.l.google.com", AddressFamily.InterNetwork))[0], 19302);
+        udp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        udp.Bind(new IPEndPoint(IPAddress.Any, 0));
+        receiving = Task.Run(async () =>
+        {
+            var buffer = new byte[512];
+            while (clock.Elapsed.TotalSeconds < seconds + 2)
+            {
+                using var give = new CancellationTokenSource(1000);
+                try
+                {
+                    await udp.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), give.Token);
+                    Interlocked.Increment(ref udpAnswered);
+                }
+                catch (OperationCanceledException) { }
+                catch (SocketException) { }
+            }
+        });
+    }
+    var asking = Task.Run(async () =>
+    {
+        while (clock.Elapsed.TotalSeconds < seconds)
+        {
+            try
+            {
+                var address = (await http.GetStringAsync("https://api.ipify.org")).Trim();
+                lock (seen) { tcpOk++; seen.Add(address == home ? "home" : "VPN"); }
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+            {
+                lock (seen) { tcpFailed++; lastFailure = e.GetType().Name; }
+            }
+            await Task.Delay(500);
+        }
+    });
+    var next = 2.0;
+    while (clock.Elapsed.TotalSeconds < seconds)
+    {
+        if (udp is not null)
+        {
+            await udp.SendToAsync(StunBinding(), stun!);
+            udpSent++;
+        }
+        await Task.Delay(500);
+        if (clock.Elapsed.TotalSeconds < next) continue;
+        lock (seen)
+        {
+            Console.WriteLine($"{label}: " + (udp is null ? "" : $"udp {Interlocked.Exchange(ref udpAnswered, 0)} of {udpSent} answered, ")
+                + $"tcp {tcpOk} ok, {tcpFailed} failed{(tcpFailed > 0 ? $" ({lastFailure})" : "")}, the far end saw {(seen.Count == 0 ? "-" : string.Join(" and ", seen))}");
+            udpSent = tcpOk = tcpFailed = 0;
+            seen.Clear();
+        }
+        next += 2;
+    }
+    await asking;
+    await receiving;
+    udp?.Dispose();
+}
+
 // A STUN binding request (RFC 5389): type 0x0001, length 0, the magic cookie, a 12-byte transaction ID.
 static byte[] StunBinding()
 {
@@ -1146,7 +1221,7 @@ static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGatewa
 // ways. The selected program is a copy of this executable kept outside Sallyport's folder (--child; the service
 // refuses to route Sallyport's own), or a game folder's programs (--folder). The profile is never printed (rule 2).
 async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? childExe, string? folder, string? workload, LossPolicy loss,
-    int cutAfter, int cutFor, int pingRestart)
+    int cutAfter, int cutFor, int pingRestart, int proxyPort)
 {
     if (profilePath is null || (childExe is null && folder is null)) { Console.Error.WriteLine("usage: Sallyport.Driver service-route <profile.ovpn> --child <exe> | --folder <game folder>"); return 2; }
     OvpnProfile profile;
@@ -1174,18 +1249,18 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     var policy = pingRestart > 0
         ? profile.Policy with { Ping = Math.Max(1, pingRestart / 4), PingRestart = pingRestart, KeepaliveOverridesServer = true }
         : profile.Policy;
-    await using var session = new TunnelSession(profile, new TunnelSessionOptions
+    await using var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = policy });
+    TunnelDispatcher? lastDispatcher = null;
+    session.DispatcherUp += dispatcher =>
     {
-        Policy = policy,
-        Consumer = (tunnel, generation) =>
-        {
-            var pump = new RunPump(tunnel, generation, run);
-            Volatile.Write(ref current, pump);
-            return pump;
-        },
-    });
+        lastDispatcher = dispatcher;
+        Volatile.Write(ref current, new RunPump(dispatcher, run));
+    };
     session.StatusChanged += status => Console.WriteLine($"{T()}  tunnel: {status.State} {status.Remote ?? "-"}, attempts {status.Attempts}, reconnects {status.Reconnects}"
         + (status.LastError is { } error ? $" ({error})" : ""));
+    // --proxy: the same login serves a SOCKS5 proxy beside the routed programs (docs/design/window.md, step 3).
+    await using var proxy = proxyPort > 0 ? new Sallyport.Proxy.Socks5Server(new SessionConnector(session), new IPEndPoint(IPAddress.Loopback, proxyPort)) : null;
+    proxy?.Start();
     using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
     session.TunnelUp += (tunnel, generation) => Console.WriteLine($"{T()}  tunnel: generation {generation} up, tunnel address {tunnel.Config.Address}");
     // Under the Stop policy the route is over when its tunnel is lost: so are the tunnel's retries.
@@ -1221,11 +1296,14 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         while (lastPhase != RoutePhase.Routing && !stop.IsCancellationRequested) await Task.Delay(100);
         Console.WriteLine("direct — this process, not selected:");
         string go;
-        if (workload == "steady")
+        Task proxying = Task.CompletedTask;
+        if (workload is "steady" or "mixed")
         {
             var home = await SeenAsync();
-            Console.WriteLine($"  udp: the far end sees this machine at {home ?? "-"}");
-            go = $"go steady {Math.Max(10, seconds - 15)} {home ?? "-"}";
+            Console.WriteLine($"  udp: the far end sees this machine at {(home is null ? "-" : "its own address (home)")}");
+            go = $"go {workload} {Math.Max(10, seconds - 15)} {home ?? "-"}";
+            if (proxyPort > 0)
+                proxying = MixedAsync(Math.Max(10, seconds - 15), home, new WebProxy($"socks5://127.0.0.1:{proxyPort}"), "  proxy");
         }
         else if (workload == "cost")
         {
@@ -1242,7 +1320,15 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         await process.StandardInput.WriteLineAsync(go);
         while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine($"{T()} {line}");
         await process.WaitForExitAsync();
+        await proxying;
         await Task.Delay(500);
+        if (lastDispatcher is { } d)
+        {
+            var c = d.Counters;
+            var n = d.Network.Counters;
+            Console.WriteLine($"{T()}  dispatcher (generation {d.Generation}): to the proxy {c.ToProxy}, to the router {c.ToRouter}, unclaimed {c.Unclaimed}, not for us {c.NotForUs};"
+                + $" proxy: {n.ConnectionsOpened} connections, {n.ConnectsFailed} failed, {n.Lookups} lookups ({n.LookupsFromCache} cached), {n.PacketsDropped} dropped");
+        }
         await stop.CancelAsync();
     }
     else

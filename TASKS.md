@@ -215,8 +215,18 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       it counts; the earlier games folder and settings left as they were. On the installed client the first start
       migrated the owner's Zenless (its 8 programs, their choices and reasons, jp, hold) — the window showed it as
       before; a program included from the window was still included after a restart, and left out again.
-   3. **One reader per tunnel:** a dispatcher, the port split (proxy 40960–49151, the router's NAT the rest), pieces to
-      the router; measured with packet TCP/UDP and proxy TCP/DNS through one login at once.
+   3. **One reader per tunnel — measured 2026-10-20** (`Sallyport.Net.TunnelDispatcher`, the session's default
+      consumer): TCP and UDP by destination port, ICMP errors by the quoted source port, later pieces to the router;
+      the proxy's TCP and DNS on 40960–49151, the router's NAT keeping a program's own port only outside it and above
+      1023; `RunPump` the dispatcher's router side. `Sallyport.Driver service-route jp.ovpn --child <copy> --workload
+      mixed --proxy 41080 --seconds 45`, one login (one tunnel, 0 reconnects): the routed child's STUN every 500 ms
+      and HTTPS every 2 s — UDP 4 of 4 and every HTTPS request answered in each 2 s, the far end seeing the VPN —
+      while the same session's SOCKS5 proxy fetched over HTTPS by name (DNS through the tunnel) every 2 s, every one
+      answered from the VPN; dispatcher: 79 to the proxy, 137 to the router, 0 unclaimed, 0 not for the tunnel;
+      router: 141 routed, 137 handed up, 4 flows, 0 late, 0 stale. The first try failed and taught one thing: on a
+      CPU loaded by other work (70 %), the worker's loop stood still 0.5 and 1.4 s and the guard ended the run
+      ("the network stopped answering"), the child then going direct; the worker now runs at high priority with its
+      router on a highest-priority thread, and the run above was on the same loaded machine (56 %), no stall logged.
    4. **`ChannelManager`:** one channel per profile, shared by proxy and packet routing; the "one profile serves a game
       or a proxy" refusals removed after step 3's measurement; stopping one method leaves the other working.
    5. **Many channels in the service's one run:** selections on different profiles at once; one channel's outage;

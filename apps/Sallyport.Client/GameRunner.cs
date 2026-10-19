@@ -112,16 +112,9 @@ internal sealed class GameRunner : IDisposable
                 run.StateChanged += state => OnState(r, state);
                 lock (_gate) r.Run = run;
                 Changed?.Invoke();
-                await using var session = new TunnelSession(profile, new TunnelSessionOptions
-                {
-                    Policy = policy,
-                    Consumer = (tunnel, generation) =>
-                    {
-                        var pump = new RunPump(tunnel, generation, run);
-                        Volatile.Write(ref r.Current, pump);
-                        return pump;
-                    },
-                });
+                await using var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = policy });
+                // Each generation's router side, attached to its dispatcher and let go with it.
+                session.DispatcherUp += dispatcher => Volatile.Write(ref r.Current, new RunPump(dispatcher, run));
                 session.StatusChanged += _ => Changed?.Invoke();
                 lock (_gate) r.Session = session;
                 var forwarding = RunPump.ForwardAsync(run, () => Volatile.Read(ref r.Current));

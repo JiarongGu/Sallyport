@@ -23,8 +23,9 @@ public sealed class TunnelSessionOptions
     public ConnectionPolicy? Policy { get; init; }
     public TunnelOptions Tunnel { get; init; } = new();
     /// <summary>What each tunnel's packets go to, given the tunnel and its generation (1 for the first): the one reader
-    /// of <see cref="Tunnel.Packets"/>, disposed when that tunnel goes. Null: a <see cref="TunnelNetwork"/> — the
-    /// userspace TCP a proxy dials through (<see cref="TunnelSession.Network"/>).</summary>
+    /// of <see cref="Tunnel.Packets"/>, disposed when that tunnel goes. Null: a <see cref="TunnelDispatcher"/> — the
+    /// userspace TCP a proxy dials through (<see cref="TunnelSession.Network"/>), with a packet router attachable beside it
+    /// (<see cref="TunnelSession.DispatcherUp"/>).</summary>
     public Func<Tunnel, int, IAsyncDisposable>? Consumer { get; init; }
     /// <summary>How a tunnel to a remote is opened; tests put an in-process server here.</summary>
     internal Func<Remote, TimeSpan, CancellationToken, Task<Tunnel>>? Connect { get; init; }
@@ -46,6 +47,7 @@ public sealed class TunnelSession : IAsyncDisposable
     private SessionStatus _status = new(SessionState.Connecting, DateTimeOffset.UtcNow, null, 0, 0, null, null, 0, 0);
     private volatile Tunnel? _tunnel;
     private volatile TunnelNetwork? _network;
+    private volatile TunnelDispatcher? _dispatcher;
     // What tunnels already dropped carried, so the totals do not fall back to zero on a reconnect.
     private long _droppedIn, _droppedOut;
 
@@ -65,6 +67,10 @@ public sealed class TunnelSession : IAsyncDisposable
     /// <summary>Raised with each new tunnel's network BEFORE the session reports <see cref="SessionState.Up"/>, so what a
     /// host attaches here — a proxy, a packet router — is ready by the time anyone sees "up".</summary>
     public event Action<TunnelNetwork>? NetworkUp;
+
+    /// <summary>Raised with each new tunnel's dispatcher BEFORE "up" is reported, so a packet router attached here
+    /// (<see cref="TunnelDispatcher.Attach"/>) has the generation from its first packet.</summary>
+    public event Action<TunnelDispatcher>? DispatcherUp;
 
     /// <summary>Raised with each new tunnel and its generation once its consumer is built, BEFORE "up" is reported.</summary>
     public event Action<Tunnel, int>? TunnelUp;
@@ -93,6 +99,9 @@ public sealed class TunnelSession : IAsyncDisposable
 
     /// <summary>The current tunnel's network, or null while there is none.</summary>
     public TunnelNetwork? Network => _network;
+
+    /// <summary>The current tunnel's dispatcher, or null while there is none (or the session has a consumer of its own).</summary>
+    public TunnelDispatcher? Dispatcher => _dispatcher;
 
     /// <summary>The tunnel itself, for tests that put a packet straight into it.</summary>
     internal Tunnel? CurrentTunnel => _tunnel;
@@ -160,10 +169,12 @@ public sealed class TunnelSession : IAsyncDisposable
                 if (_options.Consumer is { } consume) _consumer = consume(tunnel, generation);
                 else
                 {
-                    var network = new TunnelNetwork(tunnel);
-                    _network = network;
-                    _consumer = network;
-                    NetworkUp?.Invoke(network);
+                    var dispatcher = new TunnelDispatcher(tunnel, generation);
+                    _dispatcher = dispatcher;
+                    _network = dispatcher.Network;
+                    _consumer = dispatcher;
+                    NetworkUp?.Invoke(dispatcher.Network);
+                    DispatcherUp?.Invoke(dispatcher);
                 }
                 TunnelUp?.Invoke(tunnel, generation);
                 Report(SessionState.Up, Label(tunnel.Remote), attempts, reconnects, null);
@@ -207,6 +218,7 @@ public sealed class TunnelSession : IAsyncDisposable
         var consumer = _consumer;
         var tunnel = _tunnel;
         _network = null;
+        _dispatcher = null;
         _consumer = null;
         // A consumer's failure to let go ends that consumer, not the session: the tunnel still goes, and the next comes.
         if (consumer is not null)

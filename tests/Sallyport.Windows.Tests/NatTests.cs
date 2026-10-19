@@ -103,6 +103,21 @@ public sealed class NatTests
         Assert.Equal(InboundRefusal.None, nat.Inbound(Udp(Server, 3478, Tunnel, 50000), out _));
     }
 
+    [Theory]
+    [InlineData(50000, true)]
+    [InlineData(20000, true)]
+    [InlineData(45000, false)]
+    [InlineData(80, false)]
+    public void A_programs_own_port_is_kept_unless_it_is_the_proxys_or_well_known(int port, bool kept)
+    {
+        // The proxy shares the tunnel on 40960-49151 (Sallyport.Net.TunnelPorts): a routed program never takes one of those.
+        var mapping = new Nat(Address(Tunnel)).Outbound(Udp(Home, (ushort)port, Server, 3478), Link)!;
+
+        Assert.Equal(kept, mapping.TunnelPort == port);
+        Assert.False(Sallyport.Net.TunnelPorts.IsProxy(mapping.TunnelPort));
+        Assert.True(mapping.TunnelPort >= 1024);
+    }
+
     [Fact]
     public void A_port_already_taken_in_the_tunnel_is_replaced_by_a_dynamic_one()
     {

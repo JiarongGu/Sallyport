@@ -14,14 +14,16 @@ public readonly record struct NetworkCounters(int OpenConnections, long Connecti
 
 /// <summary>
 /// A userspace network over a <see cref="Tunnel"/>: outbound TCP connections and DNS lookups, as the tunnel's own
-/// address, with nothing touching the machine's network stack or routing table (D2). It becomes the only reader of
-/// <see cref="Tunnel.Packets"/>.
+/// address, with nothing touching the machine's network stack or routing table (D2). It reads what a
+/// <see cref="TunnelDispatcher"/> gives it, or, alone on a tunnel, <see cref="Tunnel.Packets"/> itself. Its ports are the
+/// proxy's share of the tunnel's (<see cref="TunnelPorts"/>), so a packet router can share the tunnel.
 /// </summary>
 public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
 {
-    private const int FirstEphemeralPort = 49152, EphemeralPorts = 65536 - 49152;
+    private const int FirstEphemeralPort = TunnelPorts.ProxyFirst, EphemeralPorts = TunnelPorts.ProxyCount;
 
     private readonly Tunnel _tunnel;
+    private readonly ChannelReader<byte[]> _inbound;
     private readonly IPAddress _local;
     private readonly ConcurrentDictionary<(IPAddress Remote, ushort RemotePort, ushort LocalPort), TcpConnection> _tcp = new();
     private readonly ConcurrentDictionary<ushort, Action<Ipv4Header, ushort, ArraySegment<byte>>> _udp = new();
@@ -34,9 +36,10 @@ public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
     // What connections already forgotten contributed, so the totals do not shrink when one expires.
     private long _closedRetransmits, _closedIn, _closedOutOfOrder, _closedRepeated, _closedAcks;
 
-    public TunnelNetwork(Tunnel tunnel)
+    public TunnelNetwork(Tunnel tunnel, ChannelReader<byte[]>? inbound = null)
     {
         _tunnel = tunnel;
+        _inbound = inbound ?? tunnel.Packets;
         _local = tunnel.Config.Address is { } address && Ipv4.IsIpv4(address)
             ? address
             : throw new InvalidOperationException("the server pushed no IPv4 address for this client");
@@ -111,9 +114,9 @@ public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
         var touched = new HashSet<TcpConnection>();
         try
         {
-            while (await _tunnel.Packets.WaitToReadAsync(ct))
+            while (await _inbound.WaitToReadAsync(ct))
             {
-                while (_tunnel.Packets.TryRead(out var packet)) Dispatch(packet, touched);
+                while (_inbound.TryRead(out var packet)) Dispatch(packet, touched);
                 // The queue is empty: acknowledge everything that arrived in this burst with one ACK per connection.
                 foreach (var connection in touched) connection.FlushAck();
                 touched.Clear();
@@ -240,7 +243,7 @@ internal sealed class TunnelResolver
         _network = network;
         // No pushed resolver: a public one, still reached THROUGH the tunnel — never the machine's own.
         _servers = pushed.Where(Ipv4.IsIpv4).ToList() is { Count: > 0 } servers ? servers : [IPAddress.Parse("1.1.1.1")];
-        _port = (ushort)RandomNumberGenerator.GetInt32(49152, 65536);
+        _port = (ushort)RandomNumberGenerator.GetInt32(TunnelPorts.ProxyFirst, TunnelPorts.ProxyLast + 1);
         network.ListenUdp(_port, OnDatagram);
     }
 

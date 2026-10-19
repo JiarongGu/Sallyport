@@ -293,9 +293,11 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss, int mtu
         return frame;
     }
 
+    // The program's own port where it is free and the router's to give: never one of the proxy's on a shared channel
+    // (Sallyport.Net.TunnelPorts), nor a well-known one.
     private ushort? Allocate(byte protocol, ushort preferred)
     {
-        if (!_byTunnelPort.ContainsKey((protocol, preferred))) return preferred;
+        if (preferred >= 1024 && !Sallyport.Net.TunnelPorts.IsProxy(preferred) && !_byTunnelPort.ContainsKey((protocol, preferred))) return preferred;
         for (var tried = 0; tried < 65536 - FirstDynamicPort; tried++)
         {
             var port = (ushort)_nextPort;

@@ -46,7 +46,21 @@ static class Worker
             await using var pipe = NamedPipeServerStreamAcl.Create(RouterProtocol.RunPipe(runId), PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 1 << 20, 1 << 20, PipePeer.Security());
             using var stop = new CancellationTokenSource();
-            var routing = Task.Factory.StartNew(() => route.Run(stop.Token), TaskCreationOptions.LongRunning);
+            // The router stands in the path of every packet the adapter carries, so a busy machine must not starve it: on a
+            // loaded CPU (measured 2026-10-20) it stood still for 1.4 s and the guard ended the run. Idle, it waits on the
+            // driver, so its priority costs nothing then.
+            using (var self = System.Diagnostics.Process.GetCurrentProcess()) self.PriorityClass = System.Diagnostics.ProcessPriorityClass.High;
+            var routed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            new Thread(() =>
+            {
+                try
+                {
+                    route.Run(stop.Token);
+                    routed.SetResult();
+                }
+                catch (Exception e) { routed.SetException(e); }
+            }) { IsBackground = true, Priority = ThreadPriority.Highest, Name = "router" }.Start();
+            var routing = routed.Task;
             Say($"ready {adapter.Handle:X}");
             Say($"log on {adapter.Name}, MTU {adapter.Mtu}, {setup.Executables.Length} program(s), loss {loss.Mode}");
             // The router's drains, idle or not (it waits at most 50 ms between two): a count that stops is a router stuck,
