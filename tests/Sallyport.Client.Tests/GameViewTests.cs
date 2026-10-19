@@ -21,9 +21,9 @@ public class GameViewTests
     private static RunFacts Facts(RouteState? route, string? ended = null, LossPolicy? loss = null, DateTimeOffset? phaseSince = null) =>
         new("0123456789abcdef", Jp.Id, loss ?? new LossPolicy(), At, route is null && ended is null, null, route, phaseSince, ended, null);
 
-    private static GameView View(RunFacts? run = null, StoredProfile? profile = null, bool another = false, bool proxied = false, bool driverReady = true,
+    private static GameView View(RunFacts? run = null, StoredProfile? profile = null, bool another = false, bool driverReady = true,
         GameProfile? game = null) =>
-        GameViews.Game(game ?? Zenless(), new GameChoice(Jp.Id, LossMode.Hold, null), profile ?? Jp, run, another, proxied, driverReady, busy: false);
+        GameViews.Game(game ?? Zenless(), new GameChoice(Jp.Id, LossMode.Hold, null), profile ?? Jp, run, another, driverReady, busy: false);
 
     [Fact]
     public void A_game_ready_to_run_says_what_it_routes()
@@ -39,12 +39,11 @@ public class GameViewTests
     }
 
     [Theory]
-    [InlineData(true, false, true, "Another game is being routed. Stop it first.")]
-    [InlineData(false, true, true, "jp is connected as a proxy. Disconnect it first: one profile serves a game or a proxy at a time.")]
-    [InlineData(false, false, false, "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing.")]
-    public void A_game_that_cannot_run_says_why(bool another, bool proxied, bool driverReady, string reason)
+    [InlineData(true, true, "Another game is being routed. Stop it first.")]
+    [InlineData(false, false, "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing.")]
+    public void A_game_that_cannot_run_says_why(bool another, bool driverReady, string reason)
     {
-        var run = View(another: another, proxied: proxied, driverReady: driverReady).Actions.Run;
+        var run = View(another: another, driverReady: driverReady).Actions.Run;
 
         Assert.False(run.Enabled);
         Assert.Equal(reason, run.Reason);
@@ -124,14 +123,15 @@ public class GameViewTests
         Assert.Equal(text, GameViews.LossText(new GameChoice(Jp.Id, mode, after)));
 
     [Fact]
-    public void A_profile_in_use_by_a_game_offers_no_proxy_and_cannot_be_removed()
+    public void A_profile_a_game_is_routed_through_still_offers_its_proxy_and_cannot_be_removed()
     {
+        // One channel per profile (docs/design/window.md): its proxy and a route share it.
         var view = ClientView.Profile(new ProfileFacts(Jp, 1088, null, null, false, false, null, false, false, UsedBy: "Zenless Zone Zero"));
 
-        Assert.False(view.Actions.Connect.Enabled);
-        Assert.Equal("Zenless Zone Zero is being routed through it. One profile serves a game or a proxy at a time.", view.Actions.Connect.Reason);
+        Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Reason: null });
         Assert.False(view.Actions.Remove.Enabled);
-        Assert.Contains(view.Facts, f => f.Label == "In use by");
+        Assert.Equal("Stop routing what goes through it first.", view.Actions.Remove.Reason);
+        Assert.Contains(view.Facts, f => f.Label == "Routing through it" && f.Value == "Zenless Zone Zero");
     }
 
     [Fact]

@@ -13,11 +13,12 @@ internal sealed record RunFacts(
 
 /// <summary>
 /// The client's one game run (docs/design/product.md §1, §3): it asks the router service to route a game's programs,
-/// holds the tunnel itself — a <see cref="TunnelSession"/> with the profile's connection policy — and pumps each
-/// generation's packets to and from the run. A run lives no longer than the client: exiting, or this object going, ends
-/// it and the game goes direct.
+/// holds its profile's channel (<see cref="Connections"/>) — the same login the profile's proxy uses, brought up if it is
+/// not — and pumps each generation's packets to and from the run through that channel's dispatcher. Stopping the run
+/// lets the channel go, which stays up if the person connected it. A run lives no longer than the client: exiting, or
+/// this object going, ends it and the game goes direct.
 /// </summary>
-internal sealed class GameRunner : IDisposable
+internal sealed class GameRunner(Connections connections) : IDisposable
 {
     /// <summary>Why a run the person stopped ended: said plainly, not as trouble.</summary>
     public const string StoppedByPerson = "Stopped.";
@@ -28,6 +29,8 @@ internal sealed class GameRunner : IDisposable
 
     private sealed class Running(string gameId, string profileId, LossPolicy loss)
     {
+        /// <summary>This run's hold on its profile's channel.</summary>
+        public string Holder { get; } = $"route:{Guid.NewGuid():N}";
         public string GameId { get; } = gameId;
         public string ProfileId { get; } = profileId;
         public LossPolicy Loss { get; } = loss;
@@ -50,8 +53,7 @@ internal sealed class GameRunner : IDisposable
         get { lock (_gate) return _running is not null; }
     }
 
-    /// <summary>The profile the run uses, which a proxy may not use meanwhile (product design §4: one reader of a
-    /// tunnel's packets).</summary>
+    /// <summary>The profile the run uses: its channel is held while the run lasts.</summary>
     public string? ProfileInUse
     {
         get { lock (_gate) return _running?.ProfileId; }
@@ -70,7 +72,7 @@ internal sealed class GameRunner : IDisposable
 
     /// <summary>Starts routing <paramref name="game"/>'s programs through <paramref name="profile"/>. Returns at once;
     /// what follows — the service's answer, the tunnel — is in <see cref="Facts"/>.</summary>
-    public void Start(GameProfile game, string profileId, OvpnProfile profile, ConnectionPolicy policy, LossPolicy loss)
+    public void Start(GameProfile game, string profileId, LossPolicy loss)
     {
         Running running;
         lock (_gate)
@@ -79,7 +81,7 @@ internal sealed class GameRunner : IDisposable
             running = _running = new Running(game.Id, profileId, loss);
             _last = null;
         }
-        running.Work = Task.Run(() => RunAsync(running, game.IncludedPaths, profile, policy));
+        running.Work = Task.Run(() => RunAsync(running, game.IncludedPaths));
         Changed?.Invoke();
     }
 
@@ -92,7 +94,7 @@ internal sealed class GameRunner : IDisposable
         await running.Work;
     }
 
-    private async Task RunAsync(Running r, IReadOnlyList<string> executables, OvpnProfile profile, ConnectionPolicy policy)
+    private async Task RunAsync(Running r, IReadOnlyList<string> executables)
     {
         var folder = AppContext.BaseDirectory;
         RouterClient? client = null;
@@ -112,23 +114,45 @@ internal sealed class GameRunner : IDisposable
                 run.StateChanged += state => OnState(r, state);
                 lock (_gate) r.Run = run;
                 Changed?.Invoke();
-                await using var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = policy });
-                // Each generation's router side, attached to its dispatcher and let go with it.
-                session.DispatcherUp += dispatcher => Volatile.Write(ref r.Current, new RunPump(dispatcher, run));
-                session.StatusChanged += _ => Changed?.Invoke();
+                TunnelSession session;
+                try { session = connections.Acquire(r.ProfileId, r.Holder); }
+                catch (Shenora.Core.Ipc.ShenoraException e) { End(r, Sentence(e.Message)); return; }
+                // Each generation's router side, attached to its dispatcher and let go with it — the one up already, when
+                // the channel was (a proxy's), and each one after.
+                void Attach(Sallyport.Net.TunnelDispatcher dispatcher)
+                {
+                    lock (_gate)
+                    {
+                        if (r.Ended is not null || Volatile.Read(ref r.Current)?.Generation >= dispatcher.Generation) return;
+                        try { Volatile.Write(ref r.Current, new RunPump(dispatcher, run)); }
+                        catch (InvalidOperationException) { /* this generation went, or has its route already */ }
+                    }
+                }
+                void Gone(string id, string why) { if (id == r.ProfileId) End(r, why); }
+                void Moved(SessionStatus _) => Changed?.Invoke();
+                session.DispatcherUp += Attach;
+                session.StatusChanged += Moved;
+                connections.ChannelEnded += Gone;
                 lock (_gate) r.Session = session;
+                if (session.Dispatcher is { } up) Attach(up);
                 var forwarding = RunPump.ForwardAsync(run, () => Volatile.Read(ref r.Current));
                 // The worker going (its pipe closed) is the run's end too, whatever the supervisor says of it.
                 _ = run.Completion.ContinueWith(_ => End(r, "The router stopped."), TaskScheduler.Default);
-                await session.RunAsync(r.Stop.Token);
-                if (session.Status.State is SessionState.Refused or SessionState.GaveUp)
-                    End(r, session.Status.State == SessionState.GaveUp
-                        ? $"The connection was given up after its retries. {Sentence(session.Status.LastError)}"
-                        : $"The connection was refused: {session.Status.LastError}");
-                try { await client.StopAsync(run.RunId); }
-                catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException) { }
-                await run.DisposeAsync();
-                await forwarding;
+                try { await Task.Delay(Timeout.Infinite, r.Stop.Token); }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    session.DispatcherUp -= Attach;
+                    session.StatusChanged -= Moved;
+                    connections.ChannelEnded -= Gone;
+                    // The router side goes first, so the channel's proxy keeps its tunnel and the run retires its generation.
+                    if (Volatile.Read(ref r.Current) is { } pump) await pump.DisposeAsync();
+                    try { await client.StopAsync(run.RunId); }
+                    catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException) { }
+                    await run.DisposeAsync();
+                    await forwarding;
+                    await connections.ReleaseAsync(r.ProfileId, r.Holder);
+                }
             }
         }
         catch (OperationCanceledException) when (r.Stop.IsCancellationRequested) { }
@@ -150,7 +174,8 @@ internal sealed class GameRunner : IDisposable
                 r.PhaseSince = DateTimeOffset.Now;
             }
         }
-        // Under the Stop policy the route is over once its tunnel is lost: so are the tunnel's retries.
+        // Under the Stop policy the route is over once its tunnel is lost, and its hold on the channel with it: the channel
+        // goes on retrying only if the person connected it for its proxy.
         if (state.Phase == RoutePhase.Stopped) End(r, "The connection was lost, and this game stops routing when it is.");
         Changed?.Invoke();
     }

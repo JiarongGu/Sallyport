@@ -152,15 +152,14 @@ internal static class ClientView
             facts.Add(new("Uploaded", Bytes(status.BytesUp)));
         }
 
-        if (f.UsedBy is { } game) facts.Add(new("In use by", $"{game} (game routing)"));
+        if (f.UsedBy is { } game) facts.Add(new("Routing through it", game));
         if (f.PolicyChanged) facts.Add(new("Connection settings", "Changed by you"));
 
         var location = Located(f, up);
-        var canConnect = f.Stored.Unsupported is null && f.UsedBy is null;
         var actions = new ProfileActions(
             Connect: running || busy ? UiAction.Hidden
-                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect", canConnect,
-                    f.UsedBy is { } user ? $"{user} is being routed through it. One profile serves a game or a proxy at a time." : "This version cannot connect this profile."),
+                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect", f.Stored.Unsupported is null,
+                    "This version cannot connect this profile."),
             Disconnect: running || f.Disconnecting
                 ? UiAction.Shown(status?.State == TunnelServiceStatus.Connecting ? "Cancel" : "Disconnect", busy: f.Disconnecting)
                 : UiAction.Hidden,
@@ -171,7 +170,7 @@ internal static class ClientView
                     busy: f.Locating)
                 : UiAction.Hidden,
             Remove: UiAction.Shown("Remove profile", !running && !busy && f.UsedBy is null,
-                running ? "Disconnect before removing it." : f.UsedBy is not null ? "Stop routing the game first." : null),
+                f.UsedBy is not null ? "Stop routing what goes through it first." : running ? "Disconnect before removing it." : null),
             Settings: UiAction.Shown("Connection settings", !busy && f.Stored.Unsupported is null, "This version cannot connect this profile."));
 
         return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null, Endpoint(f.Port), f.Port,

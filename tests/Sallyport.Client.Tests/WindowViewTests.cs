@@ -30,12 +30,14 @@ public class WindowViewTests
             At, null, null);
 
     private static IReadOnlyList<GameView> Games(RunFacts? run) =>
-        [GameViews.Game(Zenless(), new GameChoice(Us.Id, LossMode.Hold, null), Us, run, false, false, true, false)];
+        [GameViews.Game(Zenless(), new GameChoice(Us.Id, LossMode.Hold, null), Us, run, false, true, false)];
+
+    private static readonly IReadOnlyDictionary<string, string?> NoProblems = new Dictionary<string, string?>();
 
     [Fact]
     public void Nothing_connected_says_so_and_offers_where_to_begin()
     {
-        var view = WindowViews.Network([Profile(Jp, null)], Games(null), null, [Jp, Us], Ready);
+        var view = WindowViews.Network([Profile(Jp, null)], Games(null), null, [Jp, Us], Ready, NoProblems);
 
         Assert.Equal("Nothing is connected", view.StatusText);
         Assert.Equal(Tone.Off, view.Tone);
@@ -47,7 +49,7 @@ public class WindowViewTests
     [Fact]
     public void A_connected_proxy_is_a_channel_with_its_endpoint_and_disconnect()
     {
-        var channel = Assert.Single(WindowViews.Network([Profile(Jp, TunnelServiceStatus.Up)], Games(null), null, [Jp, Us], Ready).Channels);
+        var channel = Assert.Single(WindowViews.Network([Profile(Jp, TunnelServiceStatus.Up)], Games(null), null, [Jp, Us], Ready, NoProblems).Channels);
 
         Assert.Equal("jp", channel.Name);
         Assert.Equal("Connected", channel.StatusText);
@@ -62,7 +64,7 @@ public class WindowViewTests
     public void A_failure_comes_first_and_is_not_hidden_by_a_healthy_channel()
     {
         var view = WindowViews.Network([Profile(Jp, TunnelServiceStatus.Up), Profile(Us, TunnelServiceStatus.Refused, "authentication was refused")],
-            Games(null), null, [Jp, Us], Ready);
+            Games(null), null, [Jp, Us], Ready, NoProblems);
 
         Assert.Equal(["us", "jp"], view.Channels.Select(c => c.Name));
         Assert.Equal(Tone.Trouble, view.Tone);
@@ -75,7 +77,7 @@ public class WindowViewTests
     public void A_routed_game_is_a_selection_on_its_profiles_channel()
     {
         var run = Running(SessionState.Up);
-        var view = WindowViews.Network([Profile(Jp, null), Profile(Us, null)], Games(run), run, [Jp, Us], Ready);
+        var view = WindowViews.Network([Profile(Jp, null), Profile(Us, null)], Games(run), run, [Jp, Us], Ready, NoProblems);
 
         var channel = Assert.Single(view.Channels);
         Assert.Equal("us", channel.Name);
@@ -95,12 +97,36 @@ public class WindowViewTests
     public void A_reconnecting_route_says_so_on_its_channel()
     {
         var run = Running(SessionState.Reconnecting);
-        var channel = Assert.Single(WindowViews.Network([], Games(run), run, [Jp, Us], Ready).Channels);
+        var channel = Assert.Single(WindowViews.Network([], Games(run), run, [Jp, Us], Ready, NoProblems).Channels);
 
         Assert.Equal(Tone.Busy, channel.Tone);
         Assert.Equal("Reconnecting…", channel.StatusText);
         Assert.Null(channel.ConnectedSince);
         Assert.Equal("Reconnecting — the game's traffic is held", channel.Selections[0].Run.StatusText);
+    }
+
+    [Fact]
+    public void A_proxy_and_a_route_on_one_profile_are_one_channel()
+    {
+        var run = Running(SessionState.Up);
+        var view = WindowViews.Network([Profile(Us, TunnelServiceStatus.Up)], Games(run), run, [Jp, Us], Ready, NoProblems);
+
+        var channel = Assert.Single(view.Channels);
+        Assert.Equal("SOCKS5 proxy on 127.0.0.1:1088", channel.ProxyText);
+        Assert.Equal("Zenless Zone Zero", Assert.Single(channel.Selections).Name);
+        Assert.True(channel.Actions.Disconnect is { Visible: true, Label: "Disconnect" });
+        Assert.Equal("1 connection · 1 app routed", view.StatusText);
+    }
+
+    [Fact]
+    public void A_proxy_that_could_not_listen_is_said_on_its_channel_without_failing_it()
+    {
+        var view = WindowViews.Network([Profile(Us, TunnelServiceStatus.Up)], Games(null), null, [Jp, Us], Ready,
+            new Dictionary<string, string?> { [Us.Id] = "port 1088 is in use by something else" });
+
+        var channel = Assert.Single(view.Channels);
+        Assert.Equal("SOCKS5 proxy not listening: port 1088 is in use by something else", channel.ProxyText);
+        Assert.Equal(Tone.Up, channel.Tone);
     }
 
     [Theory]

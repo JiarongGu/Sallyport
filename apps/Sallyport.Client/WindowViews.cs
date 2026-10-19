@@ -39,19 +39,30 @@ internal static class WindowViews
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
 
     /// <summary>What is connected and what goes through it now: a channel for each profile in use, failure first.</summary>
+    /// <summary>What is connected and what goes through it now: one channel per profile in use — its proxy and the apps
+    /// routed through it on one card, as they share one login — failure first. <paramref name="proxyProblems"/>: why a
+    /// channel's proxy is not listening, by profile.</summary>
     public static NetworkView Network(IReadOnlyList<ProfileView> profiles, IReadOnlyList<GameView> games, RunFacts? run,
-        IReadOnlyList<StoredProfile> stored, DriverView routing)
+        IReadOnlyList<StoredProfile> stored, DriverView routing, IReadOnlyDictionary<string, string?> proxyProblems)
     {
         var channels = new List<ChannelView>();
+        var routedGame = run is { Ended: null } ? games.FirstOrDefault(g => g.Id == run.GameId) : null;
         foreach (var p in profiles)
         {
             if (p.Phase is ProfilePhase.Idle or ProfilePhase.Unsupported or ProfilePhase.Removing) continue;
             // The profile's own facts, without what never changes (it is on the Profiles page).
-            var facts = p.Facts.Where(f => f.Label is not ("Transport" or "Imported" or "SOCKS5 port" or "Connection settings")).ToList();
-            channels.Add(new ChannelView($"proxy:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts,
-                p.Phase is ProfilePhase.Refused or ProfilePhase.Stopped ? null : $"SOCKS5 proxy on {p.EndpointText}", [], new ChannelActions(p.Actions.Disconnect)));
+            var facts = p.Facts.Where(f => f.Label is not ("Transport" or "Imported" or "SOCKS5 port" or "Connection settings" or "Routing through it")).ToList();
+            var selections = routedGame is { Run: { } routedRun } && run!.ProfileId == p.Id
+                ? new List<SelectionView> { Selection(routedGame, routedRun) }
+                : [];
+            var proxy = p.Phase is ProfilePhase.Refused or ProfilePhase.Stopped ? null
+                : proxyProblems.GetValueOrDefault(p.Id) is { } problem ? $"SOCKS5 proxy not listening: {problem}"
+                : $"SOCKS5 proxy on {p.EndpointText}";
+            channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy, selections,
+                new ChannelActions(p.Actions.Disconnect)));
         }
-        if (run is { Ended: null } && games.FirstOrDefault(g => g.Id == run.GameId) is { Run: { } routed } game)
+        // A run whose channel is not up yet (the service still preparing it) is shown on its own until it is.
+        if (routedGame is { Run: { } routed } game && run is not null && !channels.Any(c => c.ProfileId == run.ProfileId))
         {
             var name = stored.FirstOrDefault(s => s.Id == run.ProfileId)?.Name ?? "its profile";
             var tunnel = run.Tunnel;
@@ -78,9 +89,7 @@ internal static class WindowViews
             }
             channels.Add(new ChannelView($"route:{run.ProfileId}", run.ProfileId, name, tone, text, detail,
                 tunnel is { State: SessionState.Up } ? tunnel.Since : null, facts, null,
-                // The tunnel's own facts are the channel's, said once above the apps it carries.
-                [new SelectionView(game.Id, game.Name, routed with { Facts = [.. routed.Facts.Where(f => f.Label is not ("Connected over" or "Tunnel address" or "Reconnects"))] },
-                    game.Actions.Stop)], new ChannelActions(UiAction.Hidden)));
+                [Selection(game, routed)], new ChannelActions(UiAction.Hidden)));
         }
 
         // Trouble first, then work under way: one healthy channel must not hide another's failure.
@@ -93,6 +102,10 @@ internal static class WindowViews
         return new NetworkView(status, worst, channels.Count == 0 ? new("Nothing is connected", "Route an app or connect a profile to begin.") : null,
             channels, routing);
     }
+
+    // The tunnel's own facts are the channel's, said once above the apps it carries.
+    private static SelectionView Selection(GameView game, RunView run) =>
+        new(game.Id, game.Name, run with { Facts = [.. run.Facts.Where(f => f.Label is not ("Connected over" or "Tunnel address" or "Reconnects"))] }, game.Actions.Stop);
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn)
     {

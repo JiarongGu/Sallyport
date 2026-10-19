@@ -186,13 +186,24 @@ internal sealed class ClientCore
     {
         var profile = Profile(id);
         if (profile.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, $"This version cannot connect {profile.Name}: {why}.");
-        if (_runner.ProfileInUse == id)
-            throw new ShenoraException("PROFILE_IN_USE", "id", id, $"A game is being routed through {profile.Name}. One profile serves a game or a proxy at a time.");
         _locationFailed.TryRemove(id, out _);
         _connections.Connect(id);
     }
 
+    /// <summary>Takes the profile's channel down — its proxy, and what is routed through it, asked about first.</summary>
     public async Task DisconnectAsync(string id)
+    {
+        if (!_connections.IsRunning(id)) return;
+        if (_runner.ProfileInUse == id && _runner.Facts() is { Ended: null } run && _items.Find(run.GameId) is { } routed)
+        {
+            Confirm("disconnect", id, $"Disconnect {Profile(id).Name}?",
+                $"{routed.Name} is routed through it. Its routing stops too, and it carries on over your own connection.", "Disconnect", "Keep connected");
+            return;
+        }
+        await TakeDownAsync(id);
+    }
+
+    private async Task TakeDownAsync(string id)
     {
         if (!_connections.IsRunning(id) || !_disconnecting.TryAdd(id, 0)) return;
         Publish();
@@ -293,6 +304,7 @@ internal sealed class ClientCore
         switch (confirmation.Kind)
         {
             case "remove-profile": await RemoveProfileAsync(confirmation.SubjectId); break;
+            case "disconnect": await TakeDownAsync(confirmation.SubjectId); break;
             case "remove-game": RemoveGame(confirmation.SubjectId); break;
             case "driver-install": await ManageDriverAsync(install: true); break;
             case "driver-remove": await ManageDriverAsync(install: false); break;
@@ -450,15 +462,10 @@ internal sealed class ClientCore
             throw new ShenoraException("GAME_NO_PROFILE", "id", id, $"Choose a VPN profile for {game.Name} first (Edit).");
         if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, $"This version cannot connect {stored.Name}: {why}.");
         if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, "Another game is being routed. Stop it first.");
-        if (_connections.IsRunning(stored.Id))
-            throw new ShenoraException("PROFILE_IN_USE", "id", id, $"{stored.Name} is connected as a proxy. Disconnect it first: one profile serves a game or a proxy at a time.");
         if (game.IncludedPaths.Count == 0) throw new ShenoraException("GAME_EMPTY", "id", id, $"Include at least one of {game.Name}'s programs.");
 
-        OvpnProfile profile;
-        try { profile = _store.Load(stored.Id); }
-        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException or FileNotFoundException)
-        { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, $"{stored.Name} could not be opened."); }
-        _runner.Start(game, stored.Id, profile, _settings.PolicyOf(stored.Id).Over(profile.Policy), choice.Policy);
+        // Through the profile's channel: the same login as its proxy, if that is connected (docs/design/window.md).
+        _runner.Start(game, stored.Id, choice.Policy);
         Notify(NoticeKind.Info, $"Routing {game.Name} through {stored.Name}. If the game is running already, it may need to rejoin.", new("game", id));
     }
 
@@ -729,7 +736,7 @@ internal sealed class ClientCore
                 var choice = g.Choice;
                 var profile = stored.FirstOrDefault(p => p.Id == choice.ProfileId);
                 return GameViews.Game(g.AsGame(), choice, profile, run, run is { Ended: null } && run.GameId != g.Id,
-                    profile is not null && _connections.IsRunning(profile.Id), driver.Phase == DriverPhase.Ready, Volatile.Read(ref _dialog) is not null);
+                    driver.Phase == DriverPhase.Ready, Volatile.Read(ref _dialog) is not null);
             })
             .ToList();
         var apps = items.Where(i => i.ProxyProgram is not null).Select(i =>
@@ -773,7 +780,7 @@ internal sealed class ClientCore
             ClientView.ProfilesEmpty(stored.Count),
             ClientView.AppsEmpty(stored.Count, apps.Count),
             GameViews.GamesEmpty(games.Count),
-            WindowViews.Network(profiles, gameViews, run, stored, driver),
+            WindowViews.Network(profiles, gameViews, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id))),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere()),
             // Where a first look is useful: with nothing to route through yet, the page that imports one.
             stored.Count == 0 ? Page.Profiles : Page.Apps,

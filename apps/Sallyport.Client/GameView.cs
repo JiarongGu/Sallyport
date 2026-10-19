@@ -62,7 +62,7 @@ internal static class GameViews
         _ => "If the VPN drops: the game's traffic is held",
     };
 
-    public static GameView Game(GameProfile game, GameChoice choice, StoredProfile? profile, RunFacts? run, bool anotherRunning, bool profileProxied,
+    public static GameView Game(GameProfile game, GameChoice choice, StoredProfile? profile, RunFacts? run, bool anotherRunning,
         bool driverReady, bool busy)
     {
         var mine = run?.GameId == game.Id ? run : null;
@@ -78,7 +78,6 @@ internal static class GameViews
             anotherRunning ? "Another game is being routed. Stop it first." :
             profile is null ? "Choose a VPN profile for this game first (Edit)." :
             profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
-            profileProxied ? $"{profile.Name} is connected as a proxy. Disconnect it first: one profile serves a game or a proxy at a time." :
             included == 0 ? "Include at least one of its programs." :
             !driverReady ? "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing." :
             null;

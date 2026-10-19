@@ -227,8 +227,17 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       CPU loaded by other work (70 %), the worker's loop stood still 0.5 and 1.4 s and the guard ended the run
       ("the network stopped answering"), the child then going direct; the worker now runs at high priority with its
       router on a highest-priority thread, and the run above was on the same loaded machine (56 %), no stall logged.
-   4. **`ChannelManager`:** one channel per profile, shared by proxy and packet routing; the "one profile serves a game
-      or a proxy" refusals removed after step 3's measurement; stopping one method leaves the other working.
+   4. **One channel per profile — measured 2026-10-20** (`Connections` is the channel manager; `GameRunner` holds a
+      profile's channel instead of a login of its own): up while the person connected it or a route holds it; its
+      proxy binds when it can and says why when it cannot, never failing a route; Disconnect with a route on it asks
+      first. On the installed client, through UI Automation, with the tool's copy as a stand-in app (`childbin`,
+      added by `--add-game`, removed after): jp connected → proxy reached the VPN; childbin run → Network one card,
+      "1 connection · 1 app routed", jp with its SOCKS5 proxy and childbin "Routed through jp"; childbin's own STUN and
+      HTTPS (4 of 4 and every request, the VPN seen) while the proxy fetched (the VPN seen) — one login; Stop routing →
+      jp stayed connected, the proxy still the VPN; run again, Disconnect → "Disconnect jp? childbin is routed through
+      it…", confirmed → nothing connected, childbin "jp was disconnected.", the proxy gone, the service's run ended and
+      the adapter `None -> None`; jp not connected, childbin run → jp brought up (its proxy listening too), childbin's
+      traffic the VPN; Stop routing → jp down again.
    5. **Many channels in the service's one run:** selections on different profiles at once; one channel's outage;
       the adapters back when the last ends.
    6. **The Apps editors:** add a program or a folder, methods per program, Route / Launch / Stop, conflicts refused.
