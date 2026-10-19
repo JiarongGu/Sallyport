@@ -19,9 +19,12 @@ public sealed class TunnelEnded(string message, Exception? inner = null) : Excep
 
 /// <summary>A snapshot of what has crossed the tunnel. <see cref="OppositeDirection"/> counts packets that authenticate
 /// only under this side's own sending key — both sides chose the same key half, which no other fault produces.</summary>
+/// <remarks><see cref="MissingIn"/> counts packet ids the server sent that never opened here, wherever they were lost.
+/// <see cref="Overflowed"/> counts what this process threw away itself, before opening or after, because a queue
+/// between two of its own loops was full. Without it, a reader falling behind reads as a lossy path.</remarks>
 public readonly record struct TunnelCounters(
     long PacketsIn, long PacketsOut, long BytesIn, long BytesOut, long PingsIn, long PingsOut,
-    long Rejected, long OppositeDirection, long Replayed, int ControlDropped, long MissingIn);
+    long Rejected, long OppositeDirection, long Replayed, int ControlDropped, long MissingIn, long Overflowed);
 
 /// <summary>Options a caller rarely sets.</summary>
 public sealed class TunnelOptions
@@ -46,13 +49,12 @@ public sealed class Tunnel : IAsyncDisposable
     private readonly DataChannel _data;
     private readonly X509Certificate2 _certificate;
     private readonly CancellationTokenSource _stop = new();
-    private readonly Channel<byte[]> _packets = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096)
-        { SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly Channel<byte[]> _packets;
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly List<string> _other;
     private Task _loops = Task.CompletedTask;
     private long _lastSent, _lastReceived;
-    private long _packetsIn, _packetsOut, _bytesIn, _bytesOut, _pingsIn, _pingsOut, _rejected, _opposite, _replayed;
+    private long _packetsIn, _packetsOut, _bytesIn, _bytesOut, _pingsIn, _pingsOut, _rejected, _opposite, _replayed, _overflowed;
     private int _disposed;
 
     private Tunnel(ControlChannel channel, SslStream tls, TlsInbox inbox, DataChannel data, X509Certificate2 certificate, List<string> other)
@@ -63,6 +65,9 @@ public sealed class Tunnel : IAsyncDisposable
         _data = data;
         _certificate = certificate;
         _other = other;
+        // Lossy for the same reason as the control channel's data queue: an IP packet nobody reads in time is dropped.
+        _packets = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest },
+            _ => Interlocked.Increment(ref _overflowed));
     }
 
     public required Remote Remote { get; init; }
@@ -87,7 +92,7 @@ public sealed class Tunnel : IAsyncDisposable
     public TunnelCounters Counters => new(
         Interlocked.Read(ref _packetsIn), Interlocked.Read(ref _packetsOut), Interlocked.Read(ref _bytesIn), Interlocked.Read(ref _bytesOut),
         Interlocked.Read(ref _pingsIn), Interlocked.Read(ref _pingsOut), Interlocked.Read(ref _rejected), Interlocked.Read(ref _opposite),
-        Interlocked.Read(ref _replayed), _channel.Dropped, _data.Missing);
+        Interlocked.Read(ref _replayed), _channel.Dropped, _data.Missing, _channel.DataOverflowed + Interlocked.Read(ref _overflowed));
 
     public async ValueTask SendAsync(ReadOnlyMemory<byte> packet, CancellationToken ct = default)
     {

@@ -41,10 +41,7 @@ internal sealed class ControlChannel : IAsyncDisposable
     private readonly SemaphoreSlim _sending = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
     private readonly Channel<ControlPacket> _inbound = Channel.CreateUnbounded<ControlPacket>(new UnboundedChannelOptions { SingleWriter = true });
-    // Bounded and lossy on purpose: a data packet nobody reads in time is a dropped datagram, which IP already expects,
-    // where an unbounded queue would grow without limit behind a slow reader.
-    private readonly Channel<byte[]> _data = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096)
-        { SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest });
+    private readonly Channel<byte[]> _data;
     private readonly List<Outgoing> _outgoing = [];
     private readonly SortedDictionary<uint, ControlPacket> _early = [];
     private readonly List<uint> _acksOwed = [];
@@ -52,12 +49,18 @@ internal sealed class ControlChannel : IAsyncDisposable
     private readonly uint _time = (uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private uint _replay, _nextId, _expected;
     private int _dropped;
+    private long _dataOverflowed;
     private Task _receiving = Task.CompletedTask, _ticking = Task.CompletedTask;
 
     public ControlChannel(ITransport transport, TlsCrypt crypt)
     {
         _transport = transport;
         _crypt = crypt;
+        // Bounded and lossy on purpose: a data packet nobody reads in time is a dropped datagram, which IP already
+        // expects, where an unbounded queue would grow without limit behind a slow reader. Counted, because the replay
+        // window books the skipped ids as missing, and nothing else would say the loss was this process's own.
+        _data = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest },
+            _ => Interlocked.Increment(ref _dataOverflowed));
     }
 
     public byte[] LocalSession { get; } = RandomNumberGenerator.GetBytes(ControlPacket.SessionIdLength);
@@ -70,6 +73,8 @@ internal sealed class ControlChannel : IAsyncDisposable
     /// <summary>Data-channel packets, still sealed: the same transport carries both channels, and only the opcode tells
     /// them apart.</summary>
     public ChannelReader<byte[]> DataInbound => _data.Reader;
+    /// <summary>Data packets thrown away unread because <see cref="DataInbound"/> was full.</summary>
+    public long DataOverflowed => Interlocked.Read(ref _dataOverflowed);
 
     /// <summary>Sends a sealed data packet. It shares the semaphore with the control channel because a TCP transport
     /// cannot take two writes at once.</summary>
