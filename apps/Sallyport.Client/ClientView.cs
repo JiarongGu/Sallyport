@@ -71,14 +71,15 @@ internal sealed record ClientState(
     EmptyView? ProfilesEmpty,
     EmptyView? AppsEmpty,
     EmptyView? GamesEmpty,
-    string AppsNote,
-    DriverView Driver,
+    NetworkView Network,
+    SettingsView Settings,
+    Page InitialPage,
+    NavigationView? Navigation,
     IReadOnlyList<ClientState.ProfileChoice> ProfileChoices,
     IReadOnlyList<ClientState.KindChoice> KindChoices,
     IReadOnlyList<LossChoice> LossChoices,
     EditorView? Editor,
     ConfirmationView? Confirmation,
-    ClientState.GuideView Guide,
     IReadOnlyList<Notice> Notices)
 {
     internal sealed record SummaryView(string Text, Tone Tone);
@@ -103,8 +104,6 @@ internal static class ClientView
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
-
-    public const string AppsNote = "Apps here use proxy settings. Games, and programs that ignore proxy settings, are routed on the Games page.";
 
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
 
@@ -160,7 +159,7 @@ internal static class ClientView
         var canConnect = f.Stored.Unsupported is null && f.UsedBy is null;
         var actions = new ProfileActions(
             Connect: running || busy ? UiAction.Hidden
-                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect proxy", canConnect,
+                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect", canConnect,
                     f.UsedBy is { } user ? $"{user} is being routed through it. One profile serves a game or a proxy at a time." : "This version cannot connect this profile."),
             Disconnect: running || f.Disconnecting
                 ? UiAction.Shown(status?.State == TunnelServiceStatus.Connecting ? "Cancel" : "Disconnect", busy: f.Disconnecting)

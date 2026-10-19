@@ -1,29 +1,21 @@
 import { getBridge, useShenoraEvent } from '@shenora/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ClientState, Notice } from './contract';
+import type { ClientState, Notice, Page } from './contract';
 import { MODULE } from './contract';
 import { Apps } from './Apps';
-import { Games } from './Games';
-import { Guide } from './Guide';
+import { Network } from './Network';
 import { Profiles } from './Profiles';
+import { Settings } from './Settings';
 import { EditorForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
 import { TitleBar } from './ui/TitleBar';
 
-type Page = 'profiles' | 'games' | 'apps' | 'guide';
-
-function remembered(): Page {
-  // Storage can be refused by WebView policy; navigation must still work.
-  try {
-    const page = localStorage.getItem('sallyport.page');
-    if (page === 'profiles' || page === 'games' || page === 'apps' || page === 'guide') return page;
-  } catch { /* The first page is only a convenience. */ }
-  return 'profiles';
-}
+const pages: readonly (readonly [Page, string])[] = [['apps', 'Apps'], ['network', 'Network'], ['profiles', 'Profiles'], ['settings', 'Settings']];
 
 export function App() {
   const [state, setState] = useState<ClientState>();
-  const [page, setPage] = useState<Page>(remembered);
+  // Null until the first state says where a first look opens; the person's own choice after that.
+  const [page, setPage] = useState<Page | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [earlierOpen, setEarlierOpen] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -31,6 +23,7 @@ export function App() {
   const polite = useRef<HTMLDivElement>(null);
   const alert = useRef<HTMLDivElement>(null);
   const editorToken = useRef<string | null>(null);
+  const navigationRequest = useRef<number | null>(null);
   const take = useCallback((next: ClientState) => {
     setState((current) => !current || next.sequence > current.sequence ? next : current);
   }, []);
@@ -53,18 +46,26 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const go = useCallback((next: Page) => {
-    setPage(next);
-    try { localStorage.setItem('sallyport.page', next); }
-    catch { /* Storage policy must not block navigation. */ }
-  }, []);
+  // The host's request to show a page (the tray's Open Network) is followed once; a request already seen when the
+  // window loaded is not, so a reload does not move the person.
+  useEffect(() => {
+    if (!state) return;
+    const request = state.navigation?.request ?? 0;
+    if (navigationRequest.current === null) {
+      navigationRequest.current = request;
+      setPage((current) => current ?? state.navigation?.page ?? state.initialPage);
+    } else if (request !== navigationRequest.current && state.navigation) {
+      navigationRequest.current = request;
+      setPage(state.navigation.page);
+    }
+  }, [state]);
 
   useEffect(() => {
     const editor = state?.editor;
     if (editor && editor.token !== editorToken.current)
-      go(editor.kind === 'port' || editor.kind === 'policy' ? 'profiles' : editor.kind === 'game' ? 'games' : 'apps');
+      setPage(editor.kind === 'port' || editor.kind === 'policy' ? 'profiles' : 'apps');
     editorToken.current = editor?.token ?? null;
-  }, [state?.editor?.token, go]);
+  }, [state?.editor?.token]);
 
   // Reconcile before rendering fields so a new token cannot submit the previous draft for a frame.
   let currentDraft = draft;
@@ -84,22 +85,24 @@ export function App() {
   const editorForm = state?.editor && currentDraft ? <EditorForm key={state.editor.token}
     editor={state.editor} draft={currentDraft} onChange={setDraft}
     profileChoices={state.profileChoices} kindChoices={state.kindChoices} lossChoices={state.lossChoices} /> : null;
+  const shown = page ?? state?.initialPage ?? 'apps';
 
   return <div className="shell">
     <TitleBar summary={state?.summary} />
     <nav className="navigation" aria-label="Main">
-      {([['profiles', 'Profiles'], ['games', 'Games'], ['apps', 'Apps'], ['guide', 'How to use']] as const).map(([value, label]) =>
-        <button key={value} type="button" className={`nav-item${page === value ? ' selected' : ''}`}
-          aria-current={page === value ? 'page' : undefined} onClick={() => go(value)}>{label}</button>)}
+      {pages.map(([value, label]) =>
+        <button key={value} type="button" className={`nav-item${shown === value ? ' selected' : ''}`}
+          aria-current={shown === value ? 'page' : undefined} onClick={() => setPage(value)}>{label}</button>)}
     </nav>
     <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
     <main className="content" id="main-content">
       {!state ? <div className="loading secondary" role="status">Loading…</div> :
-        page === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle}
+        shown === 'apps' ? <Apps state={state} now={now} expanded={expanded} toggle={toggle}
+          editorForm={state.editor?.kind === 'game' || state.editor?.kind === 'app' ? editorForm : null} /> :
+        shown === 'network' ? <Network state={state} now={now} go={setPage} /> :
+        shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle}
           editorForm={state.editor?.kind === 'port' || state.editor?.kind === 'policy' ? editorForm : null} /> :
-        page === 'games' ? <Games state={state} now={now} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'game' ? editorForm : null} /> :
-        page === 'apps' ? <Apps state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'app' ? editorForm : null} /> :
-        <Guide guide={state.guide} manualOpen={expanded.has('manual')} toggleManual={() => toggle('manual')} />}
+        <Settings state={state} expanded={expanded} toggle={toggle} />}
     </main>
     <div className="sr-only" ref={polite} role="status" aria-live="polite" aria-atomic="true" />
     <div className="sr-only" ref={alert} role="alert" aria-atomic="true" />

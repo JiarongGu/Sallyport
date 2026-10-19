@@ -236,3 +236,22 @@ legend { padding: 0; margin-bottom: 4px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+h3 { font-size: 1.071429rem; line-height: 1.4; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+h4 { font-size: 1rem; line-height: 1.428571; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.app-section { margin-bottom: 32px; }
+.section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.section-head p { margin-top: 4px; max-width: 40rem; }
+.section-empty { border: 1px dashed var(--border); border-radius: 8px; padding: 16px; display: grid; justify-items: start; gap: 4px; }
+.section-empty .action { margin-top: 8px; }
+.network-summary { margin: -12px 0 16px; }
+.network-routing { margin-top: 32px; display: grid; gap: 12px; }
+.channel .facts { margin: 12px 0 0; }
+.channel-proxy { margin-top: 4px; }
+.selection { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.settings-group { margin-bottom: 32px; display: grid; gap: 12px; }
+.settings-group > p { margin-top: -8px; }
+.settings-group .driver { margin: 0; }
+.settings-group .check-field { padding: 12px 16px; }
+.settings-group .check-field > span { display: flex; flex-direction: column; gap: 2px; }
+.guide .steps h3 { font-size: 1rem; }

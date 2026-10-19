@@ -61,6 +61,8 @@ internal sealed class ClientCore
     private const long DriverFactsLast = 3000;
     private long _sequence;
     private long _noticeIds;
+    private NavigationView? _navigation;
+    private long _navigations;
 
     private sealed record OpenEditor(string Token, string Kind, string SubjectId, object Values, IReadOnlyDictionary<string, string> Errors);
 
@@ -117,6 +119,22 @@ internal sealed class ClientCore
         _events.Emit(Module, "NOTICE", JsonSerializer.SerializeToElement(notice, ClientView.Json));
         Publish();
         Noticed?.Invoke(notice);
+    }
+
+    /// <summary>Asks the window to show a page (the tray's Open Network): once, by a new request number, so a later state
+    /// does not pull the person back from where they went.</summary>
+    public void Navigate(Page page)
+    {
+        lock (_gate) _navigation = new NavigationView(page, Interlocked.Increment(ref _navigations));
+        Publish();
+    }
+
+    public void SetStartWithWindows(bool on)
+    {
+        try { StartupRegistration.Set(on); }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        { throw new ShenoraException("STARTUP", "startup", "", $"Windows did not let Sallyport change how it starts ({e.GetType().Name})."); }
+        Notify(NoticeKind.Info, on ? "Sallyport starts in the notification area when you sign in." : "Sallyport no longer starts when you sign in.");
     }
 
     public void Dismiss(string noticeId)
@@ -713,15 +731,21 @@ internal sealed class ClientCore
 
         var dialog = Volatile.Read(ref _dialog);
         var guideEndpoint = GuideEndpoint(profiles);
+        var guide = new ClientState.GuideView(guideEndpoint, ClientView.CurlExample(guideEndpoint), UiAction.Shown("Copy"));
         OpenEditor? editor;
         OpenConfirmation? confirmation;
         List<Notice> notices;
+        NavigationView? navigation;
         lock (_gate)
         {
             editor = _editor;
             confirmation = _confirmation;
             notices = [.. _notices];
+            navigation = _navigation;
         }
+        bool startsWithWindows;
+        try { startsWithWindows = StartupRegistration.IsOn(); }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException) { startsWithWindows = false; }
 
         return new ClientState(
             ++_sequence,
@@ -737,8 +761,11 @@ internal sealed class ClientCore
             ClientView.ProfilesEmpty(stored.Count),
             ClientView.AppsEmpty(stored.Count, apps.Count),
             GameViews.GamesEmpty(games.Count),
-            ClientView.AppsNote,
-            driver,
+            WindowViews.Network(profiles, gameViews, run, stored, driver),
+            WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere()),
+            // Where a first look is useful: with nothing to route through yet, the page that imports one.
+            stored.Count == 0 ? Page.Profiles : Page.Apps,
+            navigation,
             [.. stored.Select(p => new ClientState.ProfileChoice(p.Id, $"{p.Name} (port {_settings.PortOf(p.Id)})", p.Unsupported is null))],
             [.. Enum.GetValues<AppKind>().Select(k => new ClientState.KindChoice(k, ClientView.KindLabel(k), ClientView.KindHelp(k)))],
             GameViews.LossChoices,
@@ -751,7 +778,6 @@ internal sealed class ClientCore
                 editor.Kind, editor.Values),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),
-            new ClientState.GuideView(guideEndpoint, ClientView.CurlExample(guideEndpoint), UiAction.Shown("Copy")),
             notices);
     }
 

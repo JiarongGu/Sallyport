@@ -28,7 +28,7 @@ public class ClientViewTests
 
         Assert.Equal(ProfilePhase.Idle, view.Phase);
         Assert.Equal("Not connected", view.StatusText);
-        Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Label: "Connect proxy" });
+        Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Label: "Connect" });
         Assert.False(view.Actions.Disconnect.Visible);
         Assert.True(view.Actions.EditPort.Enabled);
         Assert.True(view.Actions.Remove.Enabled);

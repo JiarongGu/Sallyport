@@ -199,8 +199,16 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
 8. **The client — `docs/design/window.md`** (the owner: one Apps list, every routing method in one channel per profile;
    tabs Apps · Network · Profiles · Settings), in its working increments, each with C# view tests and the real window
    driven through UI Automation:
-   1. **Four tabs over what exists:** Apps (games and proxy apps together), Network (connections, the running route,
-      routing health), Profiles, Settings (packet routing, startup, how to use, about); the tray's Open Network.
+   1. **Four tabs over what exists — measured 2026-10-20** on the installed client (`D:\Program Files\Sallyport`),
+      through UI Automation: opens on Apps (packet section with Zenless, proxy section empty), Network "Nothing is
+      connected" with Open Apps / Open Profiles and the routing card ("Packet routing is ready"), Settings (driver and
+      service, start with Windows, how to use, about: version, installed in D:, the data in `data\users\<SID>`).
+      Start with Windows on → HKCU Run `"D:\Program Files\Sallyport\Sallyport.Client.exe" --tray`, off → gone. jp
+      connected from Profiles → Network: one channel, "SOCKS5 proxy on 127.0.0.1:1088", udp/1194, its tunnel address;
+      Disconnect there → nothing connected. Zenless run from Apps → Network: "1 connection · 1 app routed", the jp
+      channel connected with Zenless as its selection; Stop routing there → the service's run ended ("stopped by the
+      client"), the adapter `None -> None`, 0 queued. Could not be checked through UI Automation: the tray's Open
+      Network and Settings items (the tray's menu is not reached from it).
    2. **One store:** `RoutedItemStore` — an app is a program or a folder, each program with its methods — migrated from
       games, game choices and proxy apps, IDs kept, read back before it counts.
    3. **One reader per tunnel:** a dispatcher, the port split (proxy 40960–49151, the router's NAT the rest), pieces to

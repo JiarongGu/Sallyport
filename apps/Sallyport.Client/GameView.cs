@@ -80,7 +80,7 @@ internal static class GameViews
             profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
             profileProxied ? $"{profile.Name} is connected as a proxy. Disconnect it first: one profile serves a game or a proxy at a time." :
             included == 0 ? "Include at least one of its programs." :
-            !driverReady ? "Game routing is not ready on this computer (see above)." :
+            !driverReady ? "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing." :
             null;
         var actions = new GameActions(
             Run: live ? UiAction.Hidden : UiAction.Shown(mine is { Ended: not null } ? "Run again" : "Run", cannotRun is null && !busy, cannotRun),
@@ -159,7 +159,7 @@ internal static class GameViews
             { DriverInstalled: false } => (DriverPhase.NotInstalled, Tone.Off, "The packet driver is not installed",
                 "Game routing takes each game's packets through NT Kernel's free Windows Packet Filter driver. Sallyport fetches NT Kernel's own release and installs it."),
             { ServiceRunning: false } => (DriverPhase.Unknown, Tone.Trouble, "The Sallyport service is not running", "Windows starts it at boot; restart the computer if it stays stopped."),
-            _ => (DriverPhase.Ready, Tone.Up, "Ready to route games", (string?)null),
+            _ => (DriverPhase.Ready, Tone.Up, "Packet routing is ready", (string?)null),
         };
         var facts = new List<Fact>
         {

@@ -56,6 +56,12 @@ internal sealed class StatusTray : IDisposable
         _window.Activate();
     }
 
+    private void ShowPage(Page page)
+    {
+        _core.Navigate(page);
+        ShowWindow();
+    }
+
     public void Exit()
     {
         _exiting = true;
@@ -127,6 +133,7 @@ internal sealed class StatusTray : IDisposable
         var open = new ToolStripMenuItem("Open Sallyport", null, (_, _) => ShowWindow());
         open.Font = _bold ??= new Font(open.Font, FontStyle.Bold);
         _menu.Items.Add(open);
+        _menu.Items.Add(new ToolStripMenuItem("Open Network", null, (_, _) => ShowPage(Page.Network)) { ToolTipText = state.Network.StatusText });
         _menu.Items.Add(new ToolStripSeparator());
 
         if (state.Profiles.Count == 0)
@@ -185,6 +192,7 @@ internal sealed class StatusTray : IDisposable
         }
 
         _menu.Items.Add(new ToolStripSeparator());
+        _menu.Items.Add(new ToolStripMenuItem("Settings", null, (_, _) => ShowPage(Page.Settings)));
         _menu.Items.Add(new ToolStripMenuItem("Exit Sallyport", null, (_, _) => Exit()) { ToolTipText = "Stops game routing, disconnects every profile, then quits." });
     }
 

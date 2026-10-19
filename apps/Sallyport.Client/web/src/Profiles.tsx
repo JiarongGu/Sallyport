@@ -8,7 +8,7 @@ export function Profiles({ state, now, expanded, toggle, editorForm }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
   return <section className="page" aria-label="Profiles">
-    <PageHeader title="Profiles" subtitle="Use an OpenVPN profile for a game, or connect it as a local SOCKS5 proxy for apps.">
+    <PageHeader title="Profiles" subtitle="Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.">
       <ActionButton action={state.actions.import} primary onClick={() => post('IMPORT', {})} />
     </PageHeader>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}

@@ -41,7 +41,7 @@ public class GameViewTests
     [Theory]
     [InlineData(true, false, true, "Another game is being routed. Stop it first.")]
     [InlineData(false, true, true, "jp is connected as a proxy. Disconnect it first: one profile serves a game or a proxy at a time.")]
-    [InlineData(false, false, false, "Game routing is not ready on this computer (see above).")]
+    [InlineData(false, false, false, "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing.")]
     public void A_game_that_cannot_run_says_why(bool another, bool proxied, bool driverReady, string reason)
     {
         var run = View(another: another, proxied: proxied, driverReady: driverReady).Actions.Run;

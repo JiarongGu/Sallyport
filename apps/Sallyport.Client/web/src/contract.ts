@@ -5,6 +5,9 @@
 
 export const MODULE = 'CLIENT';
 
+/** The window's four tabs (docs/design/window.md). */
+export type Page = 'apps' | 'network' | 'profiles' | 'settings';
+
 export type Tone = 'off' | 'busy' | 'up' | 'trouble' | 'info';
 export type AppKind = 'chromium' | 'firefox' | 'electron' | 'environment';
 /** What a game's traffic does while its VPN is lost (docs/design/product.md §3). */
@@ -134,6 +137,55 @@ export interface DriverView {
   remove: Action;
 }
 
+/** An app's routing, as the channel it goes through shows it. */
+export interface SelectionView {
+  id: string;
+  name: string;
+  run: RunView;
+  /** Posts STOP_RUN. */
+  stop: Action;
+}
+
+/** One profile's connection: what it is, what goes through it (its proxy, the apps routed), and how to end it. */
+export interface ChannelView {
+  id: string;
+  profileId: string;
+  name: string;
+  tone: Tone;
+  statusText: string;
+  detailText: string | null;
+  /** ISO time the tunnel came up; the page shows "Connected for {duration}" from it. */
+  connectedSince: string | null;
+  facts: Fact[];
+  /** "SOCKS5 proxy on 127.0.0.1:1088", when the channel serves one. */
+  proxyText: string | null;
+  selections: SelectionView[];
+  /** Disconnect posts DISCONNECT with the channel's profileId. */
+  actions: { disconnect: Action };
+}
+
+export interface NetworkView {
+  /** "2 connections · 1 app routed", "Nothing is connected" */
+  statusText: string;
+  tone: Tone;
+  /** Shown when nothing is connected, with links to Apps and Profiles. */
+  empty: { title: string; text: string } | null;
+  /** Trouble first. */
+  channels: ChannelView[];
+  /** The packet driver and the Sallyport service, as they are. */
+  routing: DriverView;
+}
+
+export interface SettingsView {
+  /** The packet driver and the Sallyport service, with install and remove. */
+  routing: DriverView;
+  /** Toggle posts SET_START_WITH_WINDOWS with the opposite of `on`. */
+  startup: { on: boolean; label: string; text: string; toggle: Action };
+  guide: { endpointText: string; curlExample: string; copyExample: Action };
+  /** Version, where it is installed, where its data is, the driver and the service. */
+  about: Fact[];
+}
+
 export interface AppView {
   id: string;
   name: string;
@@ -233,17 +285,18 @@ export interface ClientState {
   profilesEmpty: Empty | null;
   appsEmpty: Empty | null;
   gamesEmpty: Empty | null;
-  /** "Apps here use proxy settings. Games, and programs that ignore proxy settings, are routed on the Games page." */
-  appsNote: string;
-  /** Whether games can be routed on this computer: the packet driver and the Sallyport service. */
-  driver: DriverView;
+  network: NetworkView;
+  settings: SettingsView;
+  /** The tab a first look opens on: Profiles while there is nothing to route through, Apps after. */
+  initialPage: Page;
+  /** A request from the host (the tray's Open Network) to show a page: followed once per new `request`. */
+  navigation: { page: Page; request: number } | null;
   profileChoices: { id: string; label: string; enabled: boolean }[];
   /** `help` says what choosing that kind does, for the editor to show beside the choice being made. */
   kindChoices: { value: AppKind; label: string; help: string }[];
   lossChoices: { value: LossMode; label: string; help: string }[];
   editor: Editor | null;
   confirmation: Confirmation | null;
-  guide: { endpointText: string; curlExample: string; copyExample: Action };
   /** Newest first. Info notices leave on their own after a few seconds; warnings and errors stay until dismissed. */
   notices: Notice[];
 }
@@ -281,5 +334,6 @@ export interface Commands {
   REQUEST_DRIVER_REMOVE: Record<string, never>;
   CANCEL_CONFIRMATION: { token: string };
   COPY_GUIDE_EXAMPLE: Record<string, never>;
+  SET_START_WITH_WINDOWS: { enabled: boolean };
   DISMISS_NOTICE: { id: string };
 }

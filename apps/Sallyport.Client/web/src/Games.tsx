@@ -1,46 +1,11 @@
 import { useId, type ReactNode } from 'react';
-import type { ClientState, DriverView, GameView, RunView } from './contract';
+import type { GameView, RunView } from './contract';
 import { post } from './commands';
 import { duration } from './format';
-import { ActionButton, Disclosure, EmptyView, Facts, PageHeader, StatusPill } from './ui/shared';
+import { ActionButton, Disclosure, Facts, StatusPill } from './ui/shared';
 
-export function Games({ state, now, expanded, toggle, editorForm }: {
-  state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
-}) {
-  return <section className="page" aria-label="Games">
-    <PageHeader title="Games" subtitle="Run a game through a VPN profile: everything its programs send goes through the VPN.">
-      <ActionButton action={state.actions.addGame} focusKey="add-game" primary onClick={() => post('ADD_GAME', {})} />
-    </PageHeader>
-    <Driver driver={state.driver} />
-    {state.gamesEmpty && <EmptyView empty={state.gamesEmpty} actions={state.actions} />}
-    {editorForm && !state.games.some((game) => game.id === state.editor?.subjectId) && editorForm}
-    <div className="rows">
-      {state.games.map((game) => <GameRow key={game.id} game={game} now={now}
-        expanded={expanded.has(`game:${game.id}`)} toggle={() => toggle(`game:${game.id}`)}
-        editorForm={state.editor?.subjectId === game.id ? editorForm : null} />)}
-    </div>
-  </section>;
-}
-
-function Driver({ driver }: { driver: DriverView }) {
-  // Said only when game routing is not simply ready: a ready driver needs no card of its own.
-  if (driver.phase === 'ready') return null;
-  return <section className={`card driver tone-border-${driver.tone}`} aria-label="Game routing on this computer">
-    <div className="row-head">
-      <div className="row-identity">
-        <StatusPill tone={driver.tone} announce>{driver.statusText}</StatusPill>
-        {driver.detailText && <p className="supporting secondary">{driver.detailText}</p>}
-      </div>
-      <div className="actions row-primary">
-        <ActionButton action={driver.install} focusKey="driver" primary onClick={() => post('REQUEST_DRIVER_INSTALL', {})} />
-        <ActionButton action={driver.remove} focusKey="driver" onClick={() => post('REQUEST_DRIVER_REMOVE', {})} />
-      </div>
-    </div>
-    <Facts facts={driver.facts} />
-  </section>;
-}
-
-function GameRow({ game, now, expanded, toggle, editorForm }: {
+/** A program or folder routed by its packets, on the Apps page. */
+export function GameRow({ game, now, expanded, toggle, editorForm }: {
   game: GameView; now: number; expanded: boolean; toggle: () => void; editorForm: ReactNode;
 }) {
   const detailsId = useId();
@@ -48,7 +13,7 @@ function GameRow({ game, now, expanded, toggle, editorForm }: {
   return <article className={`card tone-border-${game.tone}${expanded ? ' expanded' : ''}`} aria-labelledby={headingId}>
     <div className="row-head">
       <div className="row-identity">
-        <h2 id={headingId}>{game.name}</h2>
+        <h3 id={headingId}>{game.name}</h3>
         <div className="profile-status">
           <StatusPill tone={game.tone} announce>{game.statusText}</StatusPill>
           {game.run?.since && <span className="secondary duration">Routed for {duration(game.run.since, now)}</span>}
@@ -59,7 +24,7 @@ function GameRow({ game, now, expanded, toggle, editorForm }: {
         <ActionButton action={game.actions.stop} onClick={() => post('STOP_RUN', {})} />
       </div>
     </div>
-    {game.run && <Run run={game.run} />}
+    {game.run && <RunDetails run={game.run} />}
     <div className="row-foot">
       <span className="secondary through">{game.throughText} · {game.lossText}</span>
       <Disclosure open={expanded} controls={detailsId} onClick={toggle} />
@@ -92,7 +57,8 @@ function GameRow({ game, now, expanded, toggle, editorForm }: {
   </article>;
 }
 
-function Run({ run }: { run: RunView }) {
+/** What a run is doing: its detail, whether everything went through the VPN (three outcomes), and its counts. */
+export function RunDetails({ run }: { run: RunView }) {
   return <section className="run" aria-label="Routing">
     {run.detailText && <p className="supporting secondary">{run.detailText}</p>}
     <p className={`coverage coverage-${run.coverage.result}`} role="status">
