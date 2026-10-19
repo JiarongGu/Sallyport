@@ -104,3 +104,36 @@ An operating system bounds the same state for a closed socket — Linux gives it
 one direction of a relay has ended, the relay ends when the other has been silent for 60 s, every byte on it postponing
 that. Measured with it, the same cold session served for 150 s: three relays were still held when the last page
 ended, none by 80 s, and no connection was left in the network by 110 s, after the linger.
+
+## D9 — Two packages and the applications on them (2026-10-19)
+
+The owner asked for Sallyport to be "more like a library" with a client of its own, on a proper package layer. Read
+for shape against WireGuard for Windows, Mullvad, sing-box/Clash and Netch, and against Shenora's own rule — a package
+boundary only where a dependency or platform differs (`docs/design/architecture.md`). So: `src/Sallyport`, BCL only
+(rule 4), with the wire (`Sallyport.Protocol`: control and data channels, transports, certificates) internal and
+`Profile`, `Tunnel`, `Net`, `Proxy`, `Runtime` public; `src/Sallyport.Windows` later, the one package that may carry a
+driver; `apps/` for what runs (`Sallyport.Host`, and to come `Sallyport.Service` and `Sallyport.Client`); `tools/` for
+the probe. Rule 4 binds the packages; an application may take a package by a decision here. **`Sallyport.Client` takes
+Shenora** (the owner's framework, from nuget.org at a pinned release, never its source — Kobo's review desk broke on a
+namespace move the day it referenced the source), on the WebView2 shell: a small client should not carry CEF's 400 MB.
+
+## D10 — Games are routed at the packet level, through WinDivert (2026-10-19; to be measured)
+
+Games ignore proxy settings, so routing one needs the operating system's packets. The options weighed: our own WFP
+callout driver (Mullvad's way) needs Microsoft's attestation signing behind an EV certificate; Wintun's TUN mode
+(sing-box's way) takes all the machine's traffic into user space and needs a full TCP/UDP stack to send the rest back
+out; injecting a hook into the game is what anti-cheat exists to refuse. WinDivert is a signed driver that diverts only
+what a filter names, and an OpenVPN tunnel already carries IP packets: a routed process's packets are NAT'd into the
+tunnel and its replies injected back, TCP, UDP and ICMP alike, with no second TCP stack. Costs, accepted by the owner:
+administrator rights (so the runtime moves into a service), a native dependency (LGPLv3 or GPLv2 at our choice — loaded
+dynamically, shipped unmodified with its licence), and anti-cheat that may refuse any packet driver, which only a game
+can answer. The spike (TASKS) measures it before anything is built on it; if the driver will not load here or the
+owner's games refuse it, this is decided again.
+
+## D11 — Imported profiles are held by the service, encrypted (2026-10-19)
+
+A profile holds a private key and a static key. The client imports a copy (the owner chose a copy over a path, so it
+keeps working when the original moves), and the service owns it: `%ProgramData%\Sallyport\profiles`, readable by SYSTEM
+and Administrators only, encrypted at rest with DPAPI's machine scope (`CryptProtectData` through P/Invoke, no package).
+The unelevated client sees a profile's name, remotes' protocols and status — never its key material.
+

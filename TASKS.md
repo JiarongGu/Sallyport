@@ -23,10 +23,15 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
       private (14 MB idle) until the next collection — not a leak: four bursts, no growth. What holds it is not
       measured; the receive buffers, each growing toward 4 MB, are the likely part.
 
-## App-only client — route a SINGLE app through the tunnel
-- [ ] A client that routes one application's traffic through Sallyport while the rest of the machine stays
-      direct (a per-app VPN). Likely a new `src/Sallyport.AppRoute` project so the library stays pure: start the
-      tunnel + the existing SOCKS5 server, launch or attach to the target app, and force only THAT app's sockets
-      through the proxy — a per-process proxy env/setting where the app honours it, otherwise WFP (Windows
-      Filtering Platform, P/Invoke, no package) to redirect just that app. Measure against a real app: its
-      destination IP must read JP while another stays direct. Clean-room; no runtime deps.
+## The client and game routing — `docs/design/architecture.md` (D9–D11)
+Step 1, the restructure, is done. In order:
+- [ ] **Runtime.** A session per profile (a tunnel, reconnect, the remotes in turn) with status and byte counts as
+      events; the profile store (D11); the management API's contracts. Kobo's Host moves onto it unchanged outside.
+- [ ] **Spike: packet mode for one process** (D10). WinDivert loads here (blocklist on, memory integrity off); one
+      process's TCP and UDP NAT'd through the tunnel read the server's address while another process reads AU; no
+      packet of a routed flow leaves direct. Then the owner's games, one by one, for anti-cheat. If it fails, stop.
+- [ ] **`Sallyport.Windows` + `apps/Sallyport.Service`**: the packet router and the runtime in a LocalSystem service,
+      a named-pipe management API the unelevated client may use.
+- [ ] **`apps/Sallyport.Client`** on Shenora (WebView2): profiles (import a copy), routed applications, live status.
+- [ ] **Proxy-mode launch recipes** in the client: Chromium/Electron flags with their own profile directory, a Firefox
+      profile, proxy environment variables.
