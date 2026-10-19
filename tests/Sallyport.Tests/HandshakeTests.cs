@@ -12,65 +12,6 @@ public class HandshakeTests
 {
     private static readonly Remote Remote = new("vpn.example.test", 1194, "udp");
 
-    private sealed class FakeServer
-    {
-        public string? ClientPeerInfo;
-        public string? ClientOptions;
-        public bool SawExit, SawOccExit;
-        /// <summary>The half the server sends data with: the client's opposite (1), unless a test wants a mix-up.</summary>
-        public int DataSendHalf = 1;
-
-        public async Task RunAsync(ITransport transport, byte[] staticKey, X509Certificate2 certificate, CancellationToken ct)
-        {
-            await using var channel = new ControlChannel(transport, new TlsCrypt(staticKey, sendHalf: 0));
-            channel.Start();
-            var reset = await channel.Inbound.ReadAsync(ct);
-            Assert.Equal(Opcode.ControlHardResetClientV2, reset.Opcode);
-            await channel.SendAsync(Opcode.ControlHardResetServerV2, [], ct);
-
-            await using var tls = new SslStream(new ControlStream(channel));
-            await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
-            {
-                ServerCertificateContext = SslStreamCertificateContext.Create(certificate, null, offline: true),
-                ClientCertificateRequired = true,
-                RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null,
-                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-            }, ct);
-
-            var inbox = new TlsInbox(tls);
-            KeyMethod2Message? hello;
-            int used;
-            while (!KeyMethod2Message.TryRead(inbox.Data, fromClient: true, out hello, out used)) await inbox.FillAsync(ct);
-            inbox.Consume(used);
-            ClientOptions = hello!.Options;
-            ClientPeerInfo = hello.Trailing.Count == 3 ? hello.Trailing[2] : null;
-            var mine = KeySource.ForServer();
-            await tls.WriteAsync(KeyMethod2Message.Write(mine, "V4,dev-type tun,tls-server"), ct);
-
-            Assert.Equal("PUSH_REQUEST", await inbox.ReadTextAsync(ct));
-            await tls.WriteAsync("PUSH_REPLY,route 10.0.0.0 255.0.0.0,push-continuation 2\0"u8.ToArray(), ct);
-            await tls.WriteAsync("PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0,auth-token SESSION-SECRET,peer-id 3,cipher AES-256-GCM,explicit-exit-notify,protocol-flags cc-exit,push-continuation 1\0"u8.ToArray(), ct);
-
-            // The data channel, keyed as the server derives it: the client's key source and session id first.
-            var block = DataKeys.Expand(hello.Source, mine, channel.PeerSession!, channel.LocalSession);
-            using var data = new DataChannel(DataKeys.FromBlock(block, DataSendHalf, 32), 3, 0);
-            using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var echoing = Task.Run(async () =>
-            {
-                await channel.SendDataAsync(data.Seal(Signals.Ping), stop.Token);
-                await foreach (var packet in channel.DataInbound.ReadAllAsync(stop.Token))
-                {
-                    if (data.Open(packet, out var payload) != DataChannel.Verdict.Opened || Signals.IsPing(payload)) continue;
-                    if (Signals.IsOcc(payload, out var kind)) { SawOccExit = kind == Signals.OccExit; continue; }
-                    await channel.SendDataAsync(data.Seal(payload), stop.Token);
-                }
-            }, stop.Token);
-            SawExit = await inbox.ReadTextAsync(ct) == "EXIT";
-            await stop.CancelAsync();
-            try { await echoing; } catch (OperationCanceledException) { }
-        }
-    }
-
     private static Task<Tunnel> Connect(string profileText, MemoryTransport end) =>
         Tunnel.ConnectAsync(OvpnProfile.Parse(profileText), Remote, _ => Task.FromResult<ITransport>(end), TimeSpan.FromSeconds(30), new TunnelOptions(), null, CancellationToken.None);
 

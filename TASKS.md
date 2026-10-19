@@ -24,14 +24,13 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
       measured; the receive buffers, each growing toward 4 MB, are the likely part.
 
 ## The client and game routing — `docs/design/architecture.md` (D9–D11)
-Step 1, the restructure, is done. In order:
-- [ ] **Runtime.** A session per profile (a tunnel, reconnect, the remotes in turn) with status and byte counts as
-      events; the profile store (D11); the management API's contracts. Kobo's Host moves onto it unchanged outside.
+Steps 1 (the restructure) and 2 (the runtime: `TunnelSession`, `ProfileStore`) are done. In order:
 - [ ] **Spike: packet mode for one process** (D10). WinDivert loads here (blocklist on, memory integrity off); one
       process's TCP and UDP NAT'd through the tunnel read the server's address while another process reads AU; no
       packet of a routed flow leaves direct. Then a real game's session. If the driver will not load, stop (D10).
-- [ ] **`Sallyport.Windows` + `apps/Sallyport.Service`**: the packet router and the runtime in a LocalSystem service,
-      a named-pipe management API the unelevated client may use.
+- [ ] **`Sallyport.Windows` + `apps/Sallyport.Service`**: the packet router and the runtime in a LocalSystem service —
+      a session per stored profile, the DPAPI protector and the store's folder ACL (D11), and a named-pipe management
+      API (its contracts in `Sallyport.Runtime`) the unelevated client may use.
 - [ ] **`apps/Sallyport.Client`** on Shenora (WebView2): profiles (import a copy), routed applications, live status.
 - [ ] **Proxy-mode launch recipes** in the client: Chromium/Electron flags with their own profile directory, a Firefox
       profile, proxy environment variables.

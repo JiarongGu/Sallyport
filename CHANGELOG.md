@@ -2,6 +2,14 @@
 
 ## 0.1.0 — unreleased
 
+- The runtime (2026-10-19). `TunnelSession` keeps one profile's tunnel up — the remotes in turn, reconnecting with
+  backoff — and reports `SessionStatus` on every change of state, with byte counts that survive a reconnect;
+  `NetworkUp` lets a host attach a proxy (or, later, a packet router) before "up" is said. `TunnelService` is now that
+  session behind the SOCKS5 proxy, with the status shape Kobo reads unchanged. `ProfileStore` keeps imported copies sealed
+  by an `IProfileProtector`, described without keys or host names, under ids that cannot name a path (D11).
+  `Tunnel.Unsupported` says why a profile cannot be served before any packet is sent. Fixed: stopping a service while
+  it was still connecting threw out of `RunAsync` instead of stopping. Measured: Kobo's Host republished on it — its
+  status file reads as before, and the route test says JP Tokyo through the route, AU Sydney directly.
 - Restructured as a library with applications on it (2026-10-19, D9). `src/` the packages, `apps/` what runs
   (`Sallyport.Host`), `tools/` the probe. The wire is internal: `Opcode`, `ControlPacket`, `TlsCrypt` and `StaticKey` are
   no longer public, and the control and data channels, transports and certificates share `Sallyport.Protocol`.

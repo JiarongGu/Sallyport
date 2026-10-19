@@ -1,3 +1,4 @@
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -134,5 +135,75 @@ internal sealed class MemoryTransport : ITransport
     {
         _outbox.Writer.TryComplete();
         return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>An OpenVPN-compatible server built from the client's own layers, for tests: it answers one handshake, echoes
+/// data packets, and waits for the client's EXIT — or, when <see cref="RestartWhen"/> completes, tells it RESTART.</summary>
+internal sealed class FakeServer
+{
+    public string? ClientPeerInfo;
+    public string? ClientOptions;
+    public bool SawExit, SawOccExit;
+    /// <summary>The half the server sends data with: the client's opposite (1), unless a test wants a mix-up.</summary>
+    public int DataSendHalf = 1;
+    /// <summary>When completed, the server tells the client RESTART, as a real server does before it goes down.</summary>
+    public TaskCompletionSource? RestartWhen;
+
+    public async Task RunAsync(ITransport transport, byte[] staticKey, X509Certificate2 certificate, CancellationToken ct)
+    {
+        await using var channel = new ControlChannel(transport, new TlsCrypt(staticKey, sendHalf: 0));
+        channel.Start();
+        var reset = await channel.Inbound.ReadAsync(ct);
+        Assert.Equal(Opcode.ControlHardResetClientV2, reset.Opcode);
+        await channel.SendAsync(Opcode.ControlHardResetServerV2, [], ct);
+
+        await using var tls = new SslStream(new ControlStream(channel));
+        await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+        {
+            ServerCertificateContext = SslStreamCertificateContext.Create(certificate, null, offline: true),
+            ClientCertificateRequired = true,
+            RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null,
+            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+        }, ct);
+
+        var inbox = new TlsInbox(tls);
+        KeyMethod2Message? hello;
+        int used;
+        while (!KeyMethod2Message.TryRead(inbox.Data, fromClient: true, out hello, out used)) await inbox.FillAsync(ct);
+        inbox.Consume(used);
+        ClientOptions = hello!.Options;
+        ClientPeerInfo = hello.Trailing.Count == 3 ? hello.Trailing[2] : null;
+        var mine = KeySource.ForServer();
+        await tls.WriteAsync(KeyMethod2Message.Write(mine, "V4,dev-type tun,tls-server"), ct);
+
+        Assert.Equal("PUSH_REQUEST", await inbox.ReadTextAsync(ct));
+        await tls.WriteAsync("PUSH_REPLY,route 10.0.0.0 255.0.0.0,push-continuation 2\0"u8.ToArray(), ct);
+        await tls.WriteAsync("PUSH_REPLY,ifconfig 10.8.0.2 255.255.255.0,auth-token SESSION-SECRET,peer-id 3,cipher AES-256-GCM,explicit-exit-notify,protocol-flags cc-exit,push-continuation 1\0"u8.ToArray(), ct);
+
+        // The data channel, keyed as the server derives it: the client's key source and session id first.
+        var block = DataKeys.Expand(hello.Source, mine, channel.PeerSession!, channel.LocalSession);
+        using var data = new DataChannel(DataKeys.FromBlock(block, DataSendHalf, 32), 3, 0);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var echoing = Task.Run(async () =>
+        {
+            await channel.SendDataAsync(data.Seal(Signals.Ping), stop.Token);
+            await foreach (var packet in channel.DataInbound.ReadAllAsync(stop.Token))
+            {
+                if (data.Open(packet, out var payload) != DataChannel.Verdict.Opened || Signals.IsPing(payload)) continue;
+                if (Signals.IsOcc(payload, out var kind)) { SawOccExit = kind == Signals.OccExit; continue; }
+                await channel.SendDataAsync(data.Seal(payload), stop.Token);
+            }
+        }, stop.Token);
+        var exit = inbox.ReadTextAsync(ct);
+    if (RestartWhen is not null && await Task.WhenAny(exit, RestartWhen.Task) != exit)
+    {
+        await tls.WriteAsync("RESTART\0"u8.ToArray(), ct);
+        // The client leaves without an EXIT; its transport closing ends the read.
+        try { await exit; } catch (Exception) { }
+    }
+    else SawExit = await exit == "EXIT";
+        await stop.CancelAsync();
+        try { await echoing; } catch (OperationCanceledException) { }
     }
 }

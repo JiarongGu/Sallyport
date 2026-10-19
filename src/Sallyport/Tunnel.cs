@@ -376,17 +376,20 @@ public sealed class Tunnel : IAsyncDisposable
         : text == "EXIT" ? "the server is leaving"
         : null;
 
+    /// <summary>Why this version cannot connect with <paramref name="profile"/>, or null when it can — so a host can say so
+    /// when a profile is added, before any packet is sent.</summary>
+    public static string? Unsupported(OvpnProfile profile) =>
+        profile.TlsCryptV2 ? "the profile uses tls-crypt-v2, which is not supported yet"
+        : profile.TlsCryptKey is null && profile.TlsAuthKey is not null ? "the profile uses tls-auth, which is not supported yet"
+        : profile.TlsCryptKey is null ? "the profile has no tls-crypt key; only tls-crypt profiles are supported yet"
+        : profile.AuthUserPass ? "the profile asks for a username and password, which is not supported yet"
+        : profile.CaPem is null ? "the profile has no <ca>"
+        : profile.CertPem is null || profile.KeyPem is null ? "the profile has no client certificate and key"
+        : null;
+
     private static void Refuse(OvpnProfile profile)
     {
-        string? why =
-            profile.TlsCryptV2 ? "the profile uses tls-crypt-v2, which is not supported yet"
-            : profile.TlsCryptKey is null && profile.TlsAuthKey is not null ? "the profile uses tls-auth, which is not supported yet"
-            : profile.TlsCryptKey is null ? "the profile has no tls-crypt key; only tls-crypt profiles are supported yet"
-            : profile.AuthUserPass ? "the profile asks for a username and password, which is not supported yet"
-            : profile.CaPem is null ? "the profile has no <ca>"
-            : profile.CertPem is null || profile.KeyPem is null ? "the profile has no client certificate and key"
-            : null;
-        if (why is not null) throw new HandshakeFailed(HandshakeStage.Profile, Outcome.Unverifiable, why);
+        if (Unsupported(profile) is { } why) throw new HandshakeFailed(HandshakeStage.Profile, Outcome.Unverifiable, why);
     }
 
     private static string Waiting(HandshakeStage stage) => stage switch

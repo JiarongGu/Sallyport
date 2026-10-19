@@ -1,6 +1,6 @@
 # Architecture — proposal (2026-10-19)
 
-**Status: approved 2026-10-19 (D9–D11); step 1, the restructure, done.** What Sallyport becomes so that a host other than Kobo can use it, and so that one
+**Status: approved 2026-10-19 (D9–D11); steps 1 (the restructure) and 2 (the runtime) done.** What Sallyport becomes so that a host other than Kobo can use it, and so that one
 application — a game included — can be routed through a profile while the rest of the machine stays direct.
 
 ## What the references do

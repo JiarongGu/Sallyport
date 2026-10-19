@@ -147,6 +147,8 @@ above that interface.
 
 A profile holds a private key and a static key. The client imports a copy (the owner chose a copy over a path, so it
 keeps working when the original moves), and the service owns it: `%ProgramData%\Sallyport\profiles`, readable by SYSTEM
-and Administrators only, encrypted at rest with DPAPI's machine scope (`CryptProtectData` through P/Invoke, no package).
-The unelevated client sees a profile's name, remotes' protocols and status — never its key material.
+and Administrators only, sealed at rest with DPAPI under the service's own account (`CryptProtectData` through
+P/Invoke, no package) — not DPAPI's machine scope, which any process on the machine could open. The unelevated client
+sees a profile's name, remotes' transports and status — never its key material. The store itself is platform-neutral
+(`ProfileStore` behind `IProfileProtector`); the DPAPI protector lives in `Sallyport.Windows`.
 
