@@ -16,5 +16,6 @@ An app-scoped, OpenVPN-compatible client in pure .NET (README). These rules are 
 5. **Comments say why, never what.** Where the wire format is the reason, name the field and its size.
 6. **Three outcomes where something is checked**: it holds, it failed, or it could not be checked — never collapsed.
 
-Layout: `src/Sallyport` (the library), `src/Sallyport.Probe` (a console that drives one phase against a real server),
-`tests/Sallyport.Tests`. Decisions: `docs/DECISIONS.md`. Work left: `TASKS.md` (open items only).
+Layout: `src/` holds the packages (`Sallyport`, the library), `apps/` the applications built on them
+(`Sallyport.Host`, Kobo's provider), `tools/Sallyport.Probe` (a console that drives one phase against a real server),
+`tests/Sallyport.Tests`. Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work left: `TASKS.md` (open items only).

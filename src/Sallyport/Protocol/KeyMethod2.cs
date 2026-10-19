@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Sallyport.Control;
+namespace Sallyport.Protocol;
 
 /// <summary>Each side's random contribution to the data-channel keys. Only the client sends a pre-master secret.</summary>
 internal sealed class KeySource(byte[]? preMaster, byte[] random1, byte[] random2)

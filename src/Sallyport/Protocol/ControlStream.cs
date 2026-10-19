@@ -1,4 +1,4 @@
-namespace Sallyport.Control;
+namespace Sallyport.Protocol;
 
 /// <summary>The control channel as the byte stream TLS expects: writes are cut into <see cref="Opcode.ControlV1"/>
 /// packets, reads return their payloads in order.</summary>

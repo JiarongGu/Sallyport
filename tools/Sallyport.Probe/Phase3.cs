@@ -3,7 +3,7 @@ using System.Net;
 using System.Text.Json;
 using Sallyport;
 using Sallyport.Net;
-using Sallyport.Socks;
+using Sallyport.Proxy;
 
 /// <summary>Phase 3's measurements: TCP through the tunnel against real servers, and the proxy a browser will use.</summary>
 internal static class Phase3

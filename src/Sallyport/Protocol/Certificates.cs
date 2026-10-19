@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-namespace Sallyport.Tls;
+namespace Sallyport.Protocol;
 
 internal static class Certificates
 {

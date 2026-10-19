@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Sallyport.Net;
 
-namespace Sallyport.Socks;
+namespace Sallyport.Proxy;
 
 /// <summary>Dials through a <see cref="TunnelNetwork"/>: the name is resolved by the tunnel's DNS and the connection is
 /// the tunnel's own TCP, so neither the lookup nor the traffic touches the machine's network.</summary>

@@ -1,9 +1,9 @@
-using Sallyport.Crypto;
+using Sallyport.Protocol;
 
-namespace Sallyport.Control;
+namespace Sallyport.Protocol;
 
 /// <summary>The control-channel opcodes this client sends or must recognise (the top 5 bits of a packet's first byte).</summary>
-public enum Opcode : byte
+internal enum Opcode : byte
 {
     ControlSoftResetV1 = 3,
     ControlV1 = 4,
@@ -23,7 +23,7 @@ public enum Opcode : byte
 /// there are ACKs), this packet's message id (4, absent in a bare <see cref="Opcode.AckV1"/>), then the payload — TLS
 /// records for <see cref="Opcode.ControlV1"/>.
 /// </remarks>
-public sealed record ControlPacket(
+internal sealed record ControlPacket(
     Opcode Opcode,
     byte KeyId,
     byte[] SessionId,

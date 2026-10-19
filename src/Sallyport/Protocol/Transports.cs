@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Sallyport.Profile;
 
-namespace Sallyport.Transport;
+namespace Sallyport.Protocol;
 
 /// <summary>Moves whole packets to and from one server. UDP carries one packet per datagram; TCP frames each with a
 /// 2-byte length.</summary>

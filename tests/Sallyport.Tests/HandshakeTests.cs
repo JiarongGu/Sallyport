@@ -1,11 +1,8 @@
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
-using Sallyport.Control;
-using Sallyport.Crypto;
-using Sallyport.Data;
+using Sallyport.Protocol;
 using Sallyport.Profile;
-using Sallyport.Transport;
 
 namespace Sallyport.Tests;
 

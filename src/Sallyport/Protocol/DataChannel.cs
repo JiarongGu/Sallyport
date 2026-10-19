@@ -1,8 +1,7 @@
 using System.Security.Cryptography;
-using Sallyport.Control;
-using Sallyport.Crypto;
+using Sallyport.Protocol;
 
-namespace Sallyport.Data;
+namespace Sallyport.Protocol;
 
 /// <summary>
 /// The data channel with an AEAD cipher, in <see cref="Opcode.DataV2"/> packets: opcode‖key-id (1), peer id (3),

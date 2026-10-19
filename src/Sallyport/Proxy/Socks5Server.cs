@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-namespace Sallyport.Socks;
+namespace Sallyport.Proxy;
 
 /// <summary>Opens the outbound side of a proxied connection. Names are resolved by the CONNECTOR, never by the proxy: in
 /// phase 3 the connector resolves through the VPN's own DNS, so a name lookup cannot leak outside the tunnel.</summary>

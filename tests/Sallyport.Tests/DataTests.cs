@@ -1,7 +1,5 @@
 using System.Net;
-using Sallyport.Control;
-using Sallyport.Crypto;
-using Sallyport.Data;
+using Sallyport.Protocol;
 using Sallyport.Net;
 
 namespace Sallyport.Tests;

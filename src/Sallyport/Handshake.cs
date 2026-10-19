@@ -1,5 +1,5 @@
 using Sallyport.Profile;
-using Sallyport.Transport;
+using Sallyport.Protocol;
 
 namespace Sallyport;
 

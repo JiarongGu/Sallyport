@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
-using Sallyport.Socks;
+using Sallyport.Proxy;
 
 namespace Sallyport.Tests;
 

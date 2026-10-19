@@ -29,8 +29,8 @@ and is not affiliated with or endorsed by OpenVPN Inc.
 ```
 dotnet build Sallyport.slnx
 dotnet test Sallyport.slnx
-dotnet run --project src/Sallyport.Probe -- <profile.ovpn>     # phase 1: connect and print the server's PUSH_REPLY
-dotnet run --project src/Sallyport.Probe -c Release -- <profile.ovpn> --concurrent 64   # phase 3: 64 connections at once
+dotnet run --project tools/Sallyport.Probe -- <profile.ovpn>     # phase 1: connect and print the server's PUSH_REPLY
+dotnet run --project tools/Sallyport.Probe -c Release -- <profile.ovpn> --concurrent 64   # phase 3: 64 connections at once
 ```
 
 A profile holds a private key: it is read from wherever the caller keeps it and never copied into this repository.

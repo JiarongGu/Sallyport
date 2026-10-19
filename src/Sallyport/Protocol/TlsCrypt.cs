@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 
-namespace Sallyport.Crypto;
+namespace Sallyport.Protocol;
 
 /// <summary>
 /// <c>tls-crypt</c> (v1): every control packet is authenticated and encrypted with a pre-shared static key before the
@@ -15,7 +15,7 @@ namespace Sallyport.Crypto;
 /// 32 bytes of a cipher area and HMAC-SHA256 the first 32 of an HMAC area. The two sides use opposite halves: the
 /// server sends with one and the client with the other.</para>
 /// </remarks>
-public sealed class TlsCrypt
+internal sealed class TlsCrypt
 {
     public const int HeaderLength = 1 + 8 + 4 + 4;
     public const int TagLength = 32;

@@ -1,9 +1,8 @@
 using System.Security.Cryptography;
 using System.Threading.Channels;
-using Sallyport.Crypto;
-using Sallyport.Transport;
+using Sallyport.Protocol;
 
-namespace Sallyport.Control;
+namespace Sallyport.Protocol;
 
 /// <summary>
 /// The control channel's reliability layer. Every packet that carries a message id is resent until the peer acknowledges

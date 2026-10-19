@@ -1,8 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
-using Sallyport.Control;
+using Sallyport.Protocol;
 
-namespace Sallyport.Crypto;
+namespace Sallyport.Protocol;
 
 /// <summary>TLS 1.0's pseudo-random function (RFC 2246 §5): P_MD5 over the secret's first half XOR P_SHA1 over its
 /// second half. Key method 2 derives the data-channel keys with it (D3).</summary>

@@ -2,6 +2,12 @@
 
 ## 0.1.0 — unreleased
 
+- Restructured as a library with applications on it (2026-10-19, D9). `src/` the packages, `apps/` what runs
+  (`Sallyport.Host`), `tools/` the probe. The wire is internal: `Opcode`, `ControlPacket`, `TlsCrypt` and `StaticKey` are
+  no longer public, and the control and data channels, transports and certificates share `Sallyport.Protocol`.
+  **Breaking** for in-process consumers: `Sallyport.Socks` is now `Sallyport.Proxy`, `Sallyport.Hosting` is now
+  `Sallyport.Runtime`. `Sallyport` packs as a NuGet package with its own README. Kobo runs the Host and is unaffected:
+  republished, its route test says JP Tokyo through the route and AU Sydney directly.
 - Many connections at once (2026-10-19). The receiver keeps its SACK blocks as ranges as segments arrive — rebuilt from
   every held segment, one hole cost the network's reader 105 µs a segment and at 64 downloads it fell behind the tunnel
   and dropped thousands of packets itself. A waiting reader is woken once per burst, not per segment. A half-closed

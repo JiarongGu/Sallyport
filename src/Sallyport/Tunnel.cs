@@ -5,12 +5,8 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Channels;
-using Sallyport.Control;
-using Sallyport.Crypto;
-using Sallyport.Data;
+using Sallyport.Protocol;
 using Sallyport.Profile;
-using Sallyport.Tls;
-using Sallyport.Transport;
 
 namespace Sallyport;
 

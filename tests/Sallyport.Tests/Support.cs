@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Channels;
-using Sallyport.Transport;
+using Sallyport.Protocol;
 
 namespace Sallyport.Tests;
 

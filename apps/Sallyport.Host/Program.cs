@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
-using Sallyport.Hosting;
+using Sallyport.Runtime;
 using Sallyport.Profile;
 
 // Sallyport.Host serve <profile.ovpn> [--listen 127.0.0.1:1080] [--status <file.json>]

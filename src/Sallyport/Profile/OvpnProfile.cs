@@ -95,7 +95,7 @@ public sealed class OvpnProfile
 }
 
 /// <summary>An OpenVPN static key (the <c>tls-crypt</c> / <c>tls-auth</c> blocks): 256 bytes written as hex lines.</summary>
-public static class StaticKey
+internal static class StaticKey
 {
     public const int Length = 256;
 

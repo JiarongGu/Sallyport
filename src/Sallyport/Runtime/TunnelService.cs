@@ -2,9 +2,9 @@ using System.Net;
 using System.Net.Sockets;
 using Sallyport.Net;
 using Sallyport.Profile;
-using Sallyport.Socks;
+using Sallyport.Proxy;
 
-namespace Sallyport.Hosting;
+namespace Sallyport.Runtime;
 
 /// <summary>Where a <see cref="TunnelService"/> is, for a host to show. No secret and no host name: what a status file
 /// or a window may print.</summary>

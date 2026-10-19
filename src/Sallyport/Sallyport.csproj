@@ -5,7 +5,14 @@
     <Description>An app-scoped, OpenVPN-compatible client in pure .NET: the tunnel lives in the process and ends in a local SOCKS5 proxy. Written from the protocol, not OpenVPN's code. Not affiliated with OpenVPN Inc.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PackageId>Sallyport</PackageId>
+    <PackageTags>openvpn;vpn;tunnel;socks5;proxy;tcp-ip</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Sallyport.Tests" />

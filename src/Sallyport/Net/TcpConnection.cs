@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
-using Sallyport.Socks;
+using Sallyport.Proxy;
 
 namespace Sallyport.Net;
 
