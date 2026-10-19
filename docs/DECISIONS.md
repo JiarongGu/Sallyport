@@ -383,3 +383,43 @@ kept installer in 36 s. A probe of the direct path every 250 ms during both: rem
 (adapters released by the filter), installation for about 2 s — at those moments only, so the app says so before it
 manages the driver.
 
+
+## D19 — Everything Sallyport keeps is in the folder it was installed to (2026-10-20; measured)
+
+The owner: *"do not install on my c drive"*, *"so the intallation should be able to select the install location"*, then
+yes to moving the rest. So setup asks where (`%ProgramFiles%\Sallyport` only as the default), and what Sallyport keeps
+goes in that folder, not where Windows would have put it:
+
+- **The machine's part** — setup's record, the driver's installer, the service's logs, setup's own log once an install
+  ends — in `data` inside it, not `%ProgramData%` or `%TEMP%`.
+- **Each user's part** — sealed profiles, settings, apps, the window's cache — in `data\users\<SID>`, not
+  `%LOCALAPPDATA%` (supersedes D14's location; its sealing is unchanged, DPAPI for the user with no path in it). Setup
+  makes `data\users` with rights that let users create a folder in it and nothing more — not list it, not open
+  another's. The client makes its own, owned by the person and open to them, the system and administrators only (an
+  elevated start would otherwise leave it owned by Administrators and shut to the person), and uses one it finds only
+  if its owner is the person, the system or administrators: any user may make a folder there, and one named for
+  someone else is not theirs. The first installed start copies an earlier `%LOCALAPPDATA%\Sallyport` over (the
+  window's cache excepted, which WebView2 rebuilds), marks the copy, and removes the old folder; never into a folder
+  that already holds something. A development build, which has no `data\users`, keeps `%LOCALAPPDATA%\Sallyport`.
+- **The driver's own files** — NT Kernel's installer puts them in its public `INSTALLLOCATION`, read from the pinned
+  MSI's Directory table — beside Sallyport's folder (`<parent>\Windows Packet Filter`, as Program Files would have it;
+  not inside, which an update replaces whole). `ndisrd.sys` itself goes where Windows keeps every driver, whatever this
+  says.
+
+Off the system drive a new folder inherits the drive's rights — here `D:\Program Files` lets Authenticated Users modify
+— and the service believes only clients run from its own folder, so setup gives its folders their own rights before
+anything goes in: owned by Administrators; SYSTEM and Administrators full, Users read and run; nothing inherited. It
+takes only a folder that is empty, Sallyport's, or what removing Sallyport kept of it. Removing keeps `data\users`
+unless the person says otherwise, and installing in that folder again finds it. Windows' own entries — the service,
+the Start menu, the installed-apps list, `.ovpn` under Open With — stay where Windows keeps them.
+
+Measured 2026-10-20 on the owner's machine. Installed and then reinstalled from setup's window to `D:\Program
+Files\Sallyport`. The first installed start of the client made `data\users\<SID>`, owned by the owner, SYSTEM,
+Administrators and the owner full, nothing inherited; it copied `apps`, `config`, `drivers`, `games` and `profiles`
+across, wrote its mark, and `%LOCALAPPDATA%\Sallyport` was gone. `data\users`: SYSTEM and Administrators full; Users
+create-folder, traverse, read attributes and permissions, this folder only. Setup's log moved to `data\logs\setup.log`,
+none left in `%TEMP%`. The driver: removed and reinstalled through `Sallyport.Driver install --location "D:\Program
+Files\Windows Packet Filter"` — both Windows Installer exit 0; its certificates and driver package in that folder, no
+`C:\Program Files\Windows Packet Filter`; the service `Running`, the device answering (`0x06023000`), 1.1.1.1:443
+reachable after each. That folder had inherited `D:\Program Files`' rights and was given Sallyport's; setup now does
+that before it installs the driver. Nothing of Sallyport's left on C: but Windows' own entries and `ndisrd.sys`.

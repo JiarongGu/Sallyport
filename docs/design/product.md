@@ -261,7 +261,8 @@ Install protected versioned files under `%ProgramFiles%\Sallyport`; protected se
 > logs — goes in `data` inside that folder, not in `%ProgramData%`. Setup gives the folder its own rights (owned by
 > Administrators; SYSTEM and Administrators write, Users read and run; nothing inherited), since a folder off the
 > system drive inherits rights that let users change it, and the service believes only clients run from it. Moving an
-> installed Sallyport is removing it and installing it again.
+> installed Sallyport is removing it and installing it again. Each user's part (profiles, settings) moved there too,
+> `data\users\<SID>`, and the driver's own files beside it: D19.
 
 A BCL-only C# setup executable needs compression, HTTP, hashing, registry access and P/Invoke/COM for elevation, ACLs, Authenticode verification, SCM, Job Objects and Start-menu links. SCM hosting uses native APIs, not `ServiceBase`.
 

@@ -477,6 +477,9 @@ public sealed class ProfileStoreTests : IDisposable
     {
         _pki.Dispose();
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
+        // The shared parent too, once the last test is done with it: the tests leave nothing behind.
+        try { Directory.Delete(Path.GetDirectoryName(_directory)!); }
+        catch (IOException) { }
     }
 
     [Fact]

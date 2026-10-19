@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Sallyport.Profile;
 using Sallyport.Runtime;
+using Sallyport.Windows;
 using Sallyport.Windows.PacketFilter;
 using Sallyport.Windows.Routing;
 using Sallyport.Windows.Service;
@@ -532,7 +533,10 @@ internal sealed class ClientCore
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
             await _driverSetup.FetchAsync(http);
-            var outcome = install ? await _driverSetup.InstallAsync() : await _driverSetup.UninstallAsync();
+            // An installed client puts the driver's own files beside its folder (D19), not in the system drive's Program Files.
+            var outcome = install
+                ? await _driverSetup.InstallAsync(InstallLayout.InstalledHere() is { } here ? InstallLayout.DriverFolder(here) : null)
+                : await _driverSetup.UninstallAsync();
             Notify(outcome.Succeeded ? NoticeKind.Info : NoticeKind.Error, outcome.Text);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or InvalidDataException)

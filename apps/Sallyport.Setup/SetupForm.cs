@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Sallyport.Windows;
 using Sallyport.Windows.PacketFilter;
 
 namespace Sallyport.Setup;
@@ -24,6 +25,7 @@ sealed class SetupForm : Form
     private readonly Font _strongFont = new("Segoe UI Semibold", 9.75f);
     private long? _needed;
     private bool _busy;
+    private string _verb = "Install";
     private Installer? _installer;
 
     private readonly Panel _header = new() { Dock = DockStyle.Top, Height = 76 };
@@ -149,7 +151,7 @@ sealed class SetupForm : Form
             _details.Visible = !_details.Visible;
             _detailsLink.Text = _details.Visible ? "Hide details" : "Show details";
         };
-        _logLink.LinkClicked += (_, _) => Open(Installer.LogPath);
+        _logLink.LinkClicked += (_, _) => Open(_installer?.LogFile ?? Installer.TempLog);
         _missingLink.LinkClicked += (_, _) => Open(Installer.WebView2Download);
         FormClosing += (_, e) => e.Cancel = _busy;
         ResumeLayout(false);
@@ -173,7 +175,7 @@ sealed class SetupForm : Form
     private void SetUpInstall(SetupChoices choices)
     {
         var old = Installer.ExistingVersion();
-        var verb = !_installed ? "Install" : old is not null && old != _version ? "Update" : "Reinstall";
+        var verb = _verb = !_installed ? "Install" : old is not null && old != _version ? "Update" : "Reinstall";
         _chooseHeading.Text = verb == "Update" ? $"Update Sallyport {old} → {_version}" : $"{verb} Sallyport {_version}";
         _chooseIntro.Text = _installed
             ? $"Sallyport is {(verb == "Update" ? "updated" : "reinstalled")} where it is. Your VPN profiles, apps and settings are kept."
@@ -224,8 +226,9 @@ sealed class SetupForm : Form
                 ? "The packet driver Sallyport installed goes too; the network pauses for a few seconds while it does."
                 : "The packet driver stays: Sallyport did not install it.");
         _whereLabel.Visible = _whereRow.Visible = _whereHint.Visible = _missingNote.Visible = _missingLink.Visible = false;
-        _option.Text = "Also remove my VPN profiles and settings";
-        _option.Description = "Sallyport's encrypted copies, kept in your Windows account. The .ovpn files you imported are not touched.";
+        _option.Text = "Also remove the VPN profiles and settings";
+        _option.Description = "Sallyport's encrypted copies and its settings, kept in its folder for each Windows user. Left, installing " +
+            "Sallyport in the same folder again finds them. The .ovpn files you imported are not touched.";
         _option.Checked = choices.RemoveData;
         _primary.Text = "Remove";
     }
@@ -265,6 +268,7 @@ sealed class SetupForm : Form
             {
                 trouble = null;
                 hint = free is { } room ? $"Needs {Amount(_needed.Value)} · {Amount(room)} free on {drive}" : $"Needs {Amount(_needed.Value)}";
+                if (Installer.HoldsKeptData(folder)) hint += " · the profiles and settings kept here are used again";
             }
         }
         _whereHint.Text = hint;
@@ -323,7 +327,7 @@ sealed class SetupForm : Form
         _details.Clear();
         _meter.Value = 0;
         _meter.Fill = _theme.Accent;
-        _progressHeading.Text = _uninstall ? "Removing Sallyport" : _installed ? "Updating Sallyport" : "Installing Sallyport";
+        _progressHeading.Text = _uninstall ? "Removing Sallyport" : $"{_verb switch { "Update" => "Updating", "Reinstall" => "Reinstalling", _ => "Installing" }} Sallyport";
         _stepText.Text = "Starting…";
         ShowPage(_progress);
         _primary.Enabled = _secondary.Enabled = false;
@@ -371,7 +375,7 @@ sealed class SetupForm : Form
 
     private void Finish(IReadOnlyList<string>? left, string? failure)
     {
-        var what = _uninstall ? "removed" : _installed ? "updated" : "installed";
+        var what = _uninstall ? "removed" : _verb switch { "Update" => "updated", "Reinstall" => "reinstalled", _ => "installed" };
         if (failure is not null)
         {
             _mark.Shown = Mark.Kind.Failed;
@@ -387,7 +391,10 @@ sealed class SetupForm : Form
             _mark.Shown = partly ? Mark.Kind.Partly : Mark.Kind.Done;
             _finishHeading.Text = partly ? $"Sallyport is {what}, with something left" : $"Sallyport is {what}";
             var done = _uninstall
-                ? "Its service, Start menu entry and files are gone."
+                ? _option.Checked
+                    ? "Its service, Start menu entry, files, profiles and settings are gone."
+                    : $"Its service, Start menu entry and files are gone. The VPN profiles and settings stay in {InstallLayout.Users(_installer!.Folder)}: " +
+                      "install Sallyport in the same folder again and it finds them."
                 : $"It is in {_installer!.Folder}. Find it in the Start menu, or open a .ovpn file with it.";
             _finishText.Text = partly ? $"{done}\n\n{string.Join("\n", left!)}" : done;
             _primary.Text = "Finish";

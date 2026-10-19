@@ -72,9 +72,13 @@ public sealed class PacketFilterSetup(string folder)
         return InstallerPath;
     }
 
-    public Task<SetupOutcome> InstallAsync(CancellationToken ct = default) => RunInstallerAsync("/i", "install", ct);
+    /// <summary>Installs the driver; <paramref name="location"/>, when given, is where the installer puts the driver's own
+    /// files (its public <c>INSTALLLOCATION</c>, read from the pinned MSI's Directory table) instead of Program Files on
+    /// the system drive.</summary>
+    public Task<SetupOutcome> InstallAsync(string? location = null, CancellationToken ct = default) =>
+        RunInstallerAsync("/i", "install", location is null ? "" : $" INSTALLLOCATION=\"{Path.TrimEndingDirectorySeparator(location)}\"", ct);
 
-    public Task<SetupOutcome> UninstallAsync(CancellationToken ct = default) => RunInstallerAsync("/x", "uninstall", ct);
+    public Task<SetupOutcome> UninstallAsync(CancellationToken ct = default) => RunInstallerAsync("/x", "uninstall", "", ct);
 
     /// <summary>What Windows Installer's exit code means here: 0 done; 3010 and 1641 done, a restart finishes it; 1602
     /// cancelled in the installer; 1223 the administrator prompt refused; anything else failed, its log saying why.</summary>
@@ -87,12 +91,12 @@ public sealed class PacketFilterSetup(string folder)
         _ => new(false, false, false, exitCode, $"{action} failed (Windows Installer {exitCode}); its log says why", log),
     };
 
-    private async Task<SetupOutcome> RunInstallerAsync(string verb, string action, CancellationToken ct)
+    private async Task<SetupOutcome> RunInstallerAsync(string verb, string action, string properties, CancellationToken ct)
     {
         if (!File.Exists(InstallerPath) || !await MatchesAsync(InstallerPath, ct))
             throw new InvalidOperationException("the pinned installer is not here; fetch it first");
         var log = Path.Combine(_folder, $"{action}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
-        var start = new ProcessStartInfo("msiexec.exe", $"{verb} \"{InstallerPath}\" /qn /norestart /l*v \"{log}\"")
+        var start = new ProcessStartInfo("msiexec.exe", $"{verb} \"{InstallerPath}\" /qn /norestart /l*v \"{log}\"{properties}")
         {
             // Through the shell so Windows asks for administrator: installing a driver needs it. A process that has it
             // already (Sallyport's setup) starts the installer as it is, without a second prompt.

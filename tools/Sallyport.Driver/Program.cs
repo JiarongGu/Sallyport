@@ -16,14 +16,16 @@ using Sallyport.Windows.PacketFilter;
 using Sallyport.Windows.Routing;
 using Sallyport.Windows.Service;
 
-// Sallyport.Driver status | fetch | install | uninstall | adapters | pass | inject | rtt | reset | guard
+// Sallyport.Driver status | fetch | install [--location <folder>] | uninstall | adapters | pass | inject | rtt | reset | guard
 //   The packet driver (Windows Packet Filter, D18) as Sallyport manages it: NT Kernel's pinned release, fetched into
-//   %LOCALAPPDATA%\Sallyport\drivers and checked, installed or removed with one administrator prompt.
+//   a drivers folder beside this tool and checked, installed (its own files in --location, if given) or removed with
+//   one administrator prompt.
 //   adapters, pass, inject, rtt, reset and guard are the router's first gates (docs/design/router.md): the driver's
 //   interface, what it costs, and what undoes it. They need administrator, as opening the driver does.
 // Exit codes: 0 done; 1 failed or refused; 2 bad arguments.
 
-var setup = new PacketFilterSetup(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sallyport", "drivers"));
+// Beside the tool, not in %LOCALAPPDATA%: the owner keeps nothing of Sallyport's on the system drive (D19).
+var setup = new PacketFilterSetup(Path.Combine(AppContext.BaseDirectory, "drivers"));
 var internet = IPAddress.Parse("1.1.1.1");
 
 switch (args.FirstOrDefault())
@@ -38,7 +40,7 @@ switch (args.FirstOrDefault())
     {
         if (!PacketFilterRelease.FitsThisMachine) { Console.WriteLine("this machine is not x64: the pinned installer does not fit it"); return 1; }
         await FetchAsync();
-        var outcome = await setup.InstallAsync();
+        var outcome = await setup.InstallAsync(Text("--location"));
         Report(outcome);
         Print(setup.Status());
         return outcome.Succeeded ? 0 : 1;

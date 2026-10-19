@@ -24,11 +24,8 @@ internal static class Program
         {
             Args = args,
             ApplicationName = "Sallyport",
-            // Per user, beside the app rather than in it: an installed client may not write where it runs from (D14).
-            Paths = new ShenoraPathsOptions
-            {
-                DataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sallyport"),
-            },
+            // Per user: in the installed folder's own place for this person (D19), or %LOCALAPPDATA% for a development build.
+            Paths = new ShenoraPathsOptions { DataDirectory = UserData.Folder() },
         });
 
         builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<ShenoraPaths>().DataArea("profiles"), new DpapiProtector()));

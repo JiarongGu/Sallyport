@@ -215,7 +215,10 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
      Files` itself lets Authenticated Users modify; the service `Auto`, running from D: and logging to
      `data\logs\service.log`; the uninstall entry's `InstallLocation` and `UninstallString` on D:; the Start-menu
      entry; no `C:\Program Files\Sallyport`, no `C:\ProgramData\Sallyport`. Run again, setup offers only to
-     reinstall where Sallyport is. Not yet: an upgrade across versions, an interrupted install, removal, a clean machine.
+     reinstall where Sallyport is. Then everything else off C: (D19, measured there): each user's part in
+     `data\users\<SID>`, moved from `%LOCALAPPDATA%` on the first installed start; setup's log in `data\logs`; the
+     driver's own files in `D:\Program Files\Windows Packet Filter`. Removal keeps `data\users` unless asked.
+     Not yet: an upgrade across versions, an interrupted install, removal, a clean machine.
    - **Done when:** install, upgrade, an interrupted install and removal are each measured on a clean machine, the
      network usable throughout. **Needs:** a clean Windows machine or VM.
 10. **The long run:** hours on the real server with outages, and the peer-to-peer harness → bounded memory and
