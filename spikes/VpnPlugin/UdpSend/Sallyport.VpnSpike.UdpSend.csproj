@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Copied into a "routed" and a "direct" folder: the same program at two paths, so only the app filter tells them apart. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>udpsend</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

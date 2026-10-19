@@ -25,9 +25,11 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
 
 ## The client and game routing — `docs/design/architecture.md` (D9–D11)
 Steps 1 (the restructure) and 2 (the runtime: `TunnelSession`, `ProfileStore`) are done. In order:
-- [ ] **Spike: Sallyport as a Windows VPN plug-in (D12).** A .NET 10 component activated as the `vpnClient` task; one
-      program's packets reach it through an app filter while another's do not; then the real tunnel — that program
-      reads the server's address while another reads AU. Needs Developer Mode or a trusted test certificate here.
+- [ ] **Decide how a game's destinations reach the VPN (D12).** Measured: the plug-in runs, and an app filter (with an
+      explicit protocol) confines a split route to the listed program — but a default route takes the whole machine,
+      and a forced program cannot reach what the VPN does not route. Per-game server prefixes, known or learned from the
+      game's own connections, is the shape the measurements allow. Then the real tunnel inside the plug-in: the
+      program reads the server's address while another reads AU. Every run under the guard (D13).
 - [ ] **`Sallyport.Windows` + `apps/Sallyport.Service`**: the packet router and the runtime in a LocalSystem service —
       a session per stored profile, the DPAPI protector and the store's folder ACL (D11), and a named-pipe management
       API (its contracts in `Sallyport.Runtime`) the unelevated client may use.

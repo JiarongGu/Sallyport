@@ -5,4 +5,10 @@
     <PackageVersion Include="xunit" Version="2.9.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
   </ItemGroup>
+  <!-- The VPN plug-in's background component is a WinRT class Windows activates (D12); C#/WinRT authors it. MIT. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.Windows.CsWinRT" Version="2.2.0" />
+    <!-- Windows' own metadata (contract WinMDs), which C#/WinRT reads at build time to author the component; nothing of it ships. -->
+    <PackageVersion Include="Microsoft.Windows.SDK.Contracts" Version="10.0.22621.3233" />
+  </ItemGroup>
 </Project>

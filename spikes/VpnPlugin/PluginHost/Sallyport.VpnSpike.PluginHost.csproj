@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The spike's vpnClient custom host (D12): the app model starts it like a UWP app and activates the plug-in
+       component's class inside it. Framework-dependent, so C#/WinRT's host loads the component into this same runtime;
+       the same C#/WinRT as the component's, so both see one WinRT.Runtime. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWinRT" />
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" ExcludeAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <CsWinRTWindowsMetadata>$(PkgMicrosoft_Windows_SDK_Contracts)\ref\netstandard2.0</CsWinRTWindowsMetadata>
+  </PropertyGroup>
+
+</Project>

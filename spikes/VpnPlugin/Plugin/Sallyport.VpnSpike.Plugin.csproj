@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The spike's VPN plug-in (D12): a WinRT component the VPN platform activates as a vpnClient background task. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Platforms>x64</Platforms>
+    <!-- C#/WinRT picks its native host by Platform, and takes AnyCPU for x86: a 64-bit host process then cannot load it
+         (measured: RoGetActivationFactory failed with ERROR_BAD_EXE_FORMAT). -->
+    <Platform>x64</Platform>
+    <CsWinRTComponent>true</CsWinRTComponent>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWinRT" />
+    <!-- No Windows SDK is installed: C#/WinRT reads Windows' metadata from this package's WinMDs instead. -->
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" ExcludeAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <CsWinRTWindowsMetadata>$(PkgMicrosoft_Windows_SDK_Contracts)\ref\netstandard2.0</CsWinRTWindowsMetadata>
+  </PropertyGroup>
+
+</Project>

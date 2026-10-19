@@ -179,3 +179,43 @@ decapsulate) rather than running loops of its own, and it runs where the platfor
 store lives. The spike proves, in order: a .NET 10 component is activated as the `vpnClient` task; with an app filter,
 one program's packets reach it and another's do not; then the real tunnel — that program reads the server's address
 while another reads AU. If the first two cannot be made to hold, this is decided again.
+
+**Measured 2026-10-19 (`spikes/VpnPlugin`, a sideloaded package signed by a test certificate the machine trusts):**
+- The platform runs a .NET 10 plug-in. A `vpnClient` task must name both a custom host (`Executable`) and a class
+  (`EntryPoint`); the host is a framework-dependent .NET executable running `CoreApplication`, the class a C#/WinRT
+  component served in-process by `WinRT.Host.dll`. Connect, encapsulate and disconnect reached it. On the way: C#/WinRT
+  ships its x86 host for AnyCPU (`ERROR_BAD_EXE_FORMAT` in a 64-bit host — set `Platform` x64); with no Windows SDK
+  installed, its metadata comes from `Microsoft.Windows.SDK.Contracts`; `ServerHostNameList` threw `E_INVALIDARG` for
+  a server URI of `https://1.1.1.1`, so the plug-in carries its server in its own configuration.
+- **App filters work only with an explicit protocol.** A filter's `Protocol` defaults to `None` (0) and then matches
+  nothing — curl was refused at once under its plain, lower-case, `%windir%` and device-path forms, at the plug-in and at
+  the profile alike. With `Protocol` TCP and UDP the plain path matched: under a split route only the listed program's
+  packets reached the plug-in, and an unlisted program's traffic to the routed prefixes was refused, not sent direct.
+- **Force policy confines the program, not the routes:** a listed program forced through the VPN could not reach a
+  destination outside the VPN's routes ("unreachable network").
+- **A default route is not confined by app filters:** with 0.0.0.0/0 and the listed program filtered, other programs'
+  connections (four outside hosts within two seconds) went into the VPN as it started, and the guard (D13) tripped.
+- The plug-in cannot end its own connection: `TerminateConnection` never did in four runs, and a timer in its process
+  fired late or not at all — the process appears to be suspended between the platform's events.
+
+**So, open:** routing all of a game's traffic needs its destinations routed into the VPN, and a default route takes the
+whole machine. The shape that the measurements allow is split routes for the game's own server prefixes — known per
+game, or learned from its connections — with the app filter confining them to it. Undecided.
+
+## D13 — Nothing that can black-hole the machine is connected without a guard outside it (2026-10-19)
+
+The spike's first run routed 0.0.0.0/0 with an app filter that matched nothing (D12's protocol default) into a plug-in
+that drops every packet: the whole machine lost its network until the platform dropped the connection. The owner's rule
+since: a proper backup first — when the network stops, the VPN is disabled.
+
+- The plug-in refuses a default route unless its profile explicitly allows one.
+- A guard in a process outside the VPN — never a routed program itself — refuses to connect when the direct path already
+  fails, probes it every 250 ms while connected (500 ms each), and on three failures in a row or four of the last six
+  disconnects, waits for the platform to report it down, removes the profile, and waits up to 10 s for the direct path.
+- The guard's process must outlive the connection. A test script that died took its guard with it and left the profile
+  connected (measured), so the shipped guard lives in the long-running client or service, and `panic` — disconnect and
+  remove every profile — is always one command away.
+
+Measured: with 1.1.1.1 black-holed it tripped 4.4 s after connecting; with a default route, 0.6 s after, torn down by
+3.8 s; the direct path was back within 0.1 s each time and no profile was left. The plug-in's own deadline is not a
+failsafe (D12): the guard outside is the one that is.
