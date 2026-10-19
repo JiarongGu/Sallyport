@@ -159,3 +159,23 @@ P/Invoke, no package) — not DPAPI's machine scope, which any process on the ma
 sees a profile's name, remotes' transports and status — never its key material. The store itself is platform-neutral
 (`ProfileStore` behind `IProfileProtector`); the DPAPI protector lives in `Sallyport.Windows`.
 
+## D12 — Games are routed by Windows' own per-app VPN: Sallyport as a VPN plug-in (2026-10-19; to be measured)
+
+WinDivert is out (D10: Defender blocks it on download). Chosen by the owner over a driver of our own (C, and Microsoft's
+attestation signature behind an EV certificate) and over Wintun (it routes by destination, not by process): Windows'
+VPN plug-in platform (`Windows.Networking.Vpn`). Windows creates the VPN interface and filters by application itself —
+a desktop application is named by its file path (VPNv2 `TrafficFilterList` `App/Id`), and a plug-in may start its
+channel with app filters of its own (`VpnChannel.StartWithTrafficFilter`). Only the chosen programs' packets enter it,
+TCP and UDP alike, as IP packets — which is what an OpenVPN tunnel carries. No third-party driver, nothing for an
+antivirus to flag, and every line Sallyport's own, MIT; Microsoft's C#/WinRT, needed to author the plug-in's
+background component in .NET, is MIT as well. Microsoft's own C# plug-in sample (MIT) shows the shape: a `vpnClient`
+background task whose class is an in-process WinRT server.
+
+What it costs: an MSIX package declaring the restricted `networkingVpnProvider` capability — "Store approval isn't
+required to sideload an app that declares restricted capabilities" (Microsoft's capability reference) — so a package
+signed by a certificate the machine trusts to install elsewhere, and Developer Mode or a trusted test certificate to
+develop here. And a change of shape: the plug-in is driven by the platform's callbacks (connect, encapsulate,
+decapsulate) rather than running loops of its own, and it runs where the platform puts it, which reopens where D11's
+store lives. The spike proves, in order: a .NET 10 component is activated as the `vpnClient` task; with an app filter,
+one program's packets reach it and another's do not; then the real tunnel — that program reads the server's address
+while another reads AU. If the first two cannot be made to hold, this is decided again.
