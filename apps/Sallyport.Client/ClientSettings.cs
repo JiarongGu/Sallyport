@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sallyport.Profile;
+using Sallyport.Windows.Routing;
 using Shenora.Core.Ipc;
 
 namespace Sallyport.Client;
@@ -11,6 +13,37 @@ internal enum AppKind { Chromium, Electron, Firefox, Environment }
 
 /// <summary>An application the client starts through a profile. A path and flags, never anything secret.</summary>
 internal sealed record RoutedApp(string Id, string Name, string Path, AppKind Kind, string ProfileId, string Arguments);
+
+/// <summary>What a game is run with: its VPN profile, and what its traffic does while the tunnel is lost (the loss policy,
+/// per game: docs/design/product.md §3).</summary>
+internal sealed record GameChoice(string? ProfileId, LossMode Loss, int? DirectAfterSeconds)
+{
+    public LossPolicy Policy => new(Loss, DirectAfterSeconds is > 0 and var s ? TimeSpan.FromSeconds(s) : null);
+}
+
+/// <summary>A profile's connection settings the person changed, each null where the profile's own stands (OpenVPN's
+/// directives, read from it: <see cref="ConnectionPolicy"/>). <see cref="RoundsMax"/> 0 is "never give up".</summary>
+internal sealed record PolicyOverride(
+    int? RetryWaitSeconds = null, int? RetryWaitMaxSeconds = null, int? RoundsMax = null, bool? RandomOrder = null,
+    int? AttemptTimeoutSeconds = null, bool? RetryAfterAuthFailure = null, int? PingRestartSeconds = null)
+{
+    public bool IsEmpty => this == new PolicyOverride();
+
+    /// <summary>The profile's policy with these over it. A ping-restart of the person's own outranks the server's, as
+    /// OpenVPN's <c>pull-filter ignore "ping-restart"</c> makes it: shortening it is the point of setting one.</summary>
+    public ConnectionPolicy Over(ConnectionPolicy policy) => policy with
+    {
+        RetryWait = RetryWaitSeconds is { } wait ? TimeSpan.FromSeconds(wait) : policy.RetryWait,
+        RetryWaitMax = RetryWaitMaxSeconds is { } max ? TimeSpan.FromSeconds(max) : policy.RetryWaitMax,
+        RoundsMax = RoundsMax is { } rounds ? rounds == 0 ? null : rounds : policy.RoundsMax,
+        RandomOrder = RandomOrder ?? policy.RandomOrder,
+        AttemptTimeout = AttemptTimeoutSeconds is { } timeout ? TimeSpan.FromSeconds(timeout) : policy.AttemptTimeout,
+        RetryAfterAuthFailure = RetryAfterAuthFailure ?? policy.RetryAfterAuthFailure,
+        PingRestart = PingRestartSeconds ?? policy.PingRestart,
+        Ping = PingRestartSeconds is { } restart ? Math.Max(1, restart / 4) : policy.Ping,
+        KeepaliveOverridesServer = PingRestartSeconds is not null || policy.KeepaliveOverridesServer,
+    };
+}
 
 /// <summary>
 /// What the client remembers besides the profiles themselves: each profile's SOCKS port and the routed applications.
@@ -35,6 +68,8 @@ internal sealed class ClientSettings
     {
         public Dictionary<string, int> Ports { get; set; } = [];
         public List<RoutedApp> Apps { get; set; } = [];
+        public Dictionary<string, GameChoice> Games { get; set; } = [];
+        public Dictionary<string, PolicyOverride> Policies { get; set; } = [];
     }
 
     public ClientSettings(string file)
@@ -79,8 +114,45 @@ internal sealed class ClientSettings
     {
         lock (_gate)
         {
-            // Applications bound to it are kept: they show the profile as gone and can be pointed at another.
-            if (_saved.Ports.Remove(profileId)) Save();
+            // Applications and games bound to it are kept: they show the profile as gone and can be pointed at another.
+            if (_saved.Ports.Remove(profileId) | _saved.Policies.Remove(profileId)) Save();
+        }
+    }
+
+    public GameChoice ChoiceFor(string gameId)
+    {
+        lock (_gate) return _saved.Games.GetValueOrDefault(gameId) ?? new GameChoice(null, LossMode.Hold, null);
+    }
+
+    public void PutChoice(string gameId, GameChoice choice)
+    {
+        lock (_gate)
+        {
+            _saved.Games[gameId] = choice;
+            Save();
+        }
+    }
+
+    public void ForgetGame(string gameId)
+    {
+        lock (_gate)
+        {
+            if (_saved.Games.Remove(gameId)) Save();
+        }
+    }
+
+    public PolicyOverride PolicyOf(string profileId)
+    {
+        lock (_gate) return _saved.Policies.GetValueOrDefault(profileId) ?? new PolicyOverride();
+    }
+
+    public void PutPolicy(string profileId, PolicyOverride policy)
+    {
+        lock (_gate)
+        {
+            if (policy.IsEmpty) _saved.Policies.Remove(profileId);
+            else _saved.Policies[profileId] = policy;
+            Save();
         }
     }
 

@@ -112,9 +112,9 @@ internal sealed class MainForm : OptimizedForm
         });
     }
 
-    /// <summary>What a start was given: profiles to import (a path ending .ovpn or .conf), <c>--tray</c> to stay out of
-    /// sight, <c>--exit</c> to leave as the tray's Exit does. Called for this start and for each later one handed over by
-    /// <see cref="SingleInstance"/>.</summary>
+    /// <summary>What a start was given: profiles to import (a path ending .ovpn or .conf), <c>--add-game</c> and a game's
+    /// folder, <c>--tray</c> to stay out of sight, <c>--exit</c> to leave as the tray's Exit does. Called for this start
+    /// and for each later one handed over by <see cref="SingleInstance"/>.</summary>
     private void Receive(string[] args, bool atStart)
     {
         if (args.Contains("--exit"))
@@ -128,6 +128,10 @@ internal sealed class MainForm : OptimizedForm
             try { _core.Import(path); }
             catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
         }
+        var addGame = Array.IndexOf(args, "--add-game");
+        if (addGame >= 0 && addGame + 1 < args.Length)
+            try { _core.AddGame(args[addGame + 1]); }
+            catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
         if (!atStart) _tray.ShowWindow();
         // Hidden only once shown: the window has to exist for the page to load behind it.
         else if (args.Contains("--tray")) BeginInvoke(Hide);

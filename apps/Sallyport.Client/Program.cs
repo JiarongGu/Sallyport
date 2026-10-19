@@ -7,8 +7,9 @@ using Shenora.Windows;
 
 namespace Sallyport.Client;
 
-// Sallyport.Client [profile.ovpn ...] [--tray] [--exit]
-//   The tray and window: import profiles, connect them (each a loopback SOCKS5 port), start applications through them.
+// Sallyport.Client [profile.ovpn ...] [--add-game <folder>] [--tray] [--exit]
+//   The tray and window: import profiles, connect them (each a loopback SOCKS5 port), start applications through them,
+//   and route games through them (the router service, docs/design/product.md).
 //   A profile path imports it; --tray starts out of sight; --exit asks the running client to disconnect all and leave.
 //   A second start hands its arguments to the one already running.
 internal static class Program
@@ -33,6 +34,8 @@ internal static class Program
         builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<ShenoraPaths>().DataArea("profiles"), new DpapiProtector()));
         builder.Services.AddSingleton(sp => new ClientSettings(Path.Combine(sp.GetRequiredService<ShenoraPaths>().DataArea("config"), "client.json")));
         builder.Services.AddSingleton<Connections>();
+        builder.Services.AddSingleton(sp => new GameProfileStore(sp.GetRequiredService<ShenoraPaths>().DataArea("games")));
+        builder.Services.AddSingleton<GameRunner>();
         builder.Services.AddSingleton<ClientCore>();
 
         builder.Services.AddSingleton(sp => new WebViewEnvironmentOptions

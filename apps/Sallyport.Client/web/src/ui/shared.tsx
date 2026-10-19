@@ -69,6 +69,7 @@ export function Disclosure({ open, controls, onClick, children = 'Details' }: {
 export function EmptyView({ empty, actions }: { empty: Empty; actions: ClientState['actions'] }) {
   return <div className="empty">
     <h2>{empty.title}</h2><p className="secondary">{empty.text}</p>
-    <ActionButton action={empty.command === 'IMPORT' ? actions.import : actions.addApp} focusKey={empty.command === 'ADD_APP' ? 'empty-add-app' : undefined} primary onClick={() => post(empty.command, {})} />
+    <ActionButton action={empty.command === 'IMPORT' ? actions.import : empty.command === 'ADD_GAME' ? actions.addGame : actions.addApp}
+      focusKey={empty.command === 'ADD_APP' ? 'empty-add-app' : empty.command === 'ADD_GAME' ? 'empty-add-game' : undefined} primary onClick={() => post(empty.command, {})} />
   </div>;
 }

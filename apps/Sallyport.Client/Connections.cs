@@ -98,7 +98,9 @@ internal sealed class Connections : IDisposable
             catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException)
             { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, "the stored profile could not be opened"); }
 
-            var running = new Running(new TunnelService(profile, new IPEndPoint(IPAddress.Loopback, port), _ => Poll()), new CancellationTokenSource(), port);
+            // The profile's own connection settings, with the person's changes over them.
+            var options = new TunnelSessionOptions { Policy = _settings.PolicyOf(id).Over(profile.Policy) };
+            var running = new Running(new TunnelService(profile, new IPEndPoint(IPAddress.Loopback, port), _ => Poll(), options), new CancellationTokenSource(), port);
             _ended.Remove(id);
             _running[id] = running;
             running.Run = Task.Run(() => running.Service.RunAsync(running.Stop.Token));

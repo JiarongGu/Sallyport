@@ -15,4 +15,9 @@
     <InternalsVisibleTo Include="Sallyport.Windows.Tests" />
   </ItemGroup>
 
+  <!-- A run's tunnel side (Service/RunPump.cs) is a TunnelSession consumer. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Sallyport\Sallyport.csproj" />
+  </ItemGroup>
+
 </Project>

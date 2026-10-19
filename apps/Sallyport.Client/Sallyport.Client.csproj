@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
+    <!-- Game routing: the router service's client and the packet driver's management. -->
+    <ProjectReference Include="..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
     <PackageReference Include="Shenora.Windows" />
     <InternalsVisibleTo Include="Sallyport.Client.Tests" />
   </ItemGroup>

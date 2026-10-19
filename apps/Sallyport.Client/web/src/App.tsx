@@ -3,19 +3,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClientState, Notice } from './contract';
 import { MODULE } from './contract';
 import { Apps } from './Apps';
+import { Games } from './Games';
 import { Guide } from './Guide';
 import { Profiles } from './Profiles';
 import { EditorForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
 import { TitleBar } from './ui/TitleBar';
 
-type Page = 'profiles' | 'apps' | 'guide';
+type Page = 'profiles' | 'games' | 'apps' | 'guide';
 
 function remembered(): Page {
   // Storage can be refused by WebView policy; navigation must still work.
   try {
     const page = localStorage.getItem('sallyport.page');
-    if (page === 'profiles' || page === 'apps' || page === 'guide') return page;
+    if (page === 'profiles' || page === 'games' || page === 'apps' || page === 'guide') return page;
   } catch { /* The first page is only a convenience. */ }
   return 'profiles';
 }
@@ -60,7 +61,8 @@ export function App() {
 
   useEffect(() => {
     const editor = state?.editor;
-    if (editor && editor.token !== editorToken.current) go(editor.kind === 'port' ? 'profiles' : 'apps');
+    if (editor && editor.token !== editorToken.current)
+      go(editor.kind === 'port' || editor.kind === 'policy' ? 'profiles' : editor.kind === 'game' ? 'games' : 'apps');
     editorToken.current = editor?.token ?? null;
   }, [state?.editor?.token, go]);
 
@@ -81,19 +83,21 @@ export function App() {
   });
   const editorForm = state?.editor && currentDraft ? <EditorForm key={state.editor.token}
     editor={state.editor} draft={currentDraft} onChange={setDraft}
-    profileChoices={state.profileChoices} kindChoices={state.kindChoices} /> : null;
+    profileChoices={state.profileChoices} kindChoices={state.kindChoices} lossChoices={state.lossChoices} /> : null;
 
   return <div className="shell">
     <TitleBar summary={state?.summary} />
     <nav className="navigation" aria-label="Main">
-      {([['profiles', 'Profiles'], ['apps', 'Apps'], ['guide', 'How to use']] as const).map(([value, label]) =>
+      {([['profiles', 'Profiles'], ['games', 'Games'], ['apps', 'Apps'], ['guide', 'How to use']] as const).map(([value, label]) =>
         <button key={value} type="button" className={`nav-item${page === value ? ' selected' : ''}`}
           aria-current={page === value ? 'page' : undefined} onClick={() => go(value)}>{label}</button>)}
     </nav>
     <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
     <main className="content" id="main-content">
       {!state ? <div className="loading secondary" role="status">Loading…</div> :
-        page === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'port' ? editorForm : null} /> :
+        page === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle}
+          editorForm={state.editor?.kind === 'port' || state.editor?.kind === 'policy' ? editorForm : null} /> :
+        page === 'games' ? <Games state={state} now={now} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'game' ? editorForm : null} /> :
         page === 'apps' ? <Apps state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'app' ? editorForm : null} /> :
         <Guide guide={state.guide} manualOpen={expanded.has('manual')} toggleManual={() => toggle('manual')} />}
     </main>

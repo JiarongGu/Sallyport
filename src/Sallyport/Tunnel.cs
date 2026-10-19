@@ -88,6 +88,11 @@ public sealed class Tunnel : IAsyncDisposable
     public required PushedConfig Config { get; init; }
     public required TimeSpan ConnectTime { get; init; }
 
+    /// <summary>What the tunnel adds to each packet on the path to the server: the outer IPv4 header, the transport's
+    /// (UDP 8; TCP 20 and the 2-byte length each packet is framed with) and the data channel's own. A path's MTU less
+    /// this is the largest packet the tunnel carries in one outer packet.</summary>
+    public int Overhead => 20 + (Remote.Proto == "tcp" ? 20 + 2 : 8) + DataChannel.Overhead;
+
     /// <summary>Control messages that were neither a push reply nor a refusal (INFO, AUTH_PENDING, ...).</summary>
     public IReadOnlyList<string> OtherMessages { get { lock (_other) return [.. _other]; } }
 

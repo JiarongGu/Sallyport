@@ -36,7 +36,20 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "LAUNCH_APP" => () => core.LaunchAsync(Id(), cancellationToken),
             "REMOVE_APP" => () => Done(() => core.RemoveApp(Id())),
             "REQUEST_REMOVE_PROFILE" => () => Done(() => core.RequestRemoveProfile(Id())),
-            "CONFIRM_REMOVE_PROFILE" => () => core.ConfirmRemoveProfileAsync(Token()),
+            "CONFIRM" => () => core.ConfirmAsync(Token()),
+            "ADD_GAME" => core.AddGameFromDialogAsync,
+            "RESCAN_GAME" => () => Done(() => core.RescanGame(Id())),
+            "SET_GAME_PROGRAM" => () => Done(() => core.SetGameProgram(Id(), Text("path"), PayloadHelper.GetRequiredValue<bool>(request.Payload, "included"))),
+            "BEGIN_GAME_EDIT" => () => Done(() => core.BeginGameEdit(Id())),
+            "SAVE_GAME" => () => Done(() => core.SaveGame(Token(), PayloadHelper.GetRequiredValue<GameValues>(request.Payload, "values"))),
+            "REQUEST_REMOVE_GAME" => () => Done(() => core.RequestRemoveGame(Id())),
+            "RUN_GAME" => () => Done(() => core.RunGame(Id())),
+            "STOP_RUN" => core.StopRunAsync,
+            "BEGIN_POLICY_EDIT" => () => Done(() => core.BeginPolicyEdit(Id())),
+            "SAVE_POLICY" => () => Done(() => core.SavePolicy(Token(), PayloadHelper.GetRequiredValue<PolicyValues>(request.Payload, "values"))),
+            "RESET_POLICY" => () => Done(() => core.ResetPolicy(Token())),
+            "REQUEST_DRIVER_INSTALL" => () => Done(core.RequestDriverInstall),
+            "REQUEST_DRIVER_REMOVE" => () => Done(core.RequestDriverRemove),
             "CANCEL_CONFIRMATION" => () => Done(() => core.CancelConfirmation(Token())),
             "COPY_GUIDE_EXAMPLE" => () => Done(core.CopyGuideExample),
             "DISMISS_NOTICE" => () => Done(() => core.Dismiss(Id())),
@@ -54,6 +67,6 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
 
     private static NoticeSubject? SubjectOf(IpcRequest request) =>
         PayloadHelper.GetOptionalValue<string>(request.Payload, "id") is { } id
-            ? new(request.Type.Contains("APP", StringComparison.Ordinal) ? "app" : "profile", id)
+            ? new(request.Type.Contains("APP", StringComparison.Ordinal) ? "app" : request.Type.Contains("GAME", StringComparison.Ordinal) ? "game" : "profile", id)
             : null;
 }

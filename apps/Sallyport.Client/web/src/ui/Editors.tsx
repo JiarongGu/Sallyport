@@ -1,16 +1,21 @@
 import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
-import type { AppValues, ClientState, Confirmation, Editor, EditorField, PortValues } from '../contract';
+import type { AppValues, ClientState, Confirmation, Editor, EditorField, GameValues, PolicyValues, PortValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { ActionButton } from './shared';
 
 export type Draft =
   | { token: string; kind: 'port'; values: PortValues }
-  | { token: string; kind: 'app'; values: AppValues };
+  | { token: string; kind: 'app'; values: AppValues }
+  | { token: string; kind: 'game'; values: GameValues }
+  | { token: string; kind: 'policy'; values: PolicyValues };
 
 export function seedDraft(editor: Editor): Draft {
-  return editor.kind === 'port'
-    ? { token: editor.token, kind: 'port', values: { ...editor.values } }
-    : { token: editor.token, kind: 'app', values: { ...editor.values } };
+  switch (editor.kind) {
+    case 'port': return { token: editor.token, kind: 'port', values: { ...editor.values } };
+    case 'app': return { token: editor.token, kind: 'app', values: { ...editor.values } };
+    case 'game': return { token: editor.token, kind: 'game', values: { ...editor.values } };
+    case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
+  }
 }
 
 function useEditorFocus(ref: RefObject<HTMLFormElement | null>) {
@@ -26,12 +31,13 @@ function useEditorFocus(ref: RefObject<HTMLFormElement | null>) {
   }, [ref]);
 }
 
-export function EditorForm({ editor, draft, onChange, profileChoices, kindChoices }: {
+export function EditorForm({ editor, draft, onChange, profileChoices, kindChoices, lossChoices }: {
   editor: Editor;
   draft: Draft;
   onChange: (draft: Draft) => void;
   profileChoices: ClientState['profileChoices'];
   kindChoices: ClientState['kindChoices'];
+  lossChoices: ClientState['lossChoices'];
 }) {
   const form = useRef<HTMLFormElement>(null);
   const prefix = useId();
@@ -43,13 +49,35 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
     ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p>
     : null;
 
-  return <form ref={form} className="editor" tabIndex={-1} aria-label={editor.kind === 'port' ? 'SOCKS5 port' : 'Edit'}
+  const text = (field: EditorField & keyof PolicyValues, label: string, unit: string) => draft.kind === 'policy' ? <div className="field">
+    <label htmlFor={`${prefix}-${field}`}>{label}</label>
+    <div className="unit-field">
+      <input id={`${prefix}-${field}`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
+        value={draft.values[field] as string} disabled={saving}
+        aria-invalid={!!editor.errors[field]} aria-describedby={description(field)}
+        onChange={(event) => onChange({ ...draft, values: { ...draft.values, [field]: event.target.value } })} />
+      <span className="secondary">{unit}</span>
+    </div>
+    {error(field)}
+  </div> : null;
+  const check = (field: 'randomOrder' | 'retryAfterAuthFailure', label: string) => draft.kind === 'policy' ? <label className="check-field">
+    <input type="checkbox" checked={draft.values[field]} disabled={saving}
+      onChange={(event) => onChange({ ...draft, values: { ...draft.values, [field]: event.target.checked } })} />
+    {label}
+  </label> : null;
+
+  return <form ref={form} className="editor" tabIndex={-1}
+    aria-label={editor.kind === 'port' ? 'SOCKS5 port' : editor.kind === 'policy' ? 'Connection settings' : 'Edit'}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
       event.preventDefault();
       if (!editor.save.visible || !editor.save.enabled || editor.save.busy) return;
-      if (draft.kind === 'port') post('SET_PORT', { token: editor.token, portText: draft.values.portText });
-      else post('UPDATE_APP', { token: editor.token, values: draft.values });
+      switch (draft.kind) {
+        case 'port': post('SET_PORT', { token: editor.token, portText: draft.values.portText }); break;
+        case 'app': post('UPDATE_APP', { token: editor.token, values: draft.values }); break;
+        case 'game': post('SAVE_GAME', { token: editor.token, values: draft.values }); break;
+        case 'policy': post('SAVE_POLICY', { token: editor.token, values: draft.values }); break;
+      }
     }}>
     {editor.kind === 'port' && draft.kind === 'port' ? <>
       <label htmlFor={`${prefix}-port`}>SOCKS5 port</label>
@@ -96,12 +124,61 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, arguments: event.target.value } })} />
         {error('arguments')}
       </div>
+    </div> : draft.kind === 'game' ? <div className="editor-fields">
+      <div className="field">
+        <label htmlFor={`${prefix}-name`}>Name</label>
+        <input id={`${prefix}-name`} value={draft.values.name} disabled={saving}
+          aria-invalid={!!editor.errors.name} aria-describedby={description('name')}
+          onChange={(event) => onChange({ ...draft, values: { ...draft.values, name: event.target.value } })} />
+        {error('name')}
+      </div>
+      <div className="field">
+        <label htmlFor={`${prefix}-profile`}>VPN profile</label>
+        <select id={`${prefix}-profile`} value={draft.values.profileId ?? ''} disabled={saving}
+          aria-invalid={!!editor.errors.profileId} aria-describedby={description('profileId')}
+          onChange={(event) => onChange({ ...draft, values: { ...draft.values, profileId: event.target.value || null } })}>
+          <option value="" hidden disabled />
+          {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
+        </select>
+        {error('profileId')}
+      </div>
+      <fieldset className="field full-field loss-choices" aria-describedby={description('loss')}>
+        <legend>When the VPN drops</legend>
+        {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
+          <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={draft.values.loss === choice.value} disabled={saving}
+            onChange={() => onChange({ ...draft, values: { ...draft.values, loss: choice.value } })} />
+          <span><span>{choice.label}</span><span className="secondary metadata">{choice.help}</span></span>
+        </label>)}
+        {error('loss')}
+      </fieldset>
+      {draft.values.loss === 'hold' && <div className="field">
+        <label htmlFor={`${prefix}-after`}>Use my own connection after</label>
+        <div className="unit-field">
+          <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
+            value={draft.values.directAfterText} disabled={saving} placeholder="never"
+            aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
+            onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
+          <span className="secondary">seconds</span>
+        </div>
+        {error('directAfterText')}
+      </div>}
+    </div> : draft.kind === 'policy' ? <div className="editor-fields">
+      {text('retryWaitText', 'Wait between attempts', 'seconds')}
+      {text('retryWaitMaxText', 'Longest wait', 'seconds')}
+      {text('roundsMaxText', 'Give up after (0: never)', 'rounds')}
+      {text('attemptTimeoutText', 'Time for a server to answer', 'seconds')}
+      {text('pingRestartText', 'Lost after silence of', 'seconds')}
+      <div className="field checks">
+        {check('randomOrder', 'Try the servers in random order')}
+        {check('retryAfterAuthFailure', 'Keep trying after the server refuses the login')}
+      </div>
     </div> : null}
     {editor.hint && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
     {error('form')}
     <div className="actions">
       <ActionButton action={editor.save} primary type="submit" />
       <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
+      <ActionButton action={editor.reset} onClick={() => post('RESET_POLICY', { token: editor.token })} />
     </div>
   </form>;
 }
@@ -134,7 +211,7 @@ export function RemovalConfirmation({ confirmation }: { confirmation: Confirmati
     <p id={`${prefix}-text`}>{confirmation.text}</p>
     <div className="actions">
       <ActionButton buttonRef={cancel} action={confirmation.cancel} onClick={() => post('CANCEL_CONFIRMATION', { token: confirmation.token })} />
-      <ActionButton action={confirmation.confirm} danger onClick={() => post('CONFIRM_REMOVE_PROFILE', { token: confirmation.token })} />
+      <ActionButton action={confirmation.confirm} danger onClick={() => post('CONFIRM', { token: confirmation.token })} />
     </div>
   </dialog>;
 }

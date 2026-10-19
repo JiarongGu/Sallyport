@@ -33,7 +33,8 @@ internal sealed record EmptyView(string Title, string Text, string Command);
 
 internal sealed record LocationView(LocationPhase Phase, string Text, IReadOnlyList<Fact> Facts, DateTimeOffset? CheckedAt, bool PreviousResult);
 
-internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction EditPort, UiAction Locate, UiAction Remove);
+internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction EditPort, UiAction Locate, UiAction Remove,
+    UiAction Settings);
 
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
@@ -51,7 +52,7 @@ internal sealed record AppValues(string Name, string? ProfileId, AppKind Kind, s
 
 internal sealed record EditorView(
     string Token, string SubjectId, string Phase, IReadOnlyDictionary<string, string> Errors, string? Hint, UiAction Save,
-    UiAction Cancel, string Kind, object Values);
+    UiAction Cancel, UiAction Reset, string Kind, object Values);
 
 internal sealed record ConfirmationView(string Token, string Title, string Text, UiAction Confirm, UiAction Cancel);
 
@@ -66,27 +67,32 @@ internal sealed record ClientState(
     ClientState.TopActions Actions,
     IReadOnlyList<ProfileView> Profiles,
     IReadOnlyList<AppView> Apps,
+    IReadOnlyList<GameView> Games,
     EmptyView? ProfilesEmpty,
     EmptyView? AppsEmpty,
+    EmptyView? GamesEmpty,
     string AppsNote,
+    DriverView Driver,
     IReadOnlyList<ClientState.ProfileChoice> ProfileChoices,
     IReadOnlyList<ClientState.KindChoice> KindChoices,
+    IReadOnlyList<LossChoice> LossChoices,
     EditorView? Editor,
     ConfirmationView? Confirmation,
     ClientState.GuideView Guide,
     IReadOnlyList<Notice> Notices)
 {
     internal sealed record SummaryView(string Text, Tone Tone);
-    internal sealed record TopActions(UiAction Import, UiAction AddApp);
+    internal sealed record TopActions(UiAction Import, UiAction AddApp, UiAction AddGame);
     internal sealed record ProfileChoice(string Id, string Label, bool Enabled);
     internal sealed record KindChoice(AppKind Value, string Label, string Help);
     internal sealed record GuideView(string EndpointText, string CurlExample, UiAction CopyExample);
 }
 
-/// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>.</summary>
+/// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>. <see cref="UsedBy"/>: the
+/// game being routed through it, which a proxy may not share.</summary>
 internal sealed record ProfileFacts(
     StoredProfile Stored, int Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
-    int? AttemptsSinceUp, bool Disconnecting, bool Removing);
+    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false);
 
 internal static class ClientView
 {
@@ -98,7 +104,7 @@ internal static class ClientView
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    public const string AppsNote = "Games and programs that ignore proxy settings are not routed yet.";
+    public const string AppsNote = "Apps here use proxy settings. Games, and programs that ignore proxy settings, are routed on the Games page.";
 
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
 
@@ -147,11 +153,15 @@ internal static class ClientView
             facts.Add(new("Uploaded", Bytes(status.BytesUp)));
         }
 
+        if (f.UsedBy is { } game) facts.Add(new("In use by", $"{game} (game routing)"));
+        if (f.PolicyChanged) facts.Add(new("Connection settings", "Changed by you"));
+
         var location = Located(f, up);
-        var canConnect = f.Stored.Unsupported is null;
+        var canConnect = f.Stored.Unsupported is null && f.UsedBy is null;
         var actions = new ProfileActions(
             Connect: running || busy ? UiAction.Hidden
-                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect", canConnect, "This version cannot connect this profile."),
+                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect proxy", canConnect,
+                    f.UsedBy is { } user ? $"{user} is being routed through it. One profile serves a game or a proxy at a time." : "This version cannot connect this profile."),
             Disconnect: running || f.Disconnecting
                 ? UiAction.Shown(status?.State == TunnelServiceStatus.Connecting ? "Cancel" : "Disconnect", busy: f.Disconnecting)
                 : UiAction.Hidden,
@@ -161,7 +171,9 @@ internal static class ClientView
                 ? UiAction.Shown(location.Phase switch { LocationPhase.Checked => "Check again", LocationPhase.Unavailable => "Try again", _ => "Check location" },
                     busy: f.Locating)
                 : UiAction.Hidden,
-            Remove: UiAction.Shown("Remove profile", !running && !busy, running ? "Disconnect before removing it." : null));
+            Remove: UiAction.Shown("Remove profile", !running && !busy && f.UsedBy is null,
+                running ? "Disconnect before removing it." : f.UsedBy is not null ? "Stop routing the game first." : null),
+            Settings: UiAction.Shown("Connection settings", !busy && f.Stored.Unsupported is null, "This version cannot connect this profile."));
 
         return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null, Endpoint(f.Port), f.Port,
             facts, location, actions);

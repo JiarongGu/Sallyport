@@ -1168,7 +1168,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         lastPhase = state.Phase;
     };
 
-    ServicePump? current = null;
+    RunPump? current = null;
     var policy = pingRestart > 0
         ? profile.Policy with { Ping = Math.Max(1, pingRestart / 4), PingRestart = pingRestart, KeepaliveOverridesServer = true }
         : profile.Policy;
@@ -1177,8 +1177,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         Policy = policy,
         Consumer = (tunnel, generation) =>
         {
-            var overhead = 20 + (tunnel.Remote.Proto == "tcp" ? 20 + 2 : 8) + DataChannel.Overhead;
-            var pump = new ServicePump(tunnel, generation, run, run.Attached.AdapterMtu - overhead);
+            var pump = new RunPump(tunnel, generation, run);
             Volatile.Write(ref current, pump);
             return pump;
         },
@@ -1213,14 +1212,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             Console.WriteLine($"{T()}  FREED");
         }
     }) : Task.CompletedTask;
-    // What the router routed goes into the tunnel of the generation it was routed for, and nowhere else.
-    var sending = Task.Run(async () =>
-    {
-        await foreach (var (generation, packet) in run.ToTunnel.Reader.ReadAllAsync())
-            if (Volatile.Read(ref current) is { } pump && pump.Generation == generation)
-                try { await pump.Tunnel.SendAsync(packet); }
-                catch (Exception e) when (e is TunnelEnded or ObjectDisposedException) { }
-    });
+    var sending = RunPump.ForwardAsync(run, () => Volatile.Read(ref current));
 
     if (childExe is not null)
     {
@@ -1741,48 +1733,6 @@ sealed class TunnelPump : IAsyncDisposable
         _out.Writer.TryComplete();
         await _stop.CancelAsync();
         await Task.WhenAll(_sending, _receiving);
-        _stop.Dispose();
-    }
-}
-
-// One tunnel generation's side of a run through the service: it commits the generation over the run's pipe before
-// anything of it crosses, hands the run what the tunnel returns, and retires the generation when the tunnel goes.
-sealed class ServicePump : IAsyncDisposable
-{
-    private readonly RouterRun _run;
-    private readonly CancellationTokenSource _stop = new();
-    private readonly Task _receiving;
-
-    public ServicePump(Tunnel tunnel, int generation, RouterRun run, int mtu)
-    {
-        Tunnel = tunnel;
-        Generation = generation;
-        _run = run;
-        var committed = tunnel.Config.Address is { AddressFamily: AddressFamily.InterNetwork } address
-            ? run.CommitAsync(generation, address, mtu).AsTask()
-            : Task.CompletedTask;
-        _receiving = ReceiveAsync(committed);
-    }
-
-    public Tunnel Tunnel { get; }
-    public int Generation { get; }
-
-    private async Task ReceiveAsync(Task committed)
-    {
-        try
-        {
-            await committed;
-            await foreach (var packet in Tunnel.Packets.ReadAllAsync(_stop.Token)) _run.FromTunnel(Generation, packet);
-        }
-        catch (Exception e) when (e is OperationCanceledException or TunnelEnded or IOException or ObjectDisposedException) { }
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        try { await _run.RetireAsync(Generation); }
-        catch (Exception e) when (e is IOException or ObjectDisposedException) { }
-        await _stop.CancelAsync();
-        await _receiving;
         _stop.Dispose();
     }
 }

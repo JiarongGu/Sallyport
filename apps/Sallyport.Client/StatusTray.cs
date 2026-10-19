@@ -142,6 +142,31 @@ internal sealed class StatusTray : IDisposable
             _menu.Items.Add(item);
         }
 
+        if (state.Games.FirstOrDefault(g => g.Run is { Phase: not RunPhase.Ended }) is { } routed)
+        {
+            _menu.Items.Add(new ToolStripSeparator());
+            var item = new ToolStripMenuItem($"{routed.Name} — {routed.Run!.StatusText}");
+            if (routed.Run.DetailText is { } detail) item.DropDownItems.Add(new ToolStripMenuItem(detail) { Enabled = false });
+            Add(item, routed.Actions.Stop, _core.StopRunAsync);
+            _menu.Items.Add(item);
+        }
+        else if (state.Games.Count > 0)
+        {
+            var run = new ToolStripMenuItem("Run game");
+            foreach (var game in state.Games)
+            {
+                var id = game.Id;
+                run.DropDownItems.Add(new ToolStripMenuItem($"{game.Name}  ·  {game.ThroughText}", null,
+                    (_, _) => Run(() => { _core.RunGame(id); return Task.CompletedTask; }))
+                {
+                    Enabled = game.Actions.Run.Enabled,
+                    ToolTipText = game.Actions.Run.Reason ?? "",
+                });
+            }
+            _menu.Items.Add(new ToolStripSeparator());
+            _menu.Items.Add(run);
+        }
+
         if (state.Apps.Count > 0)
         {
             var launch = new ToolStripMenuItem("Launch app");
@@ -160,7 +185,7 @@ internal sealed class StatusTray : IDisposable
         }
 
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(new ToolStripMenuItem("Exit Sallyport", null, (_, _) => Exit()) { ToolTipText = "Disconnects every profile, then quits." });
+        _menu.Items.Add(new ToolStripMenuItem("Exit Sallyport", null, (_, _) => Exit()) { ToolTipText = "Stops game routing, disconnects every profile, then quits." });
     }
 
     /// <summary>A profile's action as the window decides it: shown or not, pressable or not, and why.</summary>
@@ -189,7 +214,7 @@ internal sealed class StatusTray : IDisposable
         _window.Hide();
         if (_toldHidden) return;
         _toldHidden = true;
-        Tell("Sallyport is still running in the tray. Connections stay up.");
+        Tell("Sallyport is still running in the tray. Connections and game routing stay on.");
     }
 
     /// <summary>The notification area refuses a tip longer than 127 characters: cut at the last whole phrase that fits.</summary>

@@ -8,7 +8,7 @@ export function Profiles({ state, now, expanded, toggle, editorForm }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
   return <section className="page" aria-label="Profiles">
-    <PageHeader title="Profiles" subtitle="Connect a profile to give apps a local SOCKS5 proxy.">
+    <PageHeader title="Profiles" subtitle="Use an OpenVPN profile for a game, or connect it as a local SOCKS5 proxy for apps.">
       <ActionButton action={state.actions.import} primary onClick={() => post('IMPORT', {})} />
     </PageHeader>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}
@@ -48,7 +48,10 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
     </div>
     <div id={detailsId} hidden={!expanded} className="row-details">
       <Facts facts={profile.facts} />
-      <ActionButton action={profile.actions.editPort} focusKey={`port:${profile.id}`} onClick={() => post('BEGIN_PORT_EDIT', { id: profile.id })} />
+      <div className="actions">
+        <ActionButton action={profile.actions.editPort} focusKey={`port:${profile.id}`} onClick={() => post('BEGIN_PORT_EDIT', { id: profile.id })} />
+        <ActionButton action={profile.actions.settings} focusKey={`policy:${profile.id}`} onClick={() => post('BEGIN_POLICY_EDIT', { id: profile.id })} />
+      </div>
       {/* Beside the button that opened it; the row's foot keeps it reachable if the details are folded away. */}
       {expanded && editorForm}
       <LocationResult profile={profile} />

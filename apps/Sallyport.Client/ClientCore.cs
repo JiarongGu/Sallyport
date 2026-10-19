@@ -3,7 +3,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Sallyport.Profile;
 using Sallyport.Runtime;
+using Sallyport.Windows.PacketFilter;
+using Sallyport.Windows.Routing;
+using Sallyport.Windows.Service;
 using Shenora;
 using Shenora.Core.Events;
 using Shenora.Core.Ipc;
@@ -15,7 +19,8 @@ namespace Sallyport.Client;
 /// What the window and the tray both drive, and the only author of what the window shows: the page is sent
 /// <c>CLIENT.STATE</c> (<see cref="ClientState"/>) whenever anything changes and <c>CLIENT.NOTICE</c> for each outcome,
 /// and sends back intents that answer nothing. An edit and a confirmation are the host's too, so the page never decides
-/// what may be saved or removed. It never sees a profile's text (D14).
+/// what may be saved or removed. It never sees a profile's text (D14). Games are run through the router service
+/// (<see cref="GameRunner"/>, docs/design/product.md).
 /// </summary>
 internal sealed class ClientCore
 {
@@ -31,6 +36,9 @@ internal sealed class ClientCore
     private readonly ProfileStore _store;
     private readonly ClientSettings _settings;
     private readonly Connections _connections;
+    private readonly GameProfileStore _games;
+    private readonly GameRunner _runner;
+    private readonly PacketFilterSetup _driverSetup;
     private readonly ShenoraPaths _paths;
     private readonly IEventBus _events;
     private readonly IFileDialogs _dialogs;
@@ -46,12 +54,16 @@ internal sealed class ClientCore
     private OpenEditor? _editor;
     private OpenConfirmation? _confirmation;
     private string? _dialog;
+    // What the driver and the service are, read at most every few seconds: the window's state is taken far more often.
+    private (DriverFacts Facts, long At)? _driverFacts;
+    private string? _driverWork;
+    private const long DriverFactsLast = 3000;
     private long _sequence;
     private long _noticeIds;
 
     private sealed record OpenEditor(string Token, string Kind, string SubjectId, object Values, IReadOnlyDictionary<string, string> Errors);
 
-    private sealed record OpenConfirmation(string Token, string ProfileId, string Title, string Text);
+    private sealed record OpenConfirmation(string Token, string Kind, string SubjectId, string Title, string Text, string ConfirmLabel, string CancelLabel);
 
     /// <summary>Raised after every published state, on whichever thread published it.</summary>
     public event Action? Changed;
@@ -59,15 +71,20 @@ internal sealed class ClientCore
     /// <summary>Raised with every notice, so the tray can say it while the window is hidden.</summary>
     public event Action<Notice>? Noticed;
 
-    public ClientCore(ProfileStore store, ClientSettings settings, Connections connections, ShenoraPaths paths, IEventBus events, IFileDialogs dialogs)
+    public ClientCore(ProfileStore store, ClientSettings settings, Connections connections, GameProfileStore games, GameRunner runner,
+        ShenoraPaths paths, IEventBus events, IFileDialogs dialogs)
     {
         _store = store;
         _settings = settings;
         _connections = connections;
+        _games = games;
+        _runner = runner;
         _paths = paths;
         _events = events;
         _dialogs = dialogs;
+        _driverSetup = new PacketFilterSetup(paths.DataArea("drivers"));
         _connections.Changed += Publish;
+        _runner.Changed += Publish;
     }
 
     public ClientState Snapshot()
@@ -145,6 +162,8 @@ internal sealed class ClientCore
     {
         var profile = Profile(id);
         if (profile.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, $"This version cannot connect {profile.Name}: {why}.");
+        if (_runner.ProfileInUse == id)
+            throw new ShenoraException("PROFILE_IN_USE", "id", id, $"A game is being routed through {profile.Name}. One profile serves a game or a proxy at a time.");
         _locationFailed.TryRemove(id, out _);
         _connections.Connect(id);
     }
@@ -224,14 +243,21 @@ internal sealed class ClientCore
     {
         var profile = Profile(id);
         if (_connections.IsRunning(id)) throw new ShenoraException("CONNECTED", "id", id, $"Disconnect {profile.Name} before removing it.");
+        if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, "Stop routing the game that uses it first.");
         var shortcuts = _settings.Apps.Count(a => a.ProfileId == id);
         var text = "Deletes Sallyport's encrypted copy. The original file stays unchanged." +
             (shortcuts == 0 ? "" : shortcuts == 1 ? " 1 app shortcut will need another profile." : $" {shortcuts} app shortcuts will need another profile.");
-        lock (_gate) _confirmation = new OpenConfirmation(NewToken(), id, $"Remove {profile.Name}?", text);
+        Confirm("remove-profile", id, $"Remove {profile.Name}?", text, "Remove profile", "Keep profile");
+    }
+
+    private void Confirm(string kind, string subject, string title, string text, string confirm, string cancel)
+    {
+        lock (_gate) _confirmation = new OpenConfirmation(NewToken(), kind, subject, title, text, confirm, cancel);
         Publish();
     }
 
-    public async Task ConfirmRemoveProfileAsync(string token)
+    /// <summary>What a confirmation asked, done: removing a profile or a game, installing or removing the driver.</summary>
+    public async Task ConfirmAsync(string token)
     {
         OpenConfirmation? confirmation;
         lock (_gate)
@@ -240,7 +266,17 @@ internal sealed class ClientCore
             _confirmation = null;
         }
         if (confirmation is null) return;
-        var id = confirmation.ProfileId;
+        switch (confirmation.Kind)
+        {
+            case "remove-profile": await RemoveProfileAsync(confirmation.SubjectId); break;
+            case "remove-game": RemoveGame(confirmation.SubjectId); break;
+            case "driver-install": await ManageDriverAsync(install: true); break;
+            case "driver-remove": await ManageDriverAsync(install: false); break;
+        }
+    }
+
+    private async Task RemoveProfileAsync(string id)
+    {
         var name = _store.Find(id)?.Name;
         if (!_removing.TryAdd(id, 0)) return;
         Publish();
@@ -266,6 +302,262 @@ internal sealed class ClientCore
             _confirmation = null;
         }
         Publish();
+    }
+
+    // ---- games
+
+    /// <summary>Asks for a game's folder and makes a game of it: every program found, the utilities left out.</summary>
+    public async Task AddGameFromDialogAsync()
+    {
+        var picked = await WithDialogAsync("add-game", () => _dialogs.OpenFolderAsync(new OpenFolderOptions
+        {
+            Title = "Choose the game's folder",
+            RememberPathKey = "add-game",
+        }));
+        if (picked is { Success: true, FilePath: { } folder }) AddGame(folder);
+    }
+
+    /// <summary>A game from its folder (the dialog's choice, or a start's <c>--add-game</c>).</summary>
+    public void AddGame(string folder)
+    {
+        if (!Directory.Exists(folder)) throw new ShenoraException("GAME_FOLDER", "folder", folder, "That folder is not there.");
+        GameProfile game;
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
+        if (name.Length == 0) name = "game";
+        if (name.Length > LongestName) name = name[..LongestName];
+        try { game = _games.Create(name, folder); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        { throw new ShenoraException("GAME_FOLDER", "folder", name, $"{name} could not be read: {e.GetType().Name}."); }
+        var profile = _store.List().FirstOrDefault(p => p.Unsupported is null);
+        _settings.PutChoice(game.Id, new GameChoice(profile?.Id, LossMode.Hold, null));
+        var included = game.Executables.Count(e => e.Included);
+        Notify(NoticeKind.Info, game.Executables.Count == 0
+            ? $"Added {game.Name}, but its folder holds no program. Scan it again once the game is installed."
+            : $"Added {game.Name}: {included} of its {game.Executables.Count} programs will be routed.", new("game", game.Id));
+    }
+
+    public void RescanGame(string id)
+    {
+        var before = Game(id);
+        if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
+            throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before scanning again.");
+        GameProfile after;
+        try { after = _games.Rescan(id); }
+        catch (DirectoryNotFoundException) { throw new ShenoraException("GAME_FOLDER", "id", id, $"{before.Name}'s folder is not there any more."); }
+        var added = after.Executables.Count(e => !before.Executables.Any(b => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
+        var gone = before.Executables.Count(b => !after.Executables.Any(e => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
+        Notify(NoticeKind.Info, added + gone == 0 ? $"{after.Name}'s folder holds the same programs." :
+            $"{after.Name}: {added} new program{(added == 1 ? "" : "s")}, {gone} gone. Your choices for the rest stand.", new("game", id));
+    }
+
+    public void SetGameProgram(string id, string path, bool included)
+    {
+        Game(id);
+        if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
+            throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before changing its programs.");
+        try { _games.Choose(id, path, included); }
+        catch (ArgumentException) { throw new ShenoraException("GAME_PROGRAM", "id", id, "That program is not one of this game's."); }
+        Publish();
+    }
+
+    public void BeginGameEdit(string id)
+    {
+        var game = Game(id);
+        var choice = _settings.ChoiceFor(id);
+        lock (_gate)
+            _editor = new OpenEditor(NewToken(), "game", id, new GameValues(game.Name, _store.Find(choice.ProfileId ?? "") is null ? null : choice.ProfileId,
+                choice.Loss, choice.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? ""), Empty);
+        Publish();
+    }
+
+    public void SaveGame(string token, GameValues values)
+    {
+        if (EditorFor(token, "game") is not { } editor) return;
+        var game = Game(editor.SubjectId);
+        var name = values.Name?.Trim() ?? "";
+        var directAfterText = values.DirectAfterText?.Trim() ?? "";
+        var errors = new Dictionary<string, string>();
+        if (name.Length is 0 or > LongestName) errors["name"] = $"Use 1 to {LongestName} characters.";
+        if (values.ProfileId is null || _store.Find(values.ProfileId) is null) errors["profileId"] = "Choose a VPN profile.";
+        if (!Enum.IsDefined(values.Loss)) errors["loss"] = "Choose what happens when the VPN drops.";
+        int? directAfter = null;
+        if (values.Loss == LossMode.Hold && directAfterText.Length > 0)
+        {
+            if (int.TryParse(directAfterText, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) && seconds is >= 5 and <= 3600) directAfter = seconds;
+            else errors["directAfterText"] = "Use 5 to 3600 seconds, or leave it empty to hold until the VPN is back.";
+        }
+        if (_runner.Facts() is { GameId: var running, Ended: null } && running == game.Id) errors["form"] = "Stop routing before changing it.";
+
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
+            else
+            {
+                if (name != game.Name) _games.Rename(game.Id, name);
+                _settings.PutChoice(game.Id, new GameChoice(values.ProfileId, values.Loss, directAfter));
+                _editor = null;
+            }
+        }
+        Publish();
+    }
+
+    public void RequestRemoveGame(string id)
+    {
+        var game = Game(id);
+        if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
+            throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before removing it.");
+        Confirm("remove-game", id, $"Remove {game.Name}?", "Removes the game from Sallyport. The game itself is not touched.", "Remove game", "Keep game");
+    }
+
+    private void RemoveGame(string id)
+    {
+        var name = _games.Find(id)?.Name;
+        if (!_games.Remove(id)) return;
+        _settings.ForgetGame(id);
+        Notify(NoticeKind.Info, $"Removed {name} from Sallyport. The game itself is unchanged.");
+    }
+
+    /// <summary>Starts routing a game's programs through its VPN profile. Run before the game, every packet of it is
+    /// routed from the first; run while it plays, its connections move to the VPN and the game may need to rejoin.</summary>
+    public void RunGame(string id)
+    {
+        var game = Game(id);
+        var choice = _settings.ChoiceFor(id);
+        if (choice.ProfileId is null || _store.Find(choice.ProfileId) is not { } stored)
+            throw new ShenoraException("GAME_NO_PROFILE", "id", id, $"Choose a VPN profile for {game.Name} first (Edit).");
+        if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, $"This version cannot connect {stored.Name}: {why}.");
+        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, "Another game is being routed. Stop it first.");
+        if (_connections.IsRunning(stored.Id))
+            throw new ShenoraException("PROFILE_IN_USE", "id", id, $"{stored.Name} is connected as a proxy. Disconnect it first: one profile serves a game or a proxy at a time.");
+        if (game.IncludedPaths.Count == 0) throw new ShenoraException("GAME_EMPTY", "id", id, $"Include at least one of {game.Name}'s programs.");
+
+        OvpnProfile profile;
+        try { profile = _store.Load(stored.Id); }
+        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException or FileNotFoundException)
+        { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, $"{stored.Name} could not be opened."); }
+        _runner.Start(game, stored.Id, profile, _settings.PolicyOf(stored.Id).Over(profile.Policy), choice.Policy);
+        Notify(NoticeKind.Info, $"Routing {game.Name} through {stored.Name}. If the game is running already, it may need to rejoin.", new("game", id));
+    }
+
+    public Task StopRunAsync() => _runner.StopAsync();
+
+    // ---- a profile's connection settings
+
+    public void BeginPolicyEdit(string id)
+    {
+        var stored = Profile(id);
+        if (stored.Unsupported is not null) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, "This version cannot connect this profile.");
+        var effective = _settings.PolicyOf(id).Over(OwnPolicy(id));
+        lock (_gate) _editor = new OpenEditor(NewToken(), "policy", id, GameViews.PolicyValuesOf(effective), Empty);
+        Publish();
+    }
+
+    public void SavePolicy(string token, PolicyValues values)
+    {
+        if (EditorFor(token, "policy") is not { } editor) return;
+        var own = OwnPolicy(editor.SubjectId);
+        var errors = new Dictionary<string, string>();
+        int? Read(string? text, string field, int least, int most, string message)
+        {
+            var trimmed = text?.Trim() ?? "";
+            if (int.TryParse(trimmed, NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n >= least && n <= most) return n;
+            errors[field] = message;
+            return null;
+        }
+        var wait = Read(values.RetryWaitText, "retryWaitText", 1, 300, "Use 1 to 300 seconds.");
+        var waitMax = Read(values.RetryWaitMaxText, "retryWaitMaxText", 1, 3600, "Use 1 to 3600 seconds.");
+        var rounds = Read(values.RoundsMaxText, "roundsMaxText", 0, 1000, "Use 0 (never give up) to 1000.");
+        var timeout = Read(values.AttemptTimeoutText, "attemptTimeoutText", 2, 300, "Use 2 to 300 seconds.");
+        int? pingRestart = null;
+        if (!string.IsNullOrWhiteSpace(values.PingRestartText)) pingRestart = Read(values.PingRestartText, "pingRestartText", 5, 600, "Use 5 to 600 seconds, or leave it empty for the server's own.");
+        if (wait is { } w && waitMax is { } m && m < w) errors["retryWaitMaxText"] = "The longest wait cannot be shorter than the first.";
+
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; Publish(); return; }
+            // Only what differs from the profile's own is kept as a change: a later import of a profile that says otherwise
+            // is then followed where the person did not choose.
+            int? Differs(int value, TimeSpan theirs) => value == (int)Math.Round(theirs.TotalSeconds) ? null : value;
+            _settings.PutPolicy(editor.SubjectId, new PolicyOverride(
+                Differs(wait!.Value, own.RetryWait), Differs(waitMax!.Value, own.RetryWaitMax),
+                rounds == (own.RoundsMax ?? 0) ? null : rounds, values.RandomOrder == own.RandomOrder ? null : values.RandomOrder,
+                Differs(timeout!.Value, own.AttemptTimeout), values.RetryAfterAuthFailure == own.RetryAfterAuthFailure ? null : values.RetryAfterAuthFailure,
+                pingRestart is { } r && (r != own.PingRestart || !own.KeepaliveOverridesServer) ? r : null));
+            _editor = null;
+        }
+        Publish();
+        Notify(NoticeKind.Info, "Saved. The next connection uses these settings.", new("profile", editor.SubjectId));
+    }
+
+    public void ResetPolicy(string token)
+    {
+        if (EditorFor(token, "policy") is not { } editor) return;
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            _settings.PutPolicy(editor.SubjectId, new PolicyOverride());
+            _editor = null;
+        }
+        Publish();
+        Notify(NoticeKind.Info, "The profile's own connection settings apply again from the next connection.", new("profile", editor.SubjectId));
+    }
+
+    // The policy the profile itself carries (its OpenVPN directives): read from the stored copy, which is opened for it.
+    private ConnectionPolicy OwnPolicy(string id)
+    {
+        try { return _store.Load(id).Policy; }
+        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException or FileNotFoundException)
+        { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, "The stored profile could not be opened."); }
+    }
+
+    // ---- the packet driver
+
+    public void RequestDriverInstall() =>
+        Confirm("driver-install", "", "Install the packet driver?", GameViews.DriverInstallText, "Install", "Not now");
+
+    public void RequestDriverRemove()
+    {
+        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "driver", "", "Stop routing the game first.");
+        Confirm("driver-remove", "", "Remove the packet driver?", GameViews.DriverRemoveText, "Remove", "Keep it");
+    }
+
+    private async Task ManageDriverAsync(bool install)
+    {
+        if (Interlocked.CompareExchange(ref _driverWork, install ? "Installing the packet driver…" : "Removing the packet driver…", null) is not null) return;
+        _driverFacts = null;
+        Publish();
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            await _driverSetup.FetchAsync(http);
+            var outcome = install ? await _driverSetup.InstallAsync() : await _driverSetup.UninstallAsync();
+            Notify(outcome.Succeeded ? NoticeKind.Info : NoticeKind.Error, outcome.Text);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or InvalidDataException)
+        {
+            Notify(NoticeKind.Error, $"The driver's installer could not be fetched from NT Kernel ({e.GetType().Name}). Check the connection and try again.");
+        }
+        finally
+        {
+            Volatile.Write(ref _driverWork, null);
+            _driverFacts = null;
+            Publish();
+        }
+    }
+
+    private DriverFacts Driver()
+    {
+        var now = Environment.TickCount64;
+        if (_driverFacts is { } cached && now - cached.At < DriverFactsLast) return cached.Facts with { Working = _driverWork is not null, WorkingText = _driverWork };
+        var driver = _driverSetup.Status();
+        var (service, _) = ServiceControl.Status(RouterProtocol.ServiceName);
+        var facts = new DriverFacts(service != Windows.PacketFilter.ServiceState.NotInstalled, service == Windows.PacketFilter.ServiceState.Running,
+            driver.Service is not (Windows.PacketFilter.ServiceState.NotInstalled or Windows.PacketFilter.ServiceState.Unknown),
+            driver.Service == Windows.PacketFilter.ServiceState.Running, driver.VersionText, _driverWork is not null, _driverWork);
+        _driverFacts = (facts, now);
+        return facts;
     }
 
     // ---- apps
@@ -389,9 +681,23 @@ internal sealed class ClientCore
     private ClientState Take()
     {
         var stored = _store.List();
+        var games = _games.List();
+        var run = _runner.Facts();
+        var routedThrough = run is { Ended: null } ? run.ProfileId : null;
+        var routedGame = routedThrough is null ? null : games.FirstOrDefault(g => g.Id == run!.GameId)?.Name ?? "a game";
         var profiles = stored.Select(p => ClientView.Profile(new ProfileFacts(
                 p, _settings.PortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
-                _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id))))
+                _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
+                routedThrough == p.Id ? routedGame : null, !_settings.PolicyOf(p.Id).IsEmpty)))
+            .ToList();
+        var driver = GameViews.Driver(Driver());
+        var gameViews = games.Select(g =>
+            {
+                var choice = _settings.ChoiceFor(g.Id);
+                var profile = stored.FirstOrDefault(p => p.Id == choice.ProfileId);
+                return GameViews.Game(g, choice, profile, run, run is { Ended: null } && run.GameId != g.Id,
+                    profile is not null && _connections.IsRunning(profile.Id), driver.Phase == DriverPhase.Ready, Volatile.Read(ref _dialog) is not null);
+            })
             .ToList();
         var apps = _settings.Apps.Select(a =>
             {
@@ -419,22 +725,36 @@ internal sealed class ClientCore
             new ClientState.TopActions(
                 UiAction.Shown("Import profile…", dialog is null, "A file dialog is open.", busy: dialog == "import"),
                 UiAction.Shown("Add app…", dialog is null && stored.Count > 0, stored.Count == 0 ? "Import a profile first." : "A file dialog is open.",
-                    busy: dialog == "add-app")),
+                    busy: dialog == "add-app"),
+                UiAction.Shown("Add game…", dialog is null, "A file dialog is open.", busy: dialog == "add-game")),
             profiles,
             apps,
+            gameViews,
             ClientView.ProfilesEmpty(stored.Count),
             ClientView.AppsEmpty(stored.Count, apps.Count),
+            GameViews.GamesEmpty(games.Count),
             ClientView.AppsNote,
+            driver,
             [.. stored.Select(p => new ClientState.ProfileChoice(p.Id, $"{p.Name} (port {_settings.PortOf(p.Id)})", p.Unsupported is null))],
             [.. Enum.GetValues<AppKind>().Select(k => new ClientState.KindChoice(k, ClientView.KindLabel(k), ClientView.KindHelp(k)))],
+            GameViews.LossChoices,
             editor is null ? null : new EditorView(editor.Token, editor.SubjectId, "editing", editor.Errors,
                 // The guidance until a save is refused; then the refusal, which says it, alone.
-                editor.Kind == "port" && editor.Errors.Count == 0 ? "Use a port from 1024 to 65535." : null,
-                UiAction.Shown("Save"), UiAction.Shown("Cancel"), editor.Kind, editor.Values),
+                editor.Kind == "port" && editor.Errors.Count == 0 ? "Use a port from 1024 to 65535." :
+                editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : null,
+                UiAction.Shown("Save"), UiAction.Shown("Cancel"),
+                editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown("Use the profile's own") : UiAction.Hidden,
+                editor.Kind, editor.Values),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
-                UiAction.Shown("Remove profile"), UiAction.Shown("Keep profile")),
+                UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),
             new ClientState.GuideView(guideEndpoint, ClientView.CurlExample(guideEndpoint), UiAction.Shown("Copy")),
             notices);
+    }
+
+    private string? PolicyHint(string id)
+    {
+        try { return GameViews.PolicyHint(OwnPolicy(id), !_settings.PolicyOf(id).IsEmpty); }
+        catch (ShenoraException) { return null; }
     }
 
     /// <summary>The examples use a connected profile's port when there is one, so they can be copied as they are.</summary>
@@ -460,6 +780,9 @@ internal sealed class ClientCore
 
     private RoutedApp App(string id) =>
         _settings.FindApp(id) ?? throw new ShenoraException("APP_GONE", "id", id, "That app is no longer listed.");
+
+    private GameProfile Game(string id) =>
+        _games.Find(id) ?? throw new ShenoraException("GAME_GONE", "id", id, "That game is no longer listed.");
 
     private async Task<FileDialogResult?> WithDialogAsync(string which, Func<Task<FileDialogResult>> show)
     {

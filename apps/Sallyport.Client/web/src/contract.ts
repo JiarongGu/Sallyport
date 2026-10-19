@@ -7,6 +7,8 @@ export const MODULE = 'CLIENT';
 
 export type Tone = 'off' | 'busy' | 'up' | 'trouble' | 'info';
 export type AppKind = 'chromium' | 'firefox' | 'electron' | 'environment';
+/** What a game's traffic does while its VPN is lost (docs/design/product.md §3). */
+export type LossMode = 'hold' | 'direct' | 'stop';
 
 /** A button as the host decides it: whether it shows, whether it may be pressed, and why not. */
 export interface Action {
@@ -27,8 +29,8 @@ export interface Fact {
 export interface Empty {
   title: string;
   text: string;
-  /** Pressed through the matching top action (`actions.import` or `actions.addApp`), which says its label. */
-  command: 'IMPORT' | 'ADD_APP';
+  /** Pressed through the matching top action (`actions.import`, `actions.addApp`, `actions.addGame`), which says its label. */
+  command: 'IMPORT' | 'ADD_APP' | 'ADD_GAME';
 }
 
 export type ProfilePhase =
@@ -71,7 +73,65 @@ export interface ProfileView {
   /** The details section: Transport, Imported, SOCKS5 port, Tunnel address, Open connections, Downloaded, Uploaded. */
   facts: Fact[];
   location: LocationView;
-  actions: Record<'connect' | 'disconnect' | 'copy' | 'editPort' | 'locate' | 'remove', Action>;
+  actions: Record<'connect' | 'disconnect' | 'copy' | 'editPort' | 'locate' | 'remove' | 'settings', Action>;
+}
+
+/** Three outcomes, never two (rule 6). */
+export interface CheckView {
+  result: 'holds' | 'failed' | 'unavailable';
+  text: string;
+}
+
+/** A game's run, as the router service and the tunnel report it. */
+export interface RunView {
+  phase: 'preparing' | 'connecting' | 'routing' | 'held' | 'direct' | 'ended';
+  tone: Tone;
+  /** "Routed through jp", "Reconnecting — the game's traffic is held", "Routing stopped" */
+  statusText: string;
+  detailText: string | null;
+  /** ISO time routing began, while routing; the page shows "Routed for {duration}". */
+  since: string | null;
+  facts: Fact[];
+  /** Whether everything of the game went through the VPN. */
+  coverage: CheckView;
+}
+
+export interface GameProgramView {
+  path: string;
+  name: string;
+  included: boolean;
+  /** Why it is left out, when it is: "installs or removes software". */
+  reason: string | null;
+  /** Posts SET_GAME_PROGRAM with the opposite of `included`. */
+  toggle: Action;
+}
+
+export interface GameView {
+  id: string;
+  name: string;
+  folder: string | null;
+  /** "Through jp" */
+  throughText: string;
+  /** "If the VPN drops: the game's traffic is held" */
+  lossText: string;
+  tone: Tone;
+  statusText: string;
+  /** "3 programs routed of 7." */
+  programsText: string;
+  programs: GameProgramView[];
+  /** The run of this game, now or the last one; null when it has not run since the client started. */
+  run: RunView | null;
+  actions: Record<'run' | 'stop' | 'edit' | 'rescan' | 'remove', Action>;
+}
+
+export interface DriverView {
+  phase: 'ready' | 'notInstalled' | 'serviceMissing' | 'working' | 'unknown';
+  tone: Tone;
+  statusText: string;
+  detailText: string | null;
+  facts: Fact[];
+  install: Action;
+  remove: Action;
 }
 
 export interface AppView {
@@ -103,7 +163,29 @@ export interface AppValues {
   arguments: string;
 }
 
-export type EditorField = 'form' | 'portText' | 'name' | 'profileId' | 'kind' | 'arguments';
+export interface GameValues {
+  name: string;
+  profileId: string | null;
+  loss: LossMode;
+  /** Under 'hold': seconds before the game goes direct after all, or empty to hold until the VPN is back. */
+  directAfterText: string;
+}
+
+/** A profile's connection settings, as OpenVPN's directives name them; seeded with what is in force. */
+export interface PolicyValues {
+  retryWaitText: string;
+  retryWaitMaxText: string;
+  /** 0: never give up. */
+  roundsMaxText: string;
+  randomOrder: boolean;
+  attemptTimeoutText: string;
+  retryAfterAuthFailure: boolean;
+  /** Empty: the server's own. */
+  pingRestartText: string;
+}
+
+export type EditorField = 'form' | 'portText' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText'
+  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText';
 
 /** An edit the host opened. Its values seed the fields once (keep what the person types across later STATEs with the
  *  same token); its errors are the host's verdict on the last save. */
@@ -116,7 +198,10 @@ export type Editor = {
   hint: string | null;
   save: Action;
   cancel: Action;
-} & ({ kind: 'port'; values: PortValues } | { kind: 'app'; values: AppValues });
+  /** The policy editor's "Use the profile's own": posts RESET_POLICY. */
+  reset: Action;
+} & ({ kind: 'port'; values: PortValues } | { kind: 'app'; values: AppValues } | { kind: 'game'; values: GameValues }
+  | { kind: 'policy'; values: PolicyValues });
 
 export interface Confirmation {
   token: string;
@@ -130,7 +215,7 @@ export interface Notice {
   id: string;
   kind: 'info' | 'warning' | 'error';
   text: string;
-  subject: { kind: 'profile' | 'app'; id: string } | null;
+  subject: { kind: 'profile' | 'app' | 'game'; id: string } | null;
   createdAt: string;
   /** Posts DISMISS_NOTICE with this notice's id. */
   dismiss: Action;
@@ -141,16 +226,21 @@ export interface ClientState {
   sequence: number;
   /** The title bar's summary: "1 connected · 1 reconnecting", "Not connected". */
   summary: { text: string; tone: Tone };
-  actions: { import: Action; addApp: Action };
+  actions: { import: Action; addApp: Action; addGame: Action };
   profiles: ProfileView[];
   apps: AppView[];
+  games: GameView[];
   profilesEmpty: Empty | null;
   appsEmpty: Empty | null;
-  /** "Games and programs that ignore proxy settings are not routed yet." */
+  gamesEmpty: Empty | null;
+  /** "Apps here use proxy settings. Games, and programs that ignore proxy settings, are routed on the Games page." */
   appsNote: string;
+  /** Whether games can be routed on this computer: the packet driver and the Sallyport service. */
+  driver: DriverView;
   profileChoices: { id: string; label: string; enabled: boolean }[];
   /** `help` says what choosing that kind does, for the editor to show beside the choice being made. */
   kindChoices: { value: AppKind; label: string; help: string }[];
+  lossChoices: { value: LossMode; label: string; help: string }[];
   editor: Editor | null;
   confirmation: Confirmation | null;
   guide: { endpointText: string; curlExample: string; copyExample: Action };
@@ -174,7 +264,21 @@ export interface Commands {
   LAUNCH_APP: { id: string };
   REMOVE_APP: { id: string };
   REQUEST_REMOVE_PROFILE: { id: string };
-  CONFIRM_REMOVE_PROFILE: { token: string };
+  /** Whatever the open confirmation asks: removing a profile or a game, installing or removing the driver. */
+  CONFIRM: { token: string };
+  ADD_GAME: Record<string, never>;
+  RESCAN_GAME: { id: string };
+  SET_GAME_PROGRAM: { id: string; path: string; included: boolean };
+  BEGIN_GAME_EDIT: { id: string };
+  SAVE_GAME: { token: string; values: GameValues };
+  REQUEST_REMOVE_GAME: { id: string };
+  RUN_GAME: { id: string };
+  STOP_RUN: Record<string, never>;
+  BEGIN_POLICY_EDIT: { id: string };
+  SAVE_POLICY: { token: string; values: PolicyValues };
+  RESET_POLICY: { token: string };
+  REQUEST_DRIVER_INSTALL: Record<string, never>;
+  REQUEST_DRIVER_REMOVE: Record<string, never>;
   CANCEL_CONFIRMATION: { token: string };
   COPY_GUIDE_EXAMPLE: Record<string, never>;
   DISMISS_NOTICE: { id: string };

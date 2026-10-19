@@ -83,7 +83,8 @@ public sealed class TunnelSession : IAsyncDisposable
             var counters = _tunnel?.Counters;
             return s with
             {
-                Address = _network?.LocalAddress.ToString(),
+                // The proxy's network says its address; a consumer of another kind, the tunnel's pushed one.
+                Address = _network?.LocalAddress.ToString() ?? _tunnel?.Config.Address?.ToString(),
                 BytesIn = Interlocked.Read(ref _droppedIn) + (counters?.BytesIn ?? 0),
                 BytesOut = Interlocked.Read(ref _droppedOut) + (counters?.BytesOut ?? 0),
             };
