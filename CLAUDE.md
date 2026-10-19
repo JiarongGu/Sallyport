@@ -18,4 +18,4 @@ An app-scoped, OpenVPN-compatible client in pure .NET (README). These rules are 
 
 Layout: `src/` holds the packages (`Sallyport`, the library), `apps/` the applications built on them
 (`Sallyport.Host`, Kobo's provider), `tools/Sallyport.Probe` (a console that drives one phase against a real server),
-`tests/Sallyport.Tests`, `spikes/` (throwaway measurements that decide a design, kept as their record). Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work left: `TASKS.md` (open items only).
+`tests/Sallyport.Tests`. Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work left: `TASKS.md` (open items only).

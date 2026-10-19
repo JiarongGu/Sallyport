@@ -180,7 +180,8 @@ store lives. The spike proves, in order: a .NET 10 component is activated as the
 one program's packets reach it and another's do not; then the real tunnel — that program reads the server's address
 while another reads AU. If the first two cannot be made to hold, this is decided again.
 
-**Measured 2026-10-19 (`spikes/VpnPlugin`, a sideloaded package signed by a test certificate the machine trusts):**
+**Measured 2026-10-19** (the spike's code is in git at `e8cb2e4`, removed after; a sideloaded package signed by a
+test certificate the machine trusted, both since removed from the machine):
 - The platform runs a .NET 10 plug-in. A `vpnClient` task must name both a custom host (`Executable`) and a class
   (`EntryPoint`); the host is a framework-dependent .NET executable running `CoreApplication`, the class a C#/WinRT
   component served in-process by `WinRT.Host.dll`. Connect, encapsulate and disconnect reached it. On the way: C#/WinRT
