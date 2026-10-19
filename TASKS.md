@@ -25,9 +25,9 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
 
 ## The client and game routing — `docs/design/architecture.md` (D9–D11)
 Steps 1 (the restructure) and 2 (the runtime: `TunnelSession`, `ProfileStore`) are done. In order:
-- [ ] **Spike: packet mode for one process** (D10). WinDivert loads here (blocklist on, memory integrity off); one
-      process's TCP and UDP NAT'd through the tunnel read the server's address while another process reads AU; no
-      packet of a routed flow leaves direct. Then a real game's session. If the driver will not load, stop (D10).
+- [ ] **Decide how a game is routed (D12).** WinDivert was blocked by Defender on download (D10, measured): choose
+      between Windows' own per-app VPN (a VPN plug-in, no third-party driver), a driver of our own, or Wintun by
+      destination — then spike the choice: one process's TCP and UDP read the server's address while another reads AU.
 - [ ] **`Sallyport.Windows` + `apps/Sallyport.Service`**: the packet router and the runtime in a LocalSystem service —
       a session per stored profile, the DPAPI protector and the store's folder ACL (D11), and a named-pipe management
       API (its contracts in `Sallyport.Runtime`) the unelevated client may use.

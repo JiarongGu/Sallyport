@@ -117,7 +117,14 @@ the probe. Rule 4 binds the packages; an application may take a package by a dec
 Shenora** (the owner's framework, from nuget.org at a pinned release, never its source — Kobo's review desk broke on a
 namespace move the day it referenced the source), on the WebView2 shell: a small client should not carry CEF's 400 MB.
 
-## D10 — Games are routed at the packet level, through WinDivert (2026-10-19; to be measured)
+## D10 — Games are routed at the packet level, through WinDivert (2026-10-19; measured, and reopened)
+
+**Measured the same day, before anything was built on it: Windows Defender will not let WinDivert in.** The official
+2.2.2 release, downloaded from its GitHub page, was blocked on arrival as `Misleading:Win32/Malgent!AMTB` (severity 4;
+the file could not even be read). Nothing was loaded, and the download was deleted. Every user's Defender would do the
+same to an install carrying it, so WinDivert is not shippable, and by this entry's own condition the choice is reopened
+(D12). Measured beside it: WireGuard's Wintun 0.14.1 passed Defender, validly signed by WireGuard LLC; its prebuilt
+licence allows redistribution alongside software that uses it only through `wintun.h`'s API.
 
 Games ignore proxy settings, so routing one needs the operating system's packets. The options weighed: our own WFP
 callout driver (Mullvad's way) needs Microsoft's attestation signing behind an EV certificate; Wintun's TUN mode
