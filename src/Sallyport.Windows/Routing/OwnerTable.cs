@@ -16,7 +16,7 @@ public enum Ownership { Owned, Unowned, Ambiguous }
 /// </summary>
 public sealed partial class OwnerTable
 {
-    private const uint AF_INET = 2;
+    private const uint AF_INET = 2, AF_INET6 = 23;
     private const int TCP_TABLE_OWNER_PID_ALL = 5;
     private const int UDP_TABLE_OWNER_PID = 1;
     private const uint ERROR_INSUFFICIENT_BUFFER = 122;
@@ -25,28 +25,57 @@ public sealed partial class OwnerTable
     internal const int TcpRowSize = 24;
     // MIB_UDPROW_OWNER_PID: dwLocalAddr, dwLocalPort, dwOwningPid — three DWORDs.
     internal const int UdpRowSize = 12;
+    // MIB_TCP6ROW_OWNER_PID: ucLocalAddr[16], dwLocalScopeId, dwLocalPort, ucRemoteAddr[16], dwRemoteScopeId,
+    // dwRemotePort, dwState, dwOwningPid.
+    internal const int Tcp6RowSize = 56;
+    // MIB_UDP6ROW_OWNER_PID: ucLocalAddr[16], dwLocalScopeId, dwLocalPort, dwOwningPid.
+    internal const int Udp6RowSize = 28;
 
     private readonly Dictionary<(uint, ushort, uint, ushort), int> _tcp = [];
     private readonly HashSet<(uint, ushort)> _tcpLocal = [];
     private readonly Dictionary<(uint, ushort), int> _udp = [];
+    private readonly Dictionary<(UInt128, ushort, UInt128, ushort), int> _tcp6 = [];
+    private readonly HashSet<(UInt128, ushort)> _tcp6Local = [];
+    private readonly Dictionary<(UInt128, ushort), int> _udp6 = [];
     private byte[] _buffer = new byte[64 * 1024];
 
     public int Refreshes { get; private set; }
 
-    /// <summary>How long the last refresh took — both tables read and indexed.</summary>
+    /// <summary>How long the last refresh took — all four tables read and indexed.</summary>
     public TimeSpan LastRefresh { get; private set; }
 
     public void Refresh()
     {
         var started = Stopwatch.GetTimestamp();
-        var tcp = Read(TCP_TABLE_OWNER_PID_ALL, tcp: true);
+        var tcp = Read(TCP_TABLE_OWNER_PID_ALL, tcp: true, AF_INET);
         IndexTcp(_buffer.AsSpan(0, tcp), _tcp);
         _tcpLocal.Clear();
         foreach (var (local, port, _, _) in _tcp.Keys) _tcpLocal.Add((local, port));
-        var udp = Read(UDP_TABLE_OWNER_PID, tcp: false);
+        var udp = Read(UDP_TABLE_OWNER_PID, tcp: false, AF_INET);
         IndexUdp(_buffer.AsSpan(0, udp), _udp);
+        // IPv6 only to find a selected program's packets and keep them from leaving (they are not routed yet).
+        var tcp6 = Read(TCP_TABLE_OWNER_PID_ALL, tcp: true, AF_INET6);
+        IndexTcp6(_buffer.AsSpan(0, tcp6), _tcp6);
+        _tcp6Local.Clear();
+        foreach (var (local, port, _, _) in _tcp6.Keys) _tcp6Local.Add((local, port));
+        var udp6 = Read(UDP_TABLE_OWNER_PID, tcp: false, AF_INET6);
+        IndexUdp6(_buffer.AsSpan(0, udp6), _udp6);
         Refreshes++;
         LastRefresh = Stopwatch.GetElapsedTime(started);
+    }
+
+    /// <summary>As <see cref="Owner(in Flow, out int)"/>, for IPv6; a UDP socket on every address is bound to ::.</summary>
+    public Ownership Owner(in Flow6 flow, out int pid)
+    {
+        if (flow.Protocol == Flow.Tcp)
+        {
+            var found = _tcp6.TryGetValue((flow.LocalAddress, flow.LocalPort, flow.RemoteAddress, flow.RemotePort), out var row);
+            return Answer(found, row, out pid);
+        }
+        var specific = _udp6.TryGetValue((flow.LocalAddress, flow.LocalPort), out var specificPid);
+        var wildcard = _udp6.TryGetValue((UInt128.Zero, flow.LocalPort), out var wildcardPid);
+        if (specific && wildcard && specificPid != wildcardPid) { pid = 0; return Ownership.Ambiguous; }
+        return specific ? Answer(true, specificPid, out pid) : Answer(wildcard, wildcardPid, out pid);
     }
 
     /// <summary>The process that owns the flow in the snapshot. Two processes on one UDP port — a socket on the
@@ -69,6 +98,10 @@ public sealed partial class OwnerTable
     public bool Holds(byte protocol, uint localAddress, ushort localPort) => protocol == Flow.Tcp
         ? _tcpLocal.Contains((localAddress, localPort))
         : _udp.ContainsKey((localAddress, localPort)) || _udp.ContainsKey((0u, localPort));
+
+    public bool Holds(byte protocol, UInt128 localAddress, ushort localPort) => protocol == Flow.Tcp
+        ? _tcp6Local.Contains((localAddress, localPort))
+        : _udp6.ContainsKey((localAddress, localPort)) || _udp6.ContainsKey((UInt128.Zero, localPort));
 
     private static Ownership Answer(bool found, int row, out int pid)
     {
@@ -107,19 +140,45 @@ public sealed partial class OwnerTable
         }
     }
 
+    internal static void IndexTcp6(ReadOnlySpan<byte> table, Dictionary<(UInt128, ushort, UInt128, ushort), int> index)
+    {
+        index.Clear();
+        var rows = Rows(table, Tcp6RowSize);
+        for (var i = 0; i < rows; i++)
+        {
+            var row = table.Slice(4 + i * Tcp6RowSize, Tcp6RowSize);
+            var pid = BinaryPrimitives.ReadInt32LittleEndian(row[52..]);
+            if (pid == 0) continue;
+            index[(BinaryPrimitives.ReadUInt128BigEndian(row), Port(row[20..]), BinaryPrimitives.ReadUInt128BigEndian(row[24..]), Port(row[44..]))] = pid;
+        }
+    }
+
+    internal static void IndexUdp6(ReadOnlySpan<byte> table, Dictionary<(UInt128, ushort), int> index)
+    {
+        index.Clear();
+        var rows = Rows(table, Udp6RowSize);
+        for (var i = 0; i < rows; i++)
+        {
+            var row = table.Slice(4 + i * Udp6RowSize, Udp6RowSize);
+            var key = (BinaryPrimitives.ReadUInt128BigEndian(row), Port(row[20..]));
+            var pid = BinaryPrimitives.ReadInt32LittleEndian(row[24..]);
+            index[key] = index.TryGetValue(key, out var earlier) && earlier != pid ? Shared : pid;
+        }
+    }
+
     private static int Rows(ReadOnlySpan<byte> table, int rowSize) =>
         table.Length < 4 ? 0 : (int)Math.Min(BinaryPrimitives.ReadUInt32LittleEndian(table), (uint)((table.Length - 4) / rowSize));
 
     private static ushort Port(ReadOnlySpan<byte> field) => BinaryPrimitives.ReadUInt16BigEndian(field);
 
-    private unsafe int Read(int tableClass, bool tcp)
+    private unsafe int Read(int tableClass, bool tcp, uint family)
     {
         while (true)
         {
             var size = (uint)_buffer.Length;
             uint result;
             fixed (byte* p = _buffer)
-                result = tcp ? GetExtendedTcpTable(p, ref size, false, AF_INET, tableClass, 0) : GetExtendedUdpTable(p, ref size, false, AF_INET, tableClass, 0);
+                result = tcp ? GetExtendedTcpTable(p, ref size, false, family, tableClass, 0) : GetExtendedUdpTable(p, ref size, false, family, tableClass, 0);
             if (result == 0) return (int)size;
             if (result != ERROR_INSUFFICIENT_BUFFER) throw new System.ComponentModel.Win32Exception((int)result);
             // Sockets open between the size answer and the next read: leave room for them.

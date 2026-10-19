@@ -29,7 +29,7 @@ too"*, *"you can co work with codex with the design"*.
 - What a static filter table does with a packet no rule matches is not in the header. Unmeasured; nothing relies on it
   before it is measured.
 
-**Adopted with three changes, and a fourth from measurement.**
+**Adopted with three changes, and two from measurement.**
 
 1. **The tunnel stays in the client; only packets cross the pipe.** Codex puts the tunnel in the SYSTEM service and
    hands it the profile's plaintext for one session, amending `game-routing.md` §1. Instead: the client keeps its
@@ -68,6 +68,17 @@ too"*, *"you can co work with codex with the design"*.
    discarding of late direct packets for a moved flow (§3). They reach Windows unseen — for UDP, the game hears the
    server on both paths for as long as the server keeps sending to the old address, which mid-game attach measures
    (gate 6) rather than hides. The receive path comes back only if a measurement shows it is needed.
+
+5. **Pieces are translated one by one, and a packet too big for the tunnel is sent whole (measured, gate 5).** Codex
+   reassembles a selected datagram before NAT and fragments a packet too big for the tunnel that may be fragmented.
+   Instead each piece is translated as it comes: the first carries the ports, and its checksum is carried over the
+   change (RFC 1624) rather than computed over a datagram not all here; the later ones follow it; nothing waits for a
+   whole datagram, so nothing is held but a piece that comes before its first. And a packet too big for the tunnel
+   (1448 on a 1500-byte path) without don't-fragment goes into it whole: Windows splits the outer datagram and the
+   server joins it, so the far end gets the datagram as the program sent it. Split inside the tunnel, Google's STUN
+   server — which answers a whole 1500-byte request — answered 0 of 2; whole, 3 of 3. With don't-fragment,
+   "fragmentation needed" as designed; it sets Windows' path MTU for that destination for every program on the
+   machine, for about 10 minutes.
 
 Everything else is adopted as written, including LocalSystem, the pipe's ACL and peer checks, tunnel mode on send and
 receive, endpoint-independent UDP mappings preserving ports, MSS clamping and ICMP for DF, selected IPv6 blocked, game

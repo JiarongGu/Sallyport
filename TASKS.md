@@ -67,16 +67,43 @@ NT Kernel's, free for personal use.
      flow's life; UDP decisions are rechecked every 250 ms (the reused port of gate 3).
   Built since: **selection by a game folder's executables** (`ProgramSelection`: image path and creation time of the
   owning PID, so it holds from launch whatever starts the game), decisions and mappings expiring after 2 minutes idle
-  unless a socket still holds them; `route --folder` and `stop`. **Selected IPv6 is not blocked yet** and could not
-  be measured here: this machine has no IPv6 route (link-local only; an IPv6 connect failed).
-  **Next: Zenless Zone Zero routed whole** — `Sallyport.Driver route <profile> --folder "<its folder>"` armed before
-  the owner launches it; then attached in the middle of a game. ← next (Needs: the owner, playing)
-  5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
-  6. Zenless routed whole; mid-game attach and detach; tunnel loss, driver removal, sleep.
+  unless a socket still holds them; `route --folder` and `stop`.
+  5. **Packet boundaries — measured 2026-10-20** (`route --workload boundaries`: the same calls from this process,
+     direct, and from a selected child, routed; five runs, Windows' path-MTU cache flushed before each; guard 0 failed):
+     - **MSS:** the server clamps its own SYN-ACKs to 1286 (OpenVPN's mssfix), under the router's 1360 either way; a
+       2 MB HTTPS upload: 200 every run.
+     - **Too big for the tunnel** (1448 on this 1500-byte path, less the outer IPv4, UDP and data channel's 52): a
+       1,500-byte datagram *with* don't-fragment is answered with "fragmentation needed" — Windows took it (its
+       path-MTU cache read 1448 for that server) and dropped the program's next such send itself. That cache is the
+       machine's, per destination: an unselected program sending there gets the smaller size too, for about 10 minutes
+       (measured: the direct control's 1,500-byte datagram then went in pieces, unanswered). *Without* don't-fragment
+       it is sent whole and Windows splits the outer datagram: Google's STUN server answered it in 3 runs of 3. Split
+       inside the tunnel instead, 0 of 2 — that server ignores fragments (measured direct) — so whole is the default.
+     - **Pieces:** a 3,000-byte datagram Windows sends in pieces is routed piece by piece, its checksum carried over the
+       NAT rather than recomputed (Quad9 answered 3 of 3). A 3,959-byte reply in three pieces (Akamai's name server)
+       was handed up and put together by Windows 14 of 16, both misses in the two runs whose tunnel lost packets;
+       pieces that came before their first were held for it (up to 3 a run, none lost).
+     - **ICMP:** time exceeded one hop out (the VPN server) turned back to the program's own flow, 3 of 3 each run.
+       **Port unreachable could not be checked:** no far end sent one (the tunnel's gateway, routers on the path,
+       scanme.nmap.org).
+     - **Blocked for a selected program, and counted:** broadcast, multicast, its own LAN (TCP to the home router: a
+       reset, refused in ~2 s — Windows retries a refused connect itself), and IPv6 (multicast; TCP to a link-local
+       neighbour: a reset). Unbound, Windows sends broadcast and multicast by the adapter of lowest metric, here not
+       Wi-Fi: those never reach the router — LAN traffic only, but outside it. **External IPv6 could not be checked:**
+       this machine has no IPv6 route.
+     - **Offloads:** Wi-Fi has large-send offload on, yet no frame over 1514 in 1.3 million sent, a 40 MB upload among
+       them; partial checksums are recomputed whole.
+  6. **Zenless Zone Zero routed whole, and detached and attached mid-game — measured 2026-10-20** (`route --folder`,
+     the owner in menus and walking around; guard 0 failed): armed before launch, **all 116 of the game's flows were
+     routed from their first packet** — 115 TCP (its HTTPS), 1 UDP (the game itself, to its server, 2,515 packets) —
+     none direct, none late, none held back. Routing stopped mid-game and started again, twice (the game direct for
+     100 s, then 20 s): the game kept its UDP socket, its server answered at the new address at once, and no new login
+     connection opened. **Its ping:** the server answers nothing but the game, so the farthest hop that does answer
+     stands for it — through the VPN, hop 9 (China Telecom, Shanghai) p50 267 ms, of which the VPN server itself
+     195 ms; direct (by way of the US) the same network at hops 16–17, p50 311–350 ms. The game's own datagrams waited
+     p50 ~300 ms for its server's next. Still to measure: the tunnel lost, the driver removed and sleep, during a
+     game. ← next
   7. The peer-to-peer harness.
-- **Attach mid-game** (the owner: "we should be setup vpn in mid of the game too"): the driver moves a running
-  session's packets at once, which Windows' VPN cannot (measured, D16's route, 2026-10-19). Measure whether Zenless's server keeps a session
-  whose client address changes mid-game, or reconnects it.
 
 - **If Defender refuses the driver,** the driverless route (D16) is what remains, and its relay's inbound loss comes first:
   in the last Zenless run the bridge sent 3,870 packets to the plug-in and Windows delivered 2,100 — about 45% lost on
@@ -97,7 +124,8 @@ the same user), so no profile's text crosses a command line or a pipe.
 
 ## 4. Games in the client
 A Games page — a game profile made from a folder, each program included or left out, rescan, its learned destinations
-— and **Run**: one game profile and one VPN profile, driving the bridge, the guard supervised. Designed with Codex in
+— and **Run**: one game profile and one VPN profile, driving the bridge, the guard supervised; the game's ping shown
+both ways (its own replies, and the farthest hop that answers each way, as item 1 measured it). Designed with Codex in
 the window's contract style (D15), built, measured.
 - **Done when:** Zenless Zone Zero is created from its folder, learned, and run with the JP profile from the window,
   every state shown by the host; window and tray agree.
@@ -129,6 +157,8 @@ and `P_DATA_V1` profiles, uploads at volume (the send side has no SACK of its ow
 reader).
 - **Written but never run against a server:** the reconnect path (nothing ended the tunnel in 75 minutes); whether the
   server acts on the exit notices (`explicit-exit-notify`, `EXIT`).
+- **Unexplained:** a 112-minute idle tunnel on 2026-10-20 dropped 225 control packets (`ControlDropped`: failed
+  tls-crypt or named another session), about one every 30 s; the next sessions that night dropped none.
 - **Measured already:** the keepalive (75 minutes up, idle 5 minutes between probes, never dropped); the TCP transport
   (`tcp/443`, TLS 1.3, ipinfo JP Tokyo, 10 MB at 1.34 MB/s, TCP inside TCP).
 - Kobo runs the library as a provider process (`Sallyport.Host.exe serve|stop`); in-process hosting waits for the release.

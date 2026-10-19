@@ -19,8 +19,26 @@ public readonly record struct Flow(byte Protocol, uint LocalAddress, ushort Loca
     public override string ToString() => $"{(Protocol == Tcp ? "TCP" : "UDP")} {Local}:{LocalPort} -> {Remote}:{RemotePort}";
 }
 
+/// <summary>An IPv6 TCP or UDP packet's five-tuple, from this machine's side; addresses read big-endian from their 16
+/// bytes, as both the packet and Windows' owner tables (MIB_TCP6ROW_OWNER_PID) hold them.</summary>
+public readonly record struct Flow6(byte Protocol, UInt128 LocalAddress, ushort LocalPort, UInt128 RemoteAddress, ushort RemotePort)
+{
+    public IPAddress Local => Address(LocalAddress);
+
+    public IPAddress Remote => Address(RemoteAddress);
+
+    public static IPAddress Address(UInt128 value)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        BinaryPrimitives.WriteUInt128BigEndian(bytes, value);
+        return new IPAddress(bytes);
+    }
+
+    public override string ToString() => $"{(Protocol == Flow.Tcp ? "TCP" : "UDP")} [{Local}]:{LocalPort} -> [{Remote}]:{RemotePort}";
+}
+
 /// <summary>What an Ethernet frame is, as far as attributing it goes.</summary>
-public enum FrameKind { Flow, Ipv6, OtherIpv4, Fragment, NotIp, Malformed }
+public enum FrameKind { Flow, Ipv6, OtherIpv4, OtherIpv6, Fragment, NotIp, Malformed }
 
 public static class Frames
 {
@@ -60,6 +78,62 @@ public static class Frames
             BinaryPrimitives.ReadUInt16BigEndian(transport),
             BinaryPrimitives.ReadUInt32LittleEndian(ip[16..]),
             BinaryPrimitives.ReadUInt16BigEndian(transport[2..]));
+        return FrameKind.Flow;
+    }
+
+    /// <summary>
+    /// Reads an IPv6 frame Windows is sending, past the extension headers that can precede TCP or UDP: its five-tuple
+    /// (<see cref="FrameKind.Flow"/>, <paramref name="transport"/> where the TCP/UDP header starts within the IP packet),
+    /// or a fragment after the first (<see cref="FrameKind.Fragment"/>, addresses only). <paramref name="fragmentId"/> is
+    /// the Fragment header's identification when the packet is a piece of one.
+    /// </summary>
+    public static FrameKind TryReadOutbound6(ReadOnlySpan<byte> frame, out Flow6 flow, out int transport, out uint? fragmentId)
+    {
+        flow = default;
+        transport = 0;
+        fragmentId = null;
+        var link = frame.Length >= 14 && BinaryPrimitives.ReadUInt16BigEndian(frame[12..]) == 0x8100 ? 18 : 14;
+        if (frame.Length < link + 40) return FrameKind.Malformed;
+        var ip = frame[link..];
+        if (ip[0] >> 4 != 6) return FrameKind.Malformed;
+        var local = BinaryPrimitives.ReadUInt128BigEndian(ip[8..]);
+        var remote = BinaryPrimitives.ReadUInt128BigEndian(ip[24..]);
+        var next = ip[6];
+        var at = 40;
+        var laterPiece = false;
+        while (true)
+        {
+            if (next is Flow.Tcp or Flow.Udp) break;
+            if (at + 8 > ip.Length) return FrameKind.Malformed;
+            switch (next)
+            {
+                case 0 or 43 or 60:   // hop-by-hop, routing, destination options: length in 8-byte units, less the first
+                    next = ip[at];
+                    at += (ip[at + 1] + 1) * 8;
+                    break;
+                case 44:              // fragment: 8 bytes; offset in the high 13 bits of bytes 2-3
+                    fragmentId = BinaryPrimitives.ReadUInt32BigEndian(ip[(at + 4)..]);
+                    laterPiece = (BinaryPrimitives.ReadUInt16BigEndian(ip[(at + 2)..]) & 0xFFF8) != 0;
+                    next = ip[at];
+                    at += 8;
+                    if (laterPiece)
+                    {
+                        flow = new(next, local, 0, remote, 0);
+                        return FrameKind.Fragment;
+                    }
+                    break;
+                case 51:              // authentication: length in 4-byte units, less two
+                    next = ip[at];
+                    at += (ip[at + 1] + 2) * 4;
+                    break;
+                default:              // ICMPv6 (Windows' own neighbour discovery among it), ESP, no next header
+                    flow = new(next, local, 0, remote, 0);
+                    return FrameKind.OtherIpv6;
+            }
+        }
+        if (at + 4 > ip.Length) return FrameKind.Malformed;
+        transport = at;
+        flow = new(next, local, BinaryPrimitives.ReadUInt16BigEndian(ip[at..]), remote, BinaryPrimitives.ReadUInt16BigEndian(ip[(at + 2)..]));
         return FrameKind.Flow;
     }
 }

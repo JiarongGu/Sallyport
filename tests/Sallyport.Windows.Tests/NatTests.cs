@@ -127,9 +127,9 @@ public sealed class NatTests
         Assert.Equal(InboundRefusal.UnknownPeer, nat.Inbound(Udp(Peer, 3478, Tunnel, 50000), out _));
         Assert.Equal(InboundRefusal.NoMapping, nat.Inbound(Udp(Server, 3478, Tunnel, 50001), out _));
         Assert.Equal(InboundRefusal.NotToTunnel, nat.Inbound(Udp(Server, 3478, Home, 50000), out _));
-        var fragment = Udp(Server, 3478, Tunnel, 50000);
-        fragment[6] = 0x20;   // more fragments
-        Assert.Equal(InboundRefusal.Fragment, nat.Inbound(fragment, out _));
+        var later = Udp(Server, 3478, Tunnel, 50000);
+        later[7] = 0xB9;   // a piece at offset 185 × 8, whose first never came
+        Assert.Equal(InboundRefusal.PieceAhead, nat.Inbound(later, out _));
     }
 
     [Fact]

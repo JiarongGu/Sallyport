@@ -10,6 +10,7 @@ using Sallyport;
 using Sallyport.Profile;
 using Sallyport.Runtime;
 using Sallyport.Net;
+using Sallyport.Protocol;
 using Sallyport.Windows.PacketFilter;
 using Sallyport.Windows.Routing;
 
@@ -61,7 +62,8 @@ switch (args.FirstOrDefault())
     case "workload":
         return await WorkloadAsync();
     case "route":
-        return await RouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60), Text("--folder"));
+        return await RouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60), Text("--folder"),
+            Text("--workload") == "boundaries", Text("--peer6") is { } peer6 ? IPAddress.Parse(peer6) : null, Text("--oversized") == "split");
     case "stop":
     {
         if (!EventWaitHandle.TryOpenExisting(StopEventName, out var running)) { Console.WriteLine("no routing session is running"); return 1; }
@@ -70,9 +72,16 @@ switch (args.FirstOrDefault())
         return 0;
     }
     case "routed-workload":
-        if (Console.ReadLine() != "go") return 2;
-        await ExerciseAsync();
+    {
+        // "go", or "go boundaries <tunnel gateway> <LAN gateway> <local address> <IPv6 neighbour> <IPv6 scope>" ("-" for none).
+        var go = Console.ReadLine()?.Split(' ');
+        if (go is null || go[0] != "go") return 2;
+        if (go.Length > 1 && go[1] == "boundaries") await BoundariesAsync(Word(go, 2), Word(go, 3), Word(go, 4), Word(go, 5), go.Length > 6 ? long.Parse(go[6]) : 0);
+        else await ExerciseAsync();
         return 0;
+
+        static IPAddress? Word(string[] words, int at) => at < words.Length && IPAddress.TryParse(words[at], out var a) ? a : null;
+    }
     case "reset":
         return Reset();
     case "guard":
@@ -80,7 +89,9 @@ switch (args.FirstOrDefault())
     default:
         Console.Error.WriteLine("usage: Sallyport.Driver status | fetch | install | uninstall | adapters"
             + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
-            + " | rtt [--count N] | attribute [--seconds N] | guard [--seconds N] [--may-remove] | route <profile.ovpn> [--folder <game folder>] [--seconds N] | stop | reset");
+            + " | rtt [--count N] | attribute [--seconds N] | guard [--seconds N] [--may-remove]"
+            + " | route <profile.ovpn> [--folder <game folder>] [--seconds N] [--workload boundaries [--peer6 <link-local address>] [--oversized split|whole]]"
+            + " | stop | reset");
         return 2;
 }
 
@@ -480,7 +491,7 @@ async Task<int> WorkloadAsync()
 // folder's scan includes (GameFolder) is selected, for as long as --seconds, reporting every 10 s — a game played by
 // its owner. The profile is read where its owner keeps it and nothing of it is printed (rule 2). The tunnel lives here,
 // as the client will hold it (docs/design/router.md change 1). If it ends, routing stops and the game goes direct.
-async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
+async Task<int> RouteAsync(string? profilePath, int seconds, string? folder, bool boundaries, IPAddress? peer6, bool split)
 {
     if (profilePath is null) { Console.Error.WriteLine("usage: Sallyport.Driver route <profile.ovpn> [--folder <game folder>] [--seconds N]"); return 2; }
     OvpnProfile profile;
@@ -517,8 +528,15 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
         var outbound = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var child = 0;
         Func<int, bool> selects = selection is not null ? selection.Selects : pid => pid == Volatile.Read(ref child);
-        var nat = new Nat(BinaryPrimitives.ReadUInt32LittleEndian(tunnelAddress.GetAddressBytes()));
-        using var router = new Router(driver, adapter.Handle, selects, nat, p => outbound.Writer.TryWrite(p));
+        // What one outer datagram carries on this adapter: its MTU less the outer IPv4 header, the transport's (UDP 8;
+        // TCP 20 and the 2-byte length each packet is framed with) and the data channel's own.
+        var overhead = 20 + (profile.Remotes[0].Proto == "tcp" ? 20 + 2 : 8) + DataChannel.Overhead;
+        var nat = new Nat(BinaryPrimitives.ReadUInt32LittleEndian(tunnelAddress.GetAddressBytes()), mtu: adapter.Mtu - overhead);
+        var nic = Nic(adapter)?.GetIPProperties();
+        var onLink = nic?.UnicastAddresses.Where(u => u.Address.AddressFamily == AddressFamily.InterNetwork)
+            .Select(u => (BinaryPrimitives.ReadUInt32LittleEndian(u.Address.GetAddressBytes()), BinaryPrimitives.ReadUInt32LittleEndian(u.IPv4Mask.GetAddressBytes())))
+            .ToList() ?? [];
+        using var router = new Router(driver, adapter.Handle, selects, nat, p => outbound.Writer.TryWrite(p), onLink) { SplitOversized = split };
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         var routing = Task.Factory.StartNew(() => router.Run(stop.Token), TaskCreationOptions.LongRunning);
         var sending = Task.Run(async () =>
@@ -527,9 +545,19 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
                 try { await tunnel.SendAsync(packet); }
                 catch (TunnelEnded) { return; }
         });
+        var echo = new TunnelEcho(nat.TunnelAddress, p => outbound.Writer.TryWrite(p));
+        // Each path's hops toward the game's server, by hop count: who answered there, and how soon.
+        var hops = new Dictionary<(bool Vpn, int Ttl), (IPAddress From, RoundTrips Times)>();
+        var tunnelTimes = new RoundTrips();
+        string farthest = "(not traced yet)";
+        IPAddress? target = null;
         var receiving = Task.Run(async () =>
         {
-            try { await foreach (var packet in tunnel.Packets.ReadAllAsync(stop.Token)) router.FromTunnel(packet); }
+            try
+            {
+                await foreach (var packet in tunnel.Packets.ReadAllAsync(stop.Token))
+                    if (!echo.Answered(packet)) router.FromTunnel(packet);
+            }
             catch (OperationCanceledException) { }
         });
         // The tunnel gone means routed packets have nowhere to go: give the adapter back, and the game goes direct.
@@ -540,18 +568,25 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
             Console.WriteLine($"{Now()} route: TUNNEL ENDED ({t.Exception?.InnerException?.Message ?? "closed"}); routing stops, the game goes direct");
             stop.Cancel();
         }, TaskContinuationOptions.ExecuteSynchronously);
-        Console.WriteLine($"{Now()} route: adapter 0x{adapter.Handle:X} in mode {driver.Mode(adapter.Handle)}");
+        Console.WriteLine($"{Now()} route: adapter 0x{adapter.Handle:X} in mode {driver.Mode(adapter.Handle)}; tunnel carries {nat.Mtu} bytes whole,"
+            + $" bigger {(split ? "split" : "sent whole")}; {onLink.Count} on-link network(s) blocked for selected programs");
 
         if (selection is null)
         {
+            var lanGateway = nic?.GatewayAddresses.Select(g => g.Address).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+            var local = nic?.UnicastAddresses.Select(u => u.Address).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+            var scope6 = nic?.GetIPv6Properties()?.Index ?? 0;
             Console.WriteLine("direct — this process, not selected:");
-            await ExerciseAsync();
+            if (boundaries) await BoundariesAsync(tunnel.Config.Gateway, lanGateway, local, peer6, scope6);
+            else await ExerciseAsync();
             using var process = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "routed-workload")
                 { RedirectStandardInput = true, RedirectStandardOutput = true })!;
             // Selected before it sends anything: its first packet is the one this gate is about.
             Volatile.Write(ref child, process.Id);
             Console.WriteLine($"routed — child {process.Id}, selected:");
-            await process.StandardInput.WriteLineAsync("go");
+            await process.StandardInput.WriteLineAsync(boundaries
+                ? $"go boundaries {tunnel.Config.Gateway?.ToString() ?? "-"} {lanGateway?.ToString() ?? "-"} {local?.ToString() ?? "-"} {peer6?.ToString() ?? "-"} {scope6}"
+                : "go");
             while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine(line);
             await process.WaitForExitAsync();
             await Task.Delay(500);
@@ -559,6 +594,7 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
         }
         else
         {
+            var pinging = PingAsync(stop.Token);
             var clock = Stopwatch.StartNew();
             long lastRouted = 0, lastUp = 0;
             // `Sallyport.Driver stop` ends the session from outside, summary and all: a game is played for as long as
@@ -576,10 +612,14 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
                 var up = router.HandedUp;
                 Console.WriteLine($"{Now()} t={clock.Elapsed.TotalSeconds,4:F0}s  routed {routed} (+{routed - lastRouted}), handed up {up} (+{up - lastUp}),"
                     + $" flows routed {router.RoutedFlows} (TCP {router.RoutedTcpFlows}, UDP {router.RoutedFlows - router.RoutedTcpFlows}),"
-                    + $" held back {router.HeldBack}, late {router.LateFlows}, mappings {nat.Count}, refused from tunnel {router.Refused.Values.Sum()}");
+                    + $" held back {router.HeldBack}, late {router.LateFlows}, blocked {router.Blocked.Values.Sum()}, split {router.SplitPackets}, too big {router.TooBig},"
+                    + $" mappings {nat.Count}, refused from tunnel {router.Refused.Values.Sum()}");
+                Console.WriteLine($"{Now()}          server {Masked(target)}: {farthest}; the VPN server {tunnelTimes.Recent()};"
+                    + $" TCP handshakes {router.Handshakes.Recent()}; UDP replies {router.UdpReplies.Recent()}");
                 lastRouted = routed;
                 lastUp = up;
             }
+            await pinging;
         }
         outbound.Writer.TryComplete();
         await Task.WhenAll(routing, sending, receiving);
@@ -589,24 +629,285 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
             + $" hand-up refused {router.HandUpRefused}; expired flows {router.ExpiredFlows}, mappings {router.ExpiredMappings}; from the tunnel refused: "
             + (router.Refused.Count == 0 ? "none" : string.Join(", ", router.Refused.Select(r => $"{r.Key} {r.Value}"))));
         Console.WriteLine($"{Now()} route: NAT mappings {nat.Count}; owner-table refreshes {router.Owners.Refreshes}; {router.Interception}");
+        Console.WriteLine($"{Now()} route: blocked {(router.Blocked.Count == 0 ? "none" : string.Join(", ", router.Blocked.Select(b => $"{b.Key} {b.Value}")))}"
+            + $" ({router.BlockedFlows} flows), resets {router.ResetsSent}; too big {router.TooBig}, split {router.SplitPackets}, sent whole {router.OversizedWhole}; pieces routed {router.PiecesRouted},"
+            + $" lone {router.LonePieces}, ahead from the tunnel {router.PiecesAhead} (lost {router.PiecesAheadLost}); ICMP errors handed up {router.ErrorsHandedUp} ({string.Join(", ", router.Errors.Select(e => $"type {e.Key.Type} code {e.Key.Code}: {e.Value}"))});"
+            + $" largest routed {router.LargestRouted} bytes; largest MSS a SYN from the tunnel offered {nat.LargestPeerMss}");
         if (selection is not null)
         {
             Console.WriteLine($"selected processes: {string.Join(", ", selection.Selected.Select(pid => $"{pid} {ProcessName(pid)}"))}");
             Console.WriteLine($"processes whose program could not be read: {(selection.Unreadable.Count == 0 ? "none" : string.Join(", ", selection.Unreadable))}");
         }
-        var selected = router.Flows.Where(f => f.Value.Verdict == Verdict.Routed || (selection is null ? f.Value.Pid == child : selection.Selected.Contains(f.Value.Pid))).ToList();
+        foreach (var (type, code, about) in router.LastErrors) Console.WriteLine($"  ICMP type {type} code {code} handed up, about {about}");
+        bool Mine(FlowDecision d) => d.Verdict is Verdict.Routed or Verdict.Blocked || (selection is null ? d.Pid == child : selection.Selected.Contains(d.Pid));
+        var selected = router.Flows.Where(f => Mine(f.Value)).Select(f => (Text: $"{(f.Key.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{f.Key.LocalPort} -> {f.Key.Remote}:{f.Key.RemotePort}", f.Value))
+            .Concat(router.Flows6.Where(f => Mine(f.Value)).Select(f => (Text: $"{(f.Key.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{f.Key.LocalPort} -> [{f.Key.Remote}]:{f.Key.RemotePort}", f.Value)))
+            .ToList();
         Console.WriteLine($"the selected programs' flows ({selected.Count}), most packets first:");
-        foreach (var (flow, decision) in selected.OrderByDescending(f => f.Value.Packets).Take(40))
-            Console.WriteLine($"  {decision.Verdict,-8} {decision.Packets,6} packets  {(flow.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{flow.LocalPort} -> {flow.Remote}:{flow.RemotePort}  pid {decision.Pid}"
-                + (decision.Verdict != Verdict.Routed ? "  <- LEFT DIRECT" : ""));
+        foreach (var (text, decision) in selected.OrderByDescending(f => f.Value.Packets).Take(40))
+            Console.WriteLine($"  {decision.Verdict,-8} {decision.Packets,6} packets  {text}  pid {decision.Pid}"
+                + (decision.Verdict == Verdict.Blocked ? $"  ({decision.Reason})" : decision.Verdict != Verdict.Routed ? "  <- LEFT DIRECT" : ""));
+        Console.WriteLine($"the whole session: the VPN server {tunnelTimes.All()}; TCP handshakes {router.Handshakes.All()}; UDP replies {router.UdpReplies.All()}");
+        foreach (var vpn in new[] { true, false })
+        {
+            Console.WriteLine($"hops toward {Masked(target)} {(vpn ? "through the VPN" : "direct")}:");
+            lock (hops)
+                foreach (var ((_, ttl), (from, times)) in hops.Where(h => h.Key.Vpn == vpn).OrderBy(h => h.Key.Ttl))
+                    Console.WriteLine($"  {ttl,2}  {Masked(from),-16} {times.All()}");
+        }
         Console.WriteLine($"tunnel: {tunnel.Counters}");
         return 0;
+
+        // Every 5 s, the game's busiest UDP peer — its server, by its own traffic — is traced both ways at once, all hop
+        // counts together: echoes through the tunnel from the tunnel's address, and direct ones. A game's server need not
+        // answer a ping (Zenless Zone Zero's answers nothing but the game, measured), so the farthest hop that does
+        // answer on each path stands for the game's ping on it. And the tunnel's own round trip, to its gateway.
+        async Task PingAsync(CancellationToken ct)
+        {
+            const int MostHops = 24;
+            while (!ct.IsCancellationRequested)
+            {
+                try { await Task.Delay(5000, ct); } catch (OperationCanceledException) { return; }
+                if (nat.BusiestPeer(Flow.Udp) is not { } peer) continue;
+                target = new IPAddress(peer);
+                var sent = Enumerable.Range(1, MostHops).ToDictionary(ttl => ttl, ttl => echo.Send(peer, (byte)ttl));
+                var gateway = tunnel.Config.Gateway is { } g ? echo.Send(BinaryPrimitives.ReadUInt32LittleEndian(g.GetAddressBytes())) : (ushort?)null;
+                var direct = await Task.WhenAll(Enumerable.Range(1, MostHops).Select(ttl => DirectHopAsync(target, ttl)));
+                await Task.Delay(500, CancellationToken.None);
+
+                (int Ttl, IPAddress From, double Ms)? far = null, farDirect = null;
+                lock (hops)
+                {
+                    foreach (var (ttl, sequence) in sent)
+                        if (echo.Answer(sequence) is { } answer)
+                        {
+                            Note(true, ttl, answer.From, answer.Ms);
+                            if (far is null || ttl > far.Value.Ttl) far = (ttl, answer.From, answer.Ms);
+                        }
+                    foreach (var (ttl, from, ms) in direct.OfType<(int, IPAddress, double)>())
+                    {
+                        Note(false, ttl, from, ms);
+                        if (farDirect is null || ttl > farDirect.Value.Ttl) farDirect = (ttl, from, ms);
+                    }
+                }
+                if (gateway is { } at && echo.Answer(at) is { } reply) tunnelTimes.Add(reply.Ms);
+                farthest = $"farthest hop answering through the VPN {Hop(far)}, direct {Hop(farDirect)}";
+            }
+
+            void Note(bool vpn, int ttl, IPAddress from, double ms)
+            {
+                if (!hops.TryGetValue((vpn, ttl), out var hop) || !hop.From.Equals(from)) hops[(vpn, ttl)] = hop = (from, new RoundTrips());
+                hop.Times.Add(ms);
+            }
+
+            static string Hop((int Ttl, IPAddress From, double Ms)? hop) => hop is { } h ? $"{h.Ttl} ({Masked(h.From)}) {h.Ms:F0} ms" : "none";
+        }
+
+        static async Task<(int, IPAddress, double)?> DirectHopAsync(IPAddress target, int ttl)
+        {
+            using var ping = new Ping();
+            var started = Stopwatch.GetTimestamp();
+            try
+            {
+                // RoundtripTime is only filled for a reply from the target itself: timed here instead.
+                var reply = await ping.SendPingAsync(target, 2000, new byte[32], new PingOptions(ttl, dontFragment: true));
+                var ms = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                return reply.Status is IPStatus.TtlExpired or IPStatus.Success ? (ttl, reply.Address, ms) : null;
+            }
+            catch (PingException) { return null; }
+        }
     }
+
+    // A server's address with its last octet hidden: enough to tell one from another in a log.
+    static string Masked(IPAddress? address) => address is null ? "(no UDP peer yet)" : string.Join('.', address.ToString().Split('.')[..3]) + ".x";
 
     static string ProcessName(int pid)
     {
         try { using var p = Process.GetProcessById(pid); return p.ProcessName; }
         catch (ArgumentException) { return "(exited)"; }
+    }
+}
+
+// Gate 5: the packet boundaries a game can reach, the same calls direct (this process) and routed (the child). What
+// each far end does is beside it; what the router did with them is in the parent's counters after.
+static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGateway, IPAddress? local, IPAddress? peer6, long scope6)
+{
+    var stun = new IPEndPoint((await Dns.GetHostAddressesAsync("stun.l.google.com", AddressFamily.InterNetwork))[0], 19302);
+
+    // A datagram as big as Ethernet carries whole (1472 + 28 = 1500): bigger than the tunnel's, so routed it is split
+    // in two. Google's STUN server answers one this size (measured direct, 2026-10-20) and none bigger.
+    using (var udp = Udp())
+        Console.WriteLine($"  udp 1500 bytes:                   {await AskAsync(udp, stun, StunRequest(1472))}");
+    // The same with don't-fragment: routed, it may not be split, so the router answers "fragmentation needed"; then once
+    // more, as a program would after.
+    using (var udp = Udp())
+    {
+        udp.DontFragment = true;
+        Console.WriteLine($"  udp 1500 bytes, don't fragment:   {await AskAsync(udp, stun, StunRequest(1472))}; again: {await AskAsync(udp, stun, StunRequest(1472))}");
+    }
+    // A reply bigger than any one packet: Akamai's name server answers akamai.com's TXT records in 3,959 bytes, which
+    // arrive in three pieces (measured direct, 2026-10-20).
+    var akamai = new IPEndPoint((await Dns.GetHostAddressesAsync("a1-128.akam.net", AddressFamily.InterNetwork))[0], 53);
+    using (var udp = Udp())
+        for (var i = 0; i < 3; i++)
+            Console.WriteLine($"  udp reply of 3,959 bytes:         {await AskAsync(udp, akamai, DnsQuery("akamai.com", 16), 3000)}");
+    // A datagram bigger than Ethernet carries: Windows sends it in pieces, which the router routes after their first.
+    // Quad9 answers a query padded to 3,000 bytes, so sent in pieces (measured direct, 7 of 7, 2026-10-20).
+    var quad9 = new IPEndPoint(IPAddress.Parse("9.9.9.9"), 53);
+    using (var udp = Udp())
+        for (var i = 0; i < 3; i++)
+            Console.WriteLine($"  udp of 3,000 bytes, in pieces:    {await AskAsync(udp, quad9, DnsQuery("example.com", 1, padTo: 3000))}");
+
+    // ICMP errors: one hop's time exceeded (from the server routed; from the home router direct — a UDP socket does not
+    // see it either way, the router's count does), and a closed port's unreachable, which a Windows UDP socket sees as
+    // a reset on its next receive. Spaced past the one a second a Linux host sends each destination (icmp_ratelimit).
+    using (var udp = Udp())
+    {
+        udp.Ttl = 1;
+        for (var i = 0; i < 3; i++)
+        {
+            await udp.SendToAsync(new byte[32], new IPEndPoint(IPAddress.Parse("8.8.8.8"), 33434));
+            await Task.Delay(1200);
+        }
+        Console.WriteLine("  udp with one hop to live:         sent 3, 1.2 s apart");
+    }
+    // Connected, as a game's socket to its server usually is: Windows reports the unreachable on the next receive.
+    if (tunnelGateway is not null)
+        using (var udp = Udp())
+        {
+            udp.Connect(new IPEndPoint(tunnelGateway, 33434));
+            for (var i = 0; i < 5; i++)
+                Console.WriteLine($"  udp to a closed port on the tunnel's gateway: {await AskAsync(udp, new IPEndPoint(tunnelGateway, 33434), new byte[32], 1200)}");
+        }
+
+    // TCP the size of an upload: every segment Windows sends is as big as the MSS the far end offered.
+    using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) })
+    {
+        var begun = Stopwatch.GetTimestamp();
+        try
+        {
+            using var response = await http.PostAsync("https://speed.cloudflare.com/__up", new ByteArrayContent(new byte[2 * 1024 * 1024]));
+            Console.WriteLine($"  tcp upload of 2 MB:               {(int)response.StatusCode} in {Stopwatch.GetElapsedTime(begun).TotalSeconds:F1} s");
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { Console.WriteLine($"  tcp upload of 2 MB:               failed: {e.GetType().Name}"); }
+    }
+
+    // This side of the tunnel: every host on the link, a group, this machine's own network. Bound to the adapter's own
+    // address: unbound, Windows sends both by the adapter of lowest metric, not necessarily the one the router takes.
+    // Each socket lives half a second past its send, as a program's does; one closed at once may leave no owner to
+    // find (gate 3).
+    using (var udp = Udp(local))
+    {
+        udp.EnableBroadcast = true;
+        await udp.SendToAsync(new byte[32], new IPEndPoint(IPAddress.Broadcast, 9));
+        await Task.Delay(500);
+        Console.WriteLine("  udp broadcast:                    sent");
+    }
+    using (var udp = Udp(local))
+    {
+        if (local is not null) udp.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastInterface, local.GetAddressBytes());
+        var search = Encoding.ASCII.GetBytes("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: ssdp:all\r\n\r\n");
+        Console.WriteLine($"  udp multicast (SSDP search):      {await AskAsync(udp, new IPEndPoint(IPAddress.Parse("239.255.255.250"), 1900), search)}");
+    }
+    if (lanGateway is not null) Console.WriteLine($"  tcp to the home router, port 80:  {await ConnectAsync(new IPEndPoint(lanGateway, 80))}");
+
+    // IPv6, which the tunnel does not carry: a link's every node, and one neighbour by TCP.
+    using (var udp6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp))
+    {
+        try
+        {
+            await udp6.SendToAsync(new byte[32], new IPEndPoint(new IPAddress(IPAddress.Parse("ff02::1").GetAddressBytes(), scope6), 9));
+            await Task.Delay(500);
+            Console.WriteLine("  udp6 to every node on the link:   sent");
+        }
+        catch (SocketException e) { Console.WriteLine($"  udp6 to every node on the link:   {e.SocketErrorCode}"); }
+    }
+    if (peer6 is not null) Console.WriteLine($"  tcp6 to a neighbour, port 80:     {await ConnectAsync(new IPEndPoint(new IPAddress(peer6.GetAddressBytes(), scope6), 80))}");
+
+    static Socket Udp(IPAddress? bound = null)
+    {
+        var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.Bind(new IPEndPoint(bound ?? IPAddress.Any, 0));
+        return socket;
+    }
+
+    static async Task<string> AskAsync(Socket socket, IPEndPoint to, byte[] request, int waitMs = 2000)
+    {
+        var buffer = new byte[65536];
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            using var give = new CancellationTokenSource(waitMs);
+            int received;
+            if (socket.Connected)
+            {
+                await socket.SendAsync(request);
+                received = await socket.ReceiveAsync(buffer, SocketFlags.None, give.Token);
+            }
+            else
+            {
+                await socket.SendToAsync(request, to);
+                received = (await socket.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), give.Token)).ReceivedBytes;
+            }
+            return $"answered, {received} bytes in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms";
+        }
+        catch (OperationCanceledException) { return $"no answer in {waitMs / 1000.0:F0} s"; }
+        catch (SocketException e) { return $"{e.SocketErrorCode} after {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms"; }
+    }
+
+    static async Task<string> ConnectAsync(IPEndPoint to)
+    {
+        using var socket = new Socket(to.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        using var give = new CancellationTokenSource(5000);
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            await socket.ConnectAsync(to, give.Token);
+            return $"connected in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms";
+        }
+        catch (OperationCanceledException) { return "no answer in 5 s"; }
+        catch (SocketException e) { return $"{e.SocketErrorCode} after {Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms"; }
+    }
+
+    // A binding request padded to size with an attribute of a comprehension-optional type (0x8000-0xFFFF), which a
+    // server ignores (RFC 5389 §15).
+    static byte[] StunRequest(int size)
+    {
+        var request = new byte[size];
+        BinaryPrimitives.WriteUInt16BigEndian(request, 0x0001);
+        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(2), (ushort)(size - 20));
+        BinaryPrimitives.WriteUInt32BigEndian(request.AsSpan(4), 0x2112A442);
+        Random.Shared.NextBytes(request.AsSpan(8, 12));
+        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(20), 0x8FFF);
+        BinaryPrimitives.WriteUInt16BigEndian(request.AsSpan(22), (ushort)(size - 24));
+        return request;
+    }
+
+    // A query without recursion, with EDNS(0) (RFC 6891) offering 4,096 bytes and asking for DNSSEC records; padded to
+    // padTo bytes with the padding option (12, RFC 7830).
+    static byte[] DnsQuery(string name, ushort type, int padTo = 0)
+    {
+        var query = new List<byte>();
+        var header = new byte[12];
+        Random.Shared.NextBytes(header.AsSpan(0, 2));
+        header[5] = 1;    // one question
+        header[11] = 1;   // one additional record: the OPT
+        query.AddRange(header);
+        foreach (var label in name.Split('.'))
+        {
+            query.Add((byte)label.Length);
+            query.AddRange(Encoding.ASCII.GetBytes(label));
+        }
+        query.AddRange([0, (byte)(type >> 8), (byte)type, 0, 1]);
+        var fill = Math.Max(0, padTo - query.Count - 11 - 4);
+        var options = padTo == 0 ? 0 : 4 + fill;
+        query.AddRange([0, 0, 41, 0x10, 0x00, 0, 0, 0x80, 0, (byte)(options >> 8), (byte)options]);
+        if (padTo != 0)
+        {
+            query.AddRange([0, 12, (byte)(fill >> 8), (byte)fill]);
+            query.AddRange(new byte[fill]);
+        }
+        return [.. query];
     }
 }
 
@@ -788,6 +1089,82 @@ async Task<int> GuardAsync(int seconds)
             Console.WriteLine($"{Now()} guard: killing interceptor {p.Id}");
             try { p.Kill(); } catch (Exception e) when (e is Win32Exception or InvalidOperationException) { }
         }
+    }
+}
+
+// ICMP echoes sent into the tunnel from the tunnel's own address, outside the router, and what answers them picked out
+// of what the tunnel returns before the router sees it (which would refuse it: it belongs to no mapping) — the echo
+// reply, or a router's "time exceeded" quoting the echo when its hop limit ran out there.
+sealed class TunnelEcho(uint tunnelAddress, Action<byte[]> send)
+{
+    private readonly ushort _id = (ushort)Environment.ProcessId;
+    private readonly Lock _lock = new();
+    private readonly Dictionary<ushort, long> _sent = [];
+    private readonly Dictionary<ushort, (IPAddress From, double Ms)> _answers = [];
+    private ushort _sequence;
+
+    /// <summary>Sends an echo with <paramref name="ttl"/> hops to live; its sequence number, to look the answer up by.</summary>
+    public ushort Send(uint destination, byte ttl = 64)
+    {
+        // IPv4 (20) and an echo request (type 8): identifier, sequence, 32 bytes.
+        var packet = new byte[20 + 8 + 32];
+        packet[0] = 0x45;
+        BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(2), (ushort)packet.Length);
+        packet[8] = ttl;
+        packet[9] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(12), tunnelAddress);
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(16), destination);
+        var icmp = packet.AsSpan(20);
+        icmp[0] = 8;
+        BinaryPrimitives.WriteUInt16BigEndian(icmp[4..], _id);
+        ushort sequence;
+        lock (_lock)
+        {
+            sequence = ++_sequence;
+            _sent[sequence] = Stopwatch.GetTimestamp();
+        }
+        BinaryPrimitives.WriteUInt16BigEndian(icmp[6..], sequence);
+        BinaryPrimitives.WriteUInt16BigEndian(icmp[2..], Fold(Sum(icmp)));
+        BinaryPrimitives.WriteUInt16BigEndian(packet.AsSpan(10), Fold(Sum(packet.AsSpan(0, 20))));
+        send(packet);
+        return sequence;
+    }
+
+    /// <summary>Who answered an echo and how soon; null while none has.</summary>
+    public (IPAddress From, double Ms)? Answer(ushort sequence)
+    {
+        lock (_lock) return _answers.Remove(sequence, out var answer) ? answer : null;
+    }
+
+    /// <summary>Whether the packet answers one of these echoes: an echo reply (type 0) with this identifier, or a time
+    /// exceeded (11) or unreachable (3) quoting one. Timed if so.</summary>
+    public bool Answered(byte[] packet)
+    {
+        if (packet.Length < 28 || packet[0] != 0x45 || packet[9] != 1) return false;
+        int at;
+        if (packet[20] == 0) at = 24;
+        // The quote: the echo's own IPv4 header (20), then its type, code, checksum, identifier, sequence.
+        else if (packet[20] is 3 or 11 && packet.Length >= 28 + 20 + 8 && packet[28] == 0x45 && packet[28 + 9] == 1 && packet[48] == 8) at = 52;
+        else return false;
+        if (BinaryPrimitives.ReadUInt16BigEndian(packet.AsSpan(at)) != _id) return false;
+        var from = new IPAddress(packet.AsSpan(12, 4));
+        lock (_lock)
+            if (_sent.Remove(BinaryPrimitives.ReadUInt16BigEndian(packet.AsSpan(at + 2)), out var sent))
+                _answers[BinaryPrimitives.ReadUInt16BigEndian(packet.AsSpan(at + 2))] = (from, Stopwatch.GetElapsedTime(sent).TotalMilliseconds);
+        return true;
+    }
+
+    private static uint Sum(ReadOnlySpan<byte> data)
+    {
+        uint sum = 0;
+        for (var i = 0; i + 1 < data.Length; i += 2) sum += BinaryPrimitives.ReadUInt16BigEndian(data[i..]);
+        return sum;
+    }
+
+    private static ushort Fold(uint sum)
+    {
+        while (sum >> 16 != 0) sum = (sum & 0xFFFF) + (sum >> 16);
+        return (ushort)~sum;
     }
 }
 
