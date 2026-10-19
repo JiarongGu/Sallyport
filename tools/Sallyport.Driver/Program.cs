@@ -62,6 +62,13 @@ switch (args.FirstOrDefault())
         return await WorkloadAsync();
     case "route":
         return await RouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60), Text("--folder"));
+    case "stop":
+    {
+        if (!EventWaitHandle.TryOpenExisting(StopEventName, out var running)) { Console.WriteLine("no routing session is running"); return 1; }
+        using (running) running.Set();
+        Console.WriteLine("asked the routing session to stop");
+        return 0;
+    }
     case "routed-workload":
         if (Console.ReadLine() != "go") return 2;
         await ExerciseAsync();
@@ -73,7 +80,7 @@ switch (args.FirstOrDefault())
     default:
         Console.Error.WriteLine("usage: Sallyport.Driver status | fetch | install | uninstall | adapters"
             + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
-            + " | rtt [--count N] | attribute [--seconds N] | route <profile.ovpn> [--folder <game folder>] [--seconds N] | reset | guard [--seconds N]");
+            + " | rtt [--count N] | attribute [--seconds N] | guard [--seconds N] [--may-remove] | route <profile.ovpn> [--folder <game folder>] [--seconds N] | stop | reset");
         return 2;
 }
 
@@ -554,9 +561,17 @@ async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
         {
             var clock = Stopwatch.StartNew();
             long lastRouted = 0, lastUp = 0;
+            // `Sallyport.Driver stop` ends the session from outside, summary and all: a game is played for as long as
+            // it is played, not for a number of seconds chosen before.
+            using var stopSignal = new EventWaitHandle(false, EventResetMode.ManualReset, StopEventName);
+            using var stopped = stop.Token.Register(() => stopSignal.Set());
             while (!stop.IsCancellationRequested)
             {
-                try { await Task.Delay(10_000, stop.Token); } catch (OperationCanceledException) { }
+                if (stopSignal.WaitOne(10_000) && !stop.IsCancellationRequested)
+                {
+                    Console.WriteLine($"{Now()} route: asked to stop");
+                    await stop.CancelAsync();
+                }
                 var routed = router.RoutedPackets;
                 var up = router.HandedUp;
                 Console.WriteLine($"{Now()} t={clock.Elapsed.TotalSeconds,4:F0}s  routed {routed} (+{routed - lastRouted}), handed up {up} (+{up - lastUp}),"
@@ -699,10 +714,12 @@ int Reset()
 }
 
 // Outside every interceptor (D13): probes the direct path twice a second and, when it has been dead 3 s, undoes
-// interception — its own handle first, then killing the interceptors, then removing the driver, which is measured to
-// give the network back (D18).
+// interception — its own handle first, then killing the interceptors (both measured to give the adapter back, gate
+// 1). Removing the driver, also measured to give the network back (D18), only with --may-remove: over a game session
+// the direct path can die for reasons of its own (Wi-Fi), and removal is not undone by the path coming back.
 async Task<int> GuardAsync(int seconds)
 {
+    var mayRemove = args.Contains("--may-remove");
     var targets = new[] { new IPEndPoint(internet, 443), new IPEndPoint(IPAddress.Parse("8.8.8.8"), 443) };
     var clock = Stopwatch.StartNew();
     TimeSpan? deadSince = null;
@@ -736,7 +753,7 @@ async Task<int> GuardAsync(int seconds)
             Console.WriteLine($"{Now()} FAIL (dead {dead.TotalSeconds:F1} s)");
             if (stage == 0 && dead >= TimeSpan.FromSeconds(3)) { stage = 1; Reset(); }
             else if (stage == 1 && dead >= TimeSpan.FromSeconds(8)) { stage = 2; KillInterceptors(); }
-            else if (stage == 2 && dead >= TimeSpan.FromSeconds(18))
+            else if (stage == 2 && mayRemove && dead >= TimeSpan.FromSeconds(18))
             {
                 stage = 3;
                 Console.WriteLine($"{Now()} guard: removing the driver");
@@ -772,4 +789,10 @@ async Task<int> GuardAsync(int seconds)
             try { p.Kill(); } catch (Exception e) when (e is Win32Exception or InvalidOperationException) { }
         }
     }
+}
+
+static partial class Program
+{
+    // A session-local name: only this user's own console can end its routing session.
+    const string StopEventName = @"Local\Sallyport.Driver.route.stop";
 }

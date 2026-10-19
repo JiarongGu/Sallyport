@@ -65,8 +65,12 @@ NT Kernel's, free for personal use.
      direct, 235–281 ms through the VPN in Tokyo.
      Decisions are made per five-tuple at the first packet, after at most one refresh (2 ms apart), and kept for the
      flow's life; UDP decisions are rechecked every 250 ms (the reused port of gate 3).
-  Next, before Zenless can be routed whole: **selection by a game profile's executables** (image path and creation
-  time of the owning PID, so it holds from launch), the selected programs' IPv6 blocked, and mapping expiry. ← next
+  Built since: **selection by a game folder's executables** (`ProgramSelection`: image path and creation time of the
+  owning PID, so it holds from launch whatever starts the game), decisions and mappings expiring after 2 minutes idle
+  unless a socket still holds them; `route --folder` and `stop`. **Selected IPv6 is not blocked yet** and could not
+  be measured here: this machine has no IPv6 route (link-local only; an IPv6 connect failed).
+  **Next: Zenless Zone Zero routed whole** — `Sallyport.Driver route <profile> --folder "<its folder>"` armed before
+  the owner launches it; then attached in the middle of a game. ← next (Needs: the owner, playing)
   5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
   6. Zenless routed whole; mid-game attach and detach; tunnel loss, driver removal, sleep.
   7. The peer-to-peer harness.
