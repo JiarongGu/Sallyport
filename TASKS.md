@@ -42,8 +42,21 @@ NT Kernel's, free for personal use.
      ~173,600). Gateway round trips, 500 each, p50/p95/p99: 14.9/50.8/78.2 ms untouched, 9.7/42.8/58.9 both paths,
      10.8/46.8/59.5 send-only — Wi-Fi's own jitter is larger than anything added; the router times its own processing
      for a figure.
-  3. Attribution: short-lived, reused and shared sockets — owner found, or counted as unattributed. ← next
-  4. One program routed from its first TCP SYN and UDP datagram through the real VPN; another program direct.
+  3. **Attribution — measured 2026-10-20** (`Sallyport.Windows.Routing`: `Frames`, `OwnerTable`; `attribute`, three
+     runs of 15–20 s on the send path, a refresh on a miss at most once per drain; a child process playing cases tagged
+     in their payloads to TEST-NET addresses, kept off the network; guard 0 failed): **no packet attributed to the
+     wrong process except by a reused port, and none ambiguous.** First TCP SYN 29 of 29 right, after one refresh;
+     UDP sockets living 100 ms 59 of 60 (the one: the harness's once-per-drain refresh); one socket to 50 peers 150 of
+     150; **sockets closed the moment they send: 46 of 60 unowned** — gone before the table was read, the design's
+     limit, counted. **Port reuse: a port released by one process and taken at once by another was attributed to the
+     old owner, 5 packets over 250 ms, in one run of two** — no refresh fell between; so the router bounds staleness:
+     a periodic refresh, each flow's decision rechecked against it. A refresh reads both tables in p50 1.0–1.5 ms, p99
+     2.4–4.3 ms. Elsewhere on the machine ~12–24 TCP packets per run were unowned, one each to :443 — final packets
+     of connections in TIME_WAIT, whose rows carry PID 0 — so the router decides at a flow's first packet and keeps
+     the decision. DNS a game asks for is sent by Windows' DNS Client service, not the game: it stays direct.
+  4. One program routed from its first TCP SYN and UDP datagram through the real VPN; another program direct. ← next
+     With the flow table: a decision per five-tuple at its first packet, held through a refresh (bounded), kept for
+     the flow's life; a periodic refresh rechecks UDP decisions (the reused port above).
   5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
   6. Zenless routed whole; mid-game attach and detach; tunnel loss, driver removal, sleep.
   7. The peer-to-peer harness.

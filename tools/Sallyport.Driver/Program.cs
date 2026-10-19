@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text;
 using Sallyport.Net;
 using Sallyport.Windows.PacketFilter;
+using Sallyport.Windows.Routing;
 
 // Sallyport.Driver status | fetch | install | uninstall | adapters | pass | inject | rtt | reset | guard
 //   The packet driver (Windows Packet Filter, D18) as Sallyport manages it: NT Kernel's pinned release, fetched into
@@ -51,6 +52,10 @@ switch (args.FirstOrDefault())
         return await InjectAsync(ReceivePath());
     case "rtt":
         return await RttAsync(Option("--count", 500));
+    case "attribute":
+        return await AttributeAsync(Option("--seconds", 20));
+    case "workload":
+        return await WorkloadAsync();
     case "reset":
         return Reset();
     case "guard":
@@ -58,7 +63,7 @@ switch (args.FirstOrDefault())
     default:
         Console.Error.WriteLine("usage: Sallyport.Driver status | fetch | install | uninstall | adapters"
             + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
-            + " | rtt [--count N] | reset | guard [--seconds N]");
+            + " | rtt [--count N] | attribute [--seconds N] | reset | guard [--seconds N]");
         return 2;
 }
 
@@ -241,6 +246,209 @@ async Task<int> InjectAsync(bool receivePath)
         var udp = ip[headerLength..];
         return BinaryPrimitives.ReadUInt16BigEndian(udp) == sourcePort && BinaryPrimitives.ReadUInt16BigEndian(udp[2..]) == to.Port;
     }
+}
+
+// Every packet Windows sends, matched to its process through the owner tables, a miss refreshed once per drain — while a
+// child process plays a game whose cases are known (WorkloadAsync), tagged in its payloads, so each answer is scored
+// against the truth. Test traffic goes to TEST-NET addresses (RFC 5737) and is kept off the network.
+async Task<int> AttributeAsync(int seconds)
+{
+    using var driver = OpenDriver();
+    if (driver is null) return 1;
+    var adapter = RouteAdapter(driver);
+    if (adapter is null) { Console.WriteLine("no adapter carries the route to the internet"); return 1; }
+
+    var owners = new OwnerTable();
+    owners.Refresh();
+    var kinds = new Dictionary<FrameKind, int>();
+    var verdicts = new Dictionary<string, int>();          // "TCP owned at first look", "UDP unowned", ...
+    var cases = new SortedDictionary<string, Dictionary<string, int>>();
+    var unownedFlows = new Dictionary<string, int>();
+    var ownerPackets = new Dictionary<int, int>();
+    var refreshTimes = new List<double>();
+    var self = Environment.ProcessId;
+    var child = 0;
+    var refreshedThisDrain = false;
+
+    using var forwarder = new Forwarder(driver, adapter.Handle, 64, receivePath: false);
+    Console.WriteLine($"{Now()} attribute: adapter 0x{adapter.Handle:X} in mode {driver.Mode(adapter.Handle)}, {seconds} s;"
+        + $" owner tables read in {owners.LastRefresh.TotalMilliseconds:F2} ms");
+
+    var workload = Task.Run(async () =>
+    {
+        await Task.Delay(2000);
+        using var process = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "workload") { RedirectStandardOutput = true })!;
+        child = process.Id;
+        while (await process.StandardOutput.ReadLineAsync() is { } line)
+        {
+            Console.WriteLine($"{Now()} workload: {line}");
+            // Case E's second half: this process takes the port the child just let go.
+            if (line.StartsWith("E released ", StringComparison.Ordinal) && int.TryParse(line[11..], out var port))
+            {
+                using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                socket.Bind(new IPEndPoint(IPAddress.Any, port));
+                for (var i = 0; i < 5; i++)
+                {
+                    socket.SendTo("case=E owner=parent"u8, new IPEndPoint(IPAddress.Parse("192.0.2.14"), 9));
+                    await Task.Delay(50);
+                }
+            }
+        }
+        await process.WaitForExitAsync();
+    });
+
+    var clock = Stopwatch.StartNew();
+    while (clock.Elapsed.TotalSeconds < seconds)
+    {
+        forwarder.Wait(100);
+        refreshedThisDrain = false;
+        forwarder.Drain(Attribute);
+    }
+    forwarder.Stop();
+    await workload;
+
+    Console.WriteLine($"{Now()} attribute: {forwarder}");
+    Console.WriteLine($"frames: {string.Join(", ", kinds.OrderByDescending(k => k.Value).Select(k => $"{k.Key} {k.Value}"))}");
+    Console.WriteLine($"verdicts: {string.Join(", ", verdicts.OrderBy(v => v.Key).Select(v => $"{v.Key} {v.Value}"))}");
+    refreshTimes.Sort();
+    Console.WriteLine($"refreshes: {owners.Refreshes}; ms p50 {Pick(.5):F2} p99 {Pick(.99):F2} max {Pick(1):F2}");
+    Console.WriteLine("test cases (child " + child + ", parent " + self + "):");
+    foreach (var (name, tally) in cases) Console.WriteLine($"  {name}: {string.Join(", ", tally.OrderBy(t => t.Key).Select(t => $"{t.Key} {t.Value}"))}");
+    Console.WriteLine("unowned flows, most packets first:");
+    foreach (var (flow, count) in unownedFlows.OrderByDescending(u => u.Value).Take(12)) Console.WriteLine($"  {count,5}  {flow}");
+    Console.WriteLine("owners, most packets first:");
+    foreach (var (pid, count) in ownerPackets.OrderByDescending(o => o.Value).Take(8)) Console.WriteLine($"  {count,6}  {pid} {Name(pid)}");
+    return 0;
+
+    double Pick(double q) => refreshTimes.Count == 0 ? double.NaN : refreshTimes[Math.Min(refreshTimes.Count - 1, (int)(q * refreshTimes.Count))];
+
+    static string Name(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return p.ProcessName; }
+        catch (ArgumentException) { return "(exited)"; }
+    }
+
+    bool Attribute(DriverPacket packet)
+    {
+        var kind = Frames.TryReadOutbound(packet.Frame, out var flow);
+        kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
+        if (kind != FrameKind.Flow) return false;
+
+        var look = "at first look";
+        var answer = owners.Owner(flow, out var pid);
+        if (answer == Ownership.Unowned && !refreshedThisDrain)
+        {
+            owners.Refresh();
+            refreshTimes.Add(owners.LastRefresh.TotalMilliseconds);
+            refreshedThisDrain = true;
+            look = "after a refresh";
+            answer = owners.Owner(flow, out pid);
+        }
+        var protocol = flow.Protocol == Flow.Tcp ? "TCP" : "UDP";
+        var verdict = answer switch
+        {
+            Ownership.Owned => $"{protocol} owned {look}",
+            Ownership.Ambiguous => $"{protocol} ambiguous",
+            _ => $"{protocol} unowned",
+        };
+        verdicts[verdict] = verdicts.GetValueOrDefault(verdict) + 1;
+        if (answer == Ownership.Owned) ownerPackets[pid] = ownerPackets.GetValueOrDefault(pid) + 1;
+
+        var test = TestCase(packet.Frame, flow);
+        if (test is null)
+        {
+            if (answer == Ownership.Unowned)
+            {
+                var key = $"{protocol} :{flow.LocalPort} -> :{flow.RemotePort}";
+                unownedFlows[key] = unownedFlows.GetValueOrDefault(key) + 1;
+            }
+            return false;
+        }
+        var (name, expected) = test.Value;
+        var score = answer switch
+        {
+            Ownership.Owned when pid == (expected == "parent" ? self : child) => $"right {look}",
+            Ownership.Owned => "WRONG",
+            Ownership.Ambiguous => "ambiguous",
+            _ => "unowned",
+        };
+        var tally = cases.TryGetValue(name, out var t) ? t : cases[name] = [];
+        tally[score] = tally.GetValueOrDefault(score) + 1;
+        return true;
+    }
+
+    // The case a packet of the workload belongs to: its payload's tag, or for a bare TCP SYN its destination.
+    static (string Name, string Owner)? TestCase(ReadOnlySpan<byte> frame, in Flow flow)
+    {
+        var remote = flow.Remote.GetAddressBytes();
+        var testNet = (remote[0], remote[1], remote[2]) is (192, 0, 2) or (198, 51, 100);
+        if (!testNet) return null;
+        if (flow.Protocol == Flow.Tcp) return ("D TCP connect", "child");
+        var text = Encoding.ASCII.GetString(frame[Math.Min(frame.Length, 14 + 20 + 8)..]);
+        var at = text.IndexOf("case=", StringComparison.Ordinal);
+        if (at < 0) return ("untagged", "child");
+        var name = text[(at + 5)..(at + 6)] switch
+        {
+            "A" => "A UDP, closed at once",
+            "B" => "B UDP, 100 ms",
+            "C" => "C UDP, one socket, 50 peers",
+            "E" => "E port reused",
+            var other => other,
+        };
+        return (name, text.Contains("owner=parent", StringComparison.Ordinal) ? "parent" : "child");
+    }
+}
+
+// The game the attribution is scored against: each case's packets carry their case and expected owner.
+async Task<int> WorkloadAsync()
+{
+    var any = new IPEndPoint(IPAddress.Any, 0);
+    for (var i = 0; i < 20; i++)
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.Bind(any);
+        socket.SendTo("case=A owner=child"u8, new IPEndPoint(IPAddress.Parse("192.0.2.10"), 9));
+    }
+    Console.WriteLine("A sent");
+    for (var i = 0; i < 20; i++)
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        socket.Bind(any);
+        socket.SendTo("case=B owner=child"u8, new IPEndPoint(IPAddress.Parse("192.0.2.11"), 9));
+        await Task.Delay(100);
+    }
+    Console.WriteLine("B sent");
+    using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+    {
+        socket.Bind(any);
+        for (var peer = 1; peer <= 50; peer++)
+        {
+            socket.SendTo("case=C owner=child"u8, new IPEndPoint(IPAddress.Parse($"198.51.100.{peer}"), 9));
+            await Task.Delay(20);
+        }
+    }
+    Console.WriteLine("C sent");
+    for (var i = 0; i < 10; i++)
+    {
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        using var give = new CancellationTokenSource(300);
+        try { await socket.ConnectAsync(new IPEndPoint(IPAddress.Parse("192.0.2.13"), 443), give.Token); }
+        catch (Exception e) when (e is OperationCanceledException or SocketException) { }
+    }
+    Console.WriteLine("D sent");
+    // Long enough in the tables to be in a snapshot, then let go for the parent to take at once: a stale snapshot
+    // would still name this process.
+    int port;
+    using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+    {
+        socket.Bind(any);
+        port = ((IPEndPoint)socket.LocalEndPoint!).Port;
+        socket.SendTo("case=E owner=child"u8, new IPEndPoint(IPAddress.Parse("192.0.2.14"), 9));
+        await Task.Delay(300);
+    }
+    Console.WriteLine($"E released {port}");
+    await Task.Delay(1500);
+    return 0;
 }
 
 // Round trips to the gateway, 50 a second: Wi-Fi's own jitter is the floor that any latency the router adds is read
