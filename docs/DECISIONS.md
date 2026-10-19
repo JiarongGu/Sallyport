@@ -134,6 +134,15 @@ compatibility, not bypass — a few anti-cheats refuse to start beside particula
 the known case; none was found for WinDivert) — and a real game is measured for its traffic, not its anti-cheat. The
 spike (TASKS) measures the driver before anything is built on it; if it will not load here, this is decided again.
 
+**Ours, and MIT, down to the one piece .NET cannot be.** The owner's rule: if a borrowed part ever stands in the way, we
+write our own, and the project stays MIT. Everything above the kernel is ours — the NAT, the routing, attributing a flow
+to a process, the tunnel, the service, the client. The exception is the driver itself: Windows lets only a kernel-mode
+driver see or redirect another program's packets (its user-mode filtering API can allow or block, not capture), a
+driver is C against the Windows Driver Kit, and Windows 11 loads one only with Microsoft's attestation signature behind
+an EV certificate. So WinDivert's signed driver is used unmodified, a separate file under its own licence, behind one
+narrow interface in `Sallyport.Windows`. Replacing it with a driver of our own (C, WDK, signing) would change nothing
+above that interface.
+
 ## D11 — Imported profiles are held by the service, encrypted (2026-10-19)
 
 A profile holds a private key and a static key. The client imports a copy (the owner chose a copy over a path, so it

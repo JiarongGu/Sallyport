@@ -90,7 +90,9 @@ profile directory, a Firefox profile, proxy environment variables for CLI and .N
 | cost of diverting outbound UDP | a game session's CPU and added latency |
 
 WinDivert is LGPLv3 or GPLv2 at the user's choice: an MIT application may load its DLL dynamically and ship the signed
-DLL and driver unmodified with the licence text. Its use is a decision (D-entry) before it lands.
+DLL and driver unmodified with the licence text (D10). It sits behind one narrow interface in `Sallyport.Windows` — the
+only part of Sallyport that is not our own MIT code, because a kernel driver is the one thing .NET cannot be; a driver
+of our own could replace it without touching anything above.
 
 ## Order of work
 
