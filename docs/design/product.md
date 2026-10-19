@@ -239,6 +239,8 @@ Changed copy elsewhere:
 
 - Profiles subtitle: **“Use an OpenVPN profile for a game or a local SOCKS5 proxy.”**
 - Connect becomes **“Connect proxy”**; game use shows **“In use by {game}”**, with unavailable proxy actions explained.
+  *(Superseded by `window.md`: a profile's proxy and its routed apps share one channel, so Connect stays "Connect" and
+  nothing is made unavailable by the other.)*
 - Apps note: **“Apps here use proxy settings. Use Games for packet routing.”**
 - Guide: Import profile → Add game or proxy-aware app → Run game or Launch app.
 - Guide boundary: **“Proxy mode carries TCP. Games uses the packet driver for selected programs’ IPv4 TCP and UDP; unsupported traffic is shown as blocked or unchecked.”**
