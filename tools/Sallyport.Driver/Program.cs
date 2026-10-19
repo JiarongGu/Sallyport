@@ -1,15 +1,18 @@
+using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text;
+using Sallyport.Net;
 using Sallyport.Windows.PacketFilter;
 
-// Sallyport.Driver status | fetch | install | uninstall | adapters | pass | reset | guard
+// Sallyport.Driver status | fetch | install | uninstall | adapters | pass | inject | rtt | reset | guard
 //   The packet driver (Windows Packet Filter, D18) as Sallyport manages it: NT Kernel's pinned release, fetched into
 //   %LOCALAPPDATA%\Sallyport\drivers and checked, installed or removed with one administrator prompt.
-//   adapters, pass, reset and guard are the router's first gate (docs/design/router.md): the driver's interface and
-//   what undoes it. They need administrator, as opening the driver does.
+//   adapters, pass, inject, rtt, reset and guard are the router's first gates (docs/design/router.md): the driver's
+//   interface, what it costs, and what undoes it. They need administrator, as opening the driver does.
 // Exit codes: 0 done; 1 failed or refused; 2 bad arguments.
 
 var setup = new PacketFilterSetup(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sallyport", "drivers"));
@@ -43,15 +46,27 @@ switch (args.FirstOrDefault())
     case "adapters":
         return Adapters();
     case "pass":
-        return Pass(Option("--seconds", 15), Option("--crash-after", 0), Option("--batch", 64));
+        return Pass(Option("--seconds", 15), Option("--crash-after", 0), Option("--batch", 64), ReceivePath());
+    case "inject":
+        return await InjectAsync(ReceivePath());
+    case "rtt":
+        return await RttAsync(Option("--count", 500));
     case "reset":
         return Reset();
     case "guard":
         return await GuardAsync(Option("--seconds", 120));
     default:
         Console.Error.WriteLine("usage: Sallyport.Driver status | fetch | install | uninstall | adapters"
-            + " | pass [--seconds N] [--crash-after S] [--batch N] | reset | guard [--seconds N]");
+            + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
+            + " | rtt [--count N] | reset | guard [--seconds N]");
         return 2;
+}
+
+// --mode send: only what Windows sends is taken; what arrives is left alone.
+bool ReceivePath()
+{
+    var at = Array.IndexOf(args, "--mode");
+    return !(at >= 0 && at + 1 < args.Length && args[at + 1] == "send");
 }
 
 int Option(string name, int fallback)
@@ -97,6 +112,9 @@ DriverAdapter? RouteAdapter(PacketDriver driver)
     return id is null ? null : driver.Adapters().FirstOrDefault(a => a.InterfaceId == id);
 }
 
+NetworkInterface? Nic(DriverAdapter adapter) =>
+    NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => Guid.TryParse(n.Id, out var id) && id == adapter.InterfaceId);
+
 int Adapters()
 {
     using var driver = OpenDriver();
@@ -116,107 +134,140 @@ int Adapters()
 }
 
 // Every packet of the internet adapter taken from the driver and handed back unchanged: what interception costs before
-// it does anything. --crash-after ends the process without a word to the driver, as a crash would.
-int Pass(int seconds, int crashAfter, int batchSize)
+// it does anything. --crash-after ends the process without a word to the driver, as a crash would. --mode send takes
+// only what Windows sends; arriving packets reach Windows untouched.
+int Pass(int seconds, int crashAfter, int batchSize, bool receivePath)
 {
     using var driver = OpenDriver();
     if (driver is null) return 1;
     var adapter = RouteAdapter(driver);
     if (adapter is null) { Console.WriteLine("no adapter carries the route to the internet"); return 1; }
 
-    using var signal = new EventWaitHandle(false, EventResetMode.ManualReset);
-    using var batch = new PacketBatch(batchSize);
-    var up = new int[batchSize];
-    var down = new int[batchSize];
-    long sent = 0, sentBytes = 0, received = 0, receivedBytes = 0, reads = 0, emptyReads = 0, unknown = 0;
-    long confirmed = 0, unconfirmed = 0, refused = 0;
-    int maxBatch = 0, largestOut = 0, largestIn = 0;
-    var readErrors = new Dictionary<int, int>();
-    var cpuAtStart = Process.GetCurrentProcess().TotalProcessorTime;
-
-    driver.SetPacketEvent(adapter.Handle, signal);
-    driver.SetMode(adapter.Handle, AdapterMode.SentTunnel | AdapterMode.ReceiveTunnel);
-    Console.WriteLine($"{Now()} pass: adapter 0x{adapter.Handle:X} in tunnel mode (now {driver.Mode(adapter.Handle)}), {seconds} s"
+    using var forwarder = new Forwarder(driver, adapter.Handle, batchSize, receivePath);
+    Console.WriteLine($"{Now()} pass: adapter 0x{adapter.Handle:X} in mode {driver.Mode(adapter.Handle)}, {seconds} s"
         + (crashAfter > 0 ? $", crashing at {crashAfter} s" : ""));
-
     var clock = Stopwatch.StartNew();
     var nextLine = 1;
+    while (clock.Elapsed.TotalSeconds < seconds)
+    {
+        if (crashAfter > 0 && clock.Elapsed.TotalSeconds >= crashAfter)
+        {
+            Console.WriteLine($"{Now()} pass: crashing now; the handle is left to Windows to close");
+            Console.Out.Flush();
+            Process.GetCurrentProcess().Kill();
+        }
+        forwarder.Wait(100);
+        forwarder.Drain();
+        if (clock.Elapsed.TotalSeconds >= nextLine) Console.WriteLine($"{Now()} t={nextLine++,3}s  {forwarder}");
+    }
+    forwarder.Stop();
+    Console.WriteLine($"{Now()} pass: done, mode {driver.Mode(adapter.Handle)}, queue {driver.QueueSize(adapter.Handle)}; {forwarder};"
+        + $" CPU {forwarder.Cpu.TotalMilliseconds:F0} ms over {clock.Elapsed.TotalSeconds:F1} s");
+    return 0;
+}
+
+// A reply of this program's making handed up to Windows — what the router does with every packet the tunnel returns.
+// A UDP socket sends to TEST-NET-1 (192.0.2.1, RFC 5737: never routed); that datagram is kept off the network, and a
+// reply from 192.0.2.1 built from it is handed up. Whether the socket receives it is the answer. --mode send leaves
+// the adapter's receive path untouched: whether the router needs that path at all.
+async Task<int> InjectAsync(bool receivePath)
+{
+    using var driver = OpenDriver();
+    if (driver is null) return 1;
+    var adapter = RouteAdapter(driver);
+    var local = adapter is null ? null : Nic(adapter)?.GetIPProperties().UnicastAddresses
+        .Select(u => u.Address).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+    if (adapter is null || local is null) { Console.WriteLine("no adapter with an IPv4 address carries the route to the internet"); return 1; }
+
+    var remote = new IPEndPoint(IPAddress.Parse("192.0.2.1"), 40000);
+    using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+    socket.Bind(new IPEndPoint(local, 0));
+    var port = (ushort)((IPEndPoint)socket.LocalEndPoint!).Port;
+
+    using var forwarder = new Forwarder(driver, adapter.Handle, 64, receivePath);
+    using var reply = new PacketBatch(1);
+    Console.WriteLine($"{Now()} inject: adapter 0x{adapter.Handle:X} in mode {driver.Mode(adapter.Handle)}; socket {local}:{port} -> {remote}");
+    var injected = "nothing captured to answer";
+    bool? handleInUnion = null;
+    var buffer = new byte[64];
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    var answer = socket.ReceiveFromAsync(buffer, SocketFlags.None, new IPEndPoint(IPAddress.Any, 0), timeout.Token).AsTask();
+    socket.SendTo("sallyport out"u8, remote);
+    var clock = Stopwatch.StartNew();
+    TimeSpan? injectedAt = null;
+    while (!answer.IsCompleted)
+    {
+        forwarder.Wait(20);
+        forwarder.Drain(packet =>
+        {
+            if (injectedAt is not null || packet.Direction != PacketDirection.Send || !IsTo(packet.Frame, port, remote)) return false;
+            handleInUnion = packet.Adapter == adapter.Handle;
+            var ip = Ipv4.UdpPacket(remote.Address, (ushort)remote.Port, local, port, "sallyport in"u8, id: 1);
+            var frame = new byte[14 + ip.Length];
+            packet.Frame[6..12].CopyTo(frame);           // to this machine: the captured frame's source
+            packet.Frame[..6].CopyTo(frame.AsSpan(6));    // from its gateway: the captured frame's destination
+            frame[12] = 0x08;                             // EtherType IPv4
+            ip.CopyTo(frame, 14);
+            reply.Write(0, adapter.Handle, frame, PacketDirection.Receive);
+            try { injected = driver.Send(adapter.Handle, reply, [0], toNetwork: false) is { } took ? $"driver took {took}" : "driver wrote no count"; }
+            catch (Win32Exception e) { injected = $"driver refused, Win32 error {e.NativeErrorCode}"; }
+            injectedAt = clock.Elapsed;
+            return true;
+        });
+    }
+    forwarder.Stop();
+
+    string outcome;
     try
     {
-        while (clock.Elapsed.TotalSeconds < seconds)
-        {
-            if (crashAfter > 0 && clock.Elapsed.TotalSeconds >= crashAfter)
-            {
-                Console.WriteLine($"{Now()} pass: crashing now; the handle is left to Windows to close");
-                Console.Out.Flush();
-                Process.GetCurrentProcess().Kill();
-            }
-            signal.WaitOne(100);
-            // Reset before draining: a packet queued after the reset signals again, so none is left waiting.
-            signal.Reset();
-            Drain();
-            if (clock.Elapsed.TotalSeconds >= nextLine)
-            {
-                Console.WriteLine($"{Now()} t={nextLine,3}s  out {sent} ({sentBytes / 1024} KiB)  in {received} ({receivedBytes / 1024} KiB)"
-                    + $"  reads {reads} (+{emptyReads} empty)  max batch {maxBatch}  passed on: confirmed {confirmed}, unconfirmed {unconfirmed}, refused {refused}"
-                    + $"  unknown {unknown}  largest frame out {largestOut} in {largestIn}"
-                    + (readErrors.Count > 0 ? $"  read errors {string.Join(",", readErrors.Select(e => $"{e.Key}x{e.Value}"))}" : ""));
-                nextLine++;
-            }
-        }
+        var got = await answer;
+        outcome = $"DELIVERED {got.ReceivedBytes} bytes from {got.RemoteEndPoint}: \"{Encoding.ASCII.GetString(buffer, 0, got.ReceivedBytes)}\""
+            + $" {(clock.Elapsed - injectedAt)?.TotalMilliseconds:F1} ms after injection";
     }
-    finally
+    catch (OperationCanceledException) { outcome = "NOT delivered within 3 s"; }
+    catch (SocketException e) { outcome = $"socket error {e.SocketErrorCode}"; }
+    Console.WriteLine($"{Now()} inject: outbound kept {forwarder.Kept}; reply: {injected}; a read leaves the adapter's handle in the buffer: "
+        + $"{(handleInUnion is { } h ? (h ? "yes" : "no") : "not seen")}; {outcome}");
+    Console.WriteLine($"{Now()} inject: {forwarder}");
+    return outcome.StartsWith("DELIVERED", StringComparison.Ordinal) ? 0 : 1;
+
+    static bool IsTo(ReadOnlySpan<byte> frame, ushort sourcePort, IPEndPoint to)
     {
-        // New packets bypass this program first; then what was already queued goes on.
-        driver.SetMode(adapter.Handle, AdapterMode.None);
-        Drain();
-        driver.SetPacketEvent(adapter.Handle, null);
-        var cpu = Process.GetCurrentProcess().TotalProcessorTime - cpuAtStart;
-        Console.WriteLine($"{Now()} pass: done, mode {driver.Mode(adapter.Handle)}, queue {driver.QueueSize(adapter.Handle)};"
-            + $" out {sent} in {received}; passed on: confirmed {confirmed}, unconfirmed {unconfirmed}, refused {refused}; unknown {unknown};"
-            + $" largest frame out {largestOut} in {largestIn}; CPU {cpu.TotalMilliseconds:F0} ms over {clock.Elapsed.TotalSeconds:F1} s");
+        if (frame.Length < 14 + 20 + 8 || frame[12] != 0x08 || frame[13] != 0x00) return false;
+        var ip = frame[14..];
+        var headerLength = (ip[0] & 0x0F) * 4;
+        if (ip[0] >> 4 != 4 || ip[9] != Ipv4.Udp || ip.Length < headerLength + 8 || !ip.Slice(16, 4).SequenceEqual(to.Address.GetAddressBytes()))
+            return false;
+        var udp = ip[headerLength..];
+        return BinaryPrimitives.ReadUInt16BigEndian(udp) == sourcePort && BinaryPrimitives.ReadUInt16BigEndian(udp[2..]) == to.Port;
     }
+}
+
+// Round trips to the gateway, 50 a second: Wi-Fi's own jitter is the floor that any latency the router adds is read
+// against.
+async Task<int> RttAsync(int count)
+{
+    using var driver = OpenDriver();
+    var adapter = driver is null ? null : RouteAdapter(driver);
+    var gateway = adapter is null ? null : Nic(adapter)?.GetIPProperties().GatewayAddresses
+        .Select(g => g.Address).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+    if (gateway is null) { Console.WriteLine("no IPv4 gateway on the route to the internet"); return 1; }
+    using var ping = new Ping();
+    var times = new List<double>(count);
+    var lost = 0;
+    for (var i = 0; i < count; i++)
+    {
+        var started = Stopwatch.GetTimestamp();
+        var answer = await ping.SendPingAsync(gateway, 1000);
+        var elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        if (answer.Status == IPStatus.Success) times.Add(elapsed); else lost++;
+        if (elapsed < 20) await Task.Delay(TimeSpan.FromMilliseconds(20 - elapsed));
+    }
+    times.Sort();
+    double At(double q) => times.Count == 0 ? double.NaN : times[Math.Min(times.Count - 1, (int)(q * times.Count))];
+    Console.WriteLine($"{Now()} rtt to the gateway: {times.Count} answered, {lost} lost;"
+        + $" p50 {At(.5):F2} ms  p95 {At(.95):F2} ms  p99 {At(.99):F2} ms  max {At(1):F2} ms");
     return 0;
-
-    void Drain()
-    {
-        while (driver.Read(adapter.Handle, batch) is var count && count > 0)
-        {
-            reads++;
-            maxBatch = Math.Max(maxBatch, count);
-            int ups = 0, downs = 0;
-            for (var i = 0; i < count; i++)
-            {
-                var packet = batch[i];
-                switch (packet.Direction)
-                {
-                    case PacketDirection.Send:
-                        down[downs++] = i; sent++; sentBytes += packet.Length; largestOut = Math.Max(largestOut, packet.Length);
-                        break;
-                    case PacketDirection.Receive:
-                        up[ups++] = i; received++; receivedBytes += packet.Length; largestIn = Math.Max(largestIn, packet.Length);
-                        break;
-                    default: unknown++; break;
-                }
-            }
-            Count(downs, () => driver.Send(adapter.Handle, batch, down.AsSpan(0, downs), toNetwork: true));
-            Count(ups, () => driver.Send(adapter.Handle, batch, up.AsSpan(0, ups), toNetwork: false));
-        }
-        if (driver.LastReadError == PacketDriver.EmptyQueue) emptyReads++;
-        else if (driver.LastReadError != 0) readErrors[driver.LastReadError] = readErrors.GetValueOrDefault(driver.LastReadError) + 1;
-    }
-
-    // Three answers a send can have (rule 6): the driver's own count, its silence, or its refusal.
-    void Count(int asked, Func<int?> send)
-    {
-        if (asked == 0) return;
-        try
-        {
-            if (send() is { } took) { confirmed += took; refused += asked - took; }
-            else unconfirmed += asked;
-        }
-        catch (Win32Exception) { refused += asked; }
-    }
 }
 
 // From a handle of its own: whether a second opener of the driver can take an adapter out of another's tunnel mode.
@@ -307,4 +358,111 @@ async Task<int> GuardAsync(int seconds)
             try { p.Kill(); } catch (Exception e) when (e is Win32Exception or InvalidOperationException) { }
         }
     }
+}
+
+// Takes an adapter's packets from the driver and passes on all but those a caller keeps; counts what it saw.
+sealed class Forwarder : IDisposable
+{
+    private readonly PacketDriver _driver;
+    private readonly ulong _adapter;
+    private readonly EventWaitHandle _signal = new(false, EventResetMode.ManualReset);
+    private readonly PacketBatch _batch;
+    private readonly int[] _up, _down;
+    private readonly TimeSpan _cpuAtStart = Process.GetCurrentProcess().TotalProcessorTime;
+    private readonly Dictionary<int, int> _readErrors = [];
+    private bool _stopped;
+    private long _sent, _sentBytes, _received, _receivedBytes, _reads, _emptyReads, _unknown, _confirmed, _unconfirmed, _refused;
+    private int _maxBatch, _largestOut, _largestIn;
+
+    public Forwarder(PacketDriver driver, ulong adapter, int batchSize, bool receivePath)
+    {
+        _driver = driver;
+        _adapter = adapter;
+        _batch = new PacketBatch(batchSize);
+        _up = new int[batchSize];
+        _down = new int[batchSize];
+        driver.SetPacketEvent(adapter, _signal);
+        driver.SetMode(adapter, AdapterMode.SentTunnel | (receivePath ? AdapterMode.ReceiveTunnel : AdapterMode.None));
+    }
+
+    public long Kept { get; private set; }
+
+    public TimeSpan Cpu => Process.GetCurrentProcess().TotalProcessorTime - _cpuAtStart;
+
+    public void Wait(int milliseconds)
+    {
+        _signal.WaitOne(milliseconds);
+        // Reset before draining: a packet queued after the reset signals again, so none is left waiting.
+        _signal.Reset();
+    }
+
+    /// <summary>Everything queued, passed on — except packets <paramref name="keep"/> answers true for, which go no
+    /// further. A packet seen by <paramref name="keep"/> is valid only until it returns.</summary>
+    public void Drain(Func<DriverPacket, bool>? keep = null)
+    {
+        while (_driver.Read(_adapter, _batch) is var count && count > 0)
+        {
+            _reads++;
+            _maxBatch = Math.Max(_maxBatch, count);
+            int ups = 0, downs = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var packet = _batch[i];
+                if (keep?.Invoke(packet) == true) { Kept++; continue; }
+                switch (packet.Direction)
+                {
+                    case PacketDirection.Send:
+                        _down[downs++] = i; _sent++; _sentBytes += packet.Length; _largestOut = Math.Max(_largestOut, packet.Length);
+                        break;
+                    case PacketDirection.Receive:
+                        _up[ups++] = i; _received++; _receivedBytes += packet.Length; _largestIn = Math.Max(_largestIn, packet.Length);
+                        break;
+                    default: _unknown++; break;
+                }
+            }
+            PassOn(downs, toNetwork: true);
+            PassOn(ups, toNetwork: false);
+        }
+        if (_driver.LastReadError == PacketDriver.EmptyQueue) _emptyReads++;
+        else if (_driver.LastReadError != 0) _readErrors[_driver.LastReadError] = _readErrors.GetValueOrDefault(_driver.LastReadError) + 1;
+    }
+
+    // Three answers a send can have (rule 6): the driver's own count, its silence, or its refusal.
+    private void PassOn(int count, bool toNetwork)
+    {
+        if (count == 0) return;
+        try
+        {
+            if (_driver.Send(_adapter, _batch, (toNetwork ? _down : _up).AsSpan(0, count), toNetwork) is { } took)
+            {
+                _confirmed += took;
+                _refused += count - took;
+            }
+            else _unconfirmed += count;
+        }
+        catch (Win32Exception) { _refused += count; }
+    }
+
+    public void Stop()
+    {
+        if (_stopped) return;
+        _stopped = true;
+        // New packets bypass this program first; then what was already queued goes on.
+        _driver.SetMode(_adapter, AdapterMode.None);
+        Drain();
+        _driver.SetPacketEvent(_adapter, null);
+    }
+
+    public void Dispose()
+    {
+        Stop();
+        _batch.Dispose();
+        _signal.Dispose();
+    }
+
+    public override string ToString() =>
+        $"out {_sent} ({_sentBytes / 1024} KiB)  in {_received} ({_receivedBytes / 1024} KiB)  reads {_reads} (+{_emptyReads} empty)"
+        + $"  max batch {_maxBatch}  passed on: confirmed {_confirmed}, unconfirmed {_unconfirmed}, refused {_refused}  unknown {_unknown}"
+        + $"  largest frame out {_largestOut} in {_largestIn}"
+        + (_readErrors.Count > 0 ? $"  read errors {string.Join(",", _readErrors.Select(e => $"{e.Key}x{e.Value}"))}" : "");
 }

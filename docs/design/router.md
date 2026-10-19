@@ -29,7 +29,7 @@ too"*, *"you can co work with codex with the design"*.
 - What a static filter table does with a packet no rule matches is not in the header. Unmeasured; nothing relies on it
   before it is measured.
 
-**Adopted with three changes.**
+**Adopted with three changes, and a fourth from measurement.**
 
 1. **The tunnel stays in the client; only packets cross the pipe.** Codex puts the tunnel in the SYSTEM service and
    hands it the profile's plaintext for one session, amending `game-routing.md` §1. Instead: the client keeps its
@@ -60,6 +60,14 @@ too"*, *"you can co work with codex with the design"*.
    the driver left its adapter in mode `None` with an empty queue, and a guard probing twice a second saw no failure;
    a second handle read the first's tunnel mode and set it to `None`, and the first's packets stopped at once. So the
    supervisor's remedy for a worker that stops draining is to kill it, and its own handle is the second remedy.
+
+4. **Only what Windows sends is taken (measured, gate 2).** Codex puts the adapter in tunnel mode both ways. A reply
+   handed up with `SEND_PACKETS_TO_MSTCP` reached its UDP socket with the receive path not taken, 3 of 3, and taking
+   the send path alone cost 844 ms of CPU against 2,984 ms over the same 16 s of a download's load. The router's
+   replies come out of the tunnel, so the adapter is put in `SentTunnel` only. What that gives up: the design's
+   discarding of late direct packets for a moved flow (§3). They reach Windows unseen — for UDP, the game hears the
+   server on both paths for as long as the server keeps sending to the old address, which mid-game attach measures
+   (gate 6) rather than hides. The receive path comes back only if a measurement shows it is needed.
 
 Everything else is adopted as written, including LocalSystem, the pipe's ACL and peer checks, tunnel mode on send and
 receive, endpoint-independent UDP mappings preserving ports, MSS clamping and ICMP for DF, selected IPv6 blocked, game

@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="Sallyport.Tests" />
     <!-- The probe measures below the public API (raw UDP through the tunnel for STUN): it may build packets as the library does. -->
     <InternalsVisibleTo Include="Sallyport.Probe" />
+    <!-- So may the driver's console, injecting a reply of its own making to measure what reaches a socket. -->
+    <InternalsVisibleTo Include="Sallyport.Driver" />
   </ItemGroup>
 
 </Project>

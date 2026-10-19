@@ -42,6 +42,10 @@ public readonly unsafe struct DriverPacket
 
     public Span<byte> Frame => new(_buffer + FrameOffset, Length);
 
+    /// <summary>The buffer's union as the handle half reads it. After a read it is not the adapter's handle (measured
+    /// 2026-10-20): the request, not the buffer, says which adapter a packet came from.</summary>
+    public ulong Adapter => BinaryPrimitives.ReadUInt64LittleEndian(new ReadOnlySpan<byte>(_buffer, 8));
+
     private uint Read(int offset) => BinaryPrimitives.ReadUInt32LittleEndian(new ReadOnlySpan<byte>(_buffer + offset, 4));
 }
 
@@ -81,6 +85,26 @@ public sealed unsafe class PacketBatch : IDisposable
             ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Capacity, nameof(index));
             return new(_buffers + (nint)Stride * index);
         }
+    }
+
+    /// <summary>Puts a frame of this program's making into buffer <paramref name="index"/>, to be handed to the driver
+    /// with <see cref="PacketDriver.Send"/>: <paramref name="direction"/> says which way it travels.</summary>
+    public void Write(int index, ulong adapter, ReadOnlySpan<byte> frame, PacketDirection direction)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(frame.Length, FrameCapacity, nameof(frame));
+        var buffer = this[index].Address;
+        NativeMemory.Clear(buffer, DriverPacket.FrameOffset);
+        // The request names the adapter, and a read leaves something else in the union (measured 2026-10-20); frames of
+        // this program's making carry the handle there all the same, as they were measured to be delivered.
+        *(ulong*)buffer = adapter;
+        *(uint*)(buffer + DriverPacket.DeviceFlagsOffset) = direction switch
+        {
+            PacketDirection.Send => 1u,
+            PacketDirection.Receive => 2u,
+            _ => 0u,
+        };
+        *(uint*)(buffer + DriverPacket.LengthOffset) = (uint)frame.Length;
+        frame.CopyTo(new Span<byte>(buffer + DriverPacket.FrameOffset, frame.Length));
     }
 
     public void Dispose()

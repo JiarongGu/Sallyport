@@ -33,11 +33,16 @@ NT Kernel's, free for personal use.
      read the first's `SentTunnel, ReceiveTunnel` and set `None`; the first's packets stopped that second, nothing
      broke. The driver answers a read of an empty queue with error 87, and writes no count back for a send (its
      success is the answer); the largest frame either way was 1514.
-  2. Unchanged forwarding — cost (CPU, latency p50/p95/p99, loss) against the direct baseline. ← next
-     Measured in gate 1: 3.0 s of CPU over 15 s at ~12,500 packets/s, 95% of them inbound (a download). Routed replies
-     come out of the tunnel, not off the adapter, so the router may not need the receive path: measure whether
-     `SEND_PACKETS_TO_MSTCP` delivers on an adapter that is not in receive-tunnel mode.
-  3. Attribution: short-lived, reused and shared sockets — owner found, or counted as unattributed.
+  2. **Unchanged forwarding, and the receive path — measured 2026-10-20** (`pass --mode send|both`, `inject`, `rtt`,
+     the guard outside: 0 failed of 142): **a reply handed up with `SEND_PACKETS_TO_MSTCP` reaches its socket with the
+     adapter's receive path not taken** — a UDP socket sent to 192.0.2.1:40000 (TEST-NET-1), the datagram was kept off
+     the network, the reply built from it was delivered, 3 of 3 (twice send-only, once both); Windows' firewall let it
+     in on the socket's own outbound flow, the router's case exactly. So the router takes **only what is sent**: 16 s
+     of a download's load cost 844 ms of CPU send-only against 2,984 ms with both paths (~9,700 packets against
+     ~173,600). Gateway round trips, 500 each, p50/p95/p99: 14.9/50.8/78.2 ms untouched, 9.7/42.8/58.9 both paths,
+     10.8/46.8/59.5 send-only — Wi-Fi's own jitter is larger than anything added; the router times its own processing
+     for a figure.
+  3. Attribution: short-lived, reused and shared sockets — owner found, or counted as unattributed. ← next
   4. One program routed from its first TCP SYN and UDP datagram through the real VPN; another program direct.
   5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
   6. Zenless routed whole; mid-game attach and detach; tunnel loss, driver removal, sleep.

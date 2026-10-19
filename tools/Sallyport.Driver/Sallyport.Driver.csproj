@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
+    <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
   </ItemGroup>
 
 </Project>
