@@ -31,9 +31,12 @@ driver managed by the app.
 3. **No transport reservation at first.** Codex has the client reserve its tunnel's outer endpoint with the service.
    The service refuses to select Sallyport's own programs, so the tunnel's socket is attributed to the client and
    goes direct — measured in the packet-pipe step; the reservation comes back only if that measurement fails.
-4. **The keepalive keeps OpenVPN's precedence.** A value the server pushes outranks the client's; the client's (from
-   the profile or the person) applies when the server pushes none. Codex lets an explicit override outrank the
-   server; a server that pushes a keepalive is the one that will drop an idle client by it.
+4. **The keepalive keeps OpenVPN's precedence, override included.** A value the server pushes outranks the client's;
+   the client's (from the profile or the person) applies when the server pushes none — or over the server's, when the
+   profile or the person says so, as OpenVPN's `pull-filter ignore "ping-restart"` does. First adopted without the
+   override; measured the same night (TASKS item 2, step 2): the server's `ping-restart 50` is 50 s of a game's packets
+   into a dead tunnel before any loss policy can act, and the client's own 15 s noticed the loss in 15.0 s. So Codex's
+   explicit override stands, under OpenVPN's name for it.
 5. **WebView2 is checked, not installed.** Windows 11 carries it; Setup stops with a link where it is missing, rather
    than carrying Microsoft's installer.
 

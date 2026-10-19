@@ -13,6 +13,10 @@ public enum Verdict { Routed, Direct, Unowned, Blocked }
 /// §6). Sent direct, it would leave outside the tunnel; sent into it, it would reach nothing, or the server's network.</summary>
 public enum BlockReason { None, Ipv6, Broadcast, Multicast, LinkLocal, OnLink }
 
+/// <summary>Where a selected program's routed flows go now: into the tunnel through the current generation's NAT, held
+/// (dropped while there is no tunnel — before the first, and while one is lost, as the loss policy says), or direct.</summary>
+public enum SelectedPath { Held, Tunnel, Direct }
+
 public sealed class FlowDecision(Verdict verdict, int pid, BlockReason reason = BlockReason.None)
 {
     public Verdict Verdict { get; internal set; } = verdict;
@@ -28,7 +32,8 @@ public sealed class FlowDecision(Verdict verdict, int pid, BlockReason reason = 
 /// flow's first packet; a selected process's IPv4 TCP and UDP go to the tunnel, NAT'd, its IPv6 and its packets for this
 /// side of the tunnel are blocked, and everything else goes on unchanged. Replies from the tunnel are turned back and
 /// handed up to Windows. The tunnel itself is not here — the caller sends what <c>toTunnel</c> is given and brings back
-/// what the tunnel returns (<see cref="FromTunnel"/>).
+/// what the tunnel returns (<see cref="FromTunnel"/>). Tunnels come and go under it (<see cref="Commit"/>,
+/// <see cref="Retire"/>); the interception and every flow's decision stay, so nothing selected slips out between two.
 /// </summary>
 public sealed class Router : IDisposable
 {
@@ -52,6 +57,9 @@ public sealed class Router : IDisposable
     private readonly OwnerTable _owners = new();
     private readonly Func<int, bool> _selects;
     private readonly Action<byte[]> _toTunnel;
+    private readonly Func<DriverPacket, bool>? _discard;
+    private volatile Nat? _nat;
+    private volatile SelectedPath _path = SelectedPath.Held;
     private readonly (uint Network, uint Mask)[] _onLink;
     private readonly Dictionary<Flow, FlowDecision> _flows = [];
     private readonly Dictionary<Flow6, FlowDecision> _flows6 = [];
@@ -76,26 +84,46 @@ public sealed class Router : IDisposable
 
     /// <param name="onLink">This machine's own networks on the adapter (address and mask, as <see cref="Flow"/> holds
     /// addresses): a selected program's packets to them are blocked, the tunnel having no way back to them.</param>
-    public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Nat nat, Action<byte[]> toTunnel,
-        IEnumerable<(uint Network, uint Mask)>? onLink = null)
+    /// <param name="discard">A measurement's cut: packets it picks are dropped before anything else, both ways when
+    /// <paramref name="receivePath"/> takes what arrives too. Null in use.</param>
+    public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Action<byte[]> toTunnel,
+        IEnumerable<(uint Network, uint Mask)>? onLink = null, Func<DriverPacket, bool>? discard = null, bool receivePath = false)
     {
         _driver = driver;
         _selects = selects;
-        Nat = nat;
         _toTunnel = toTunnel;
+        _discard = discard;
         _onLink = [.. onLink ?? []];
         _owners.Refresh();
         _lastRefresh = _lastRecheck = Stopwatch.GetTimestamp();
-        _interception = new Interception(driver, adapter, 64, receivePath: false);
+        _interception = new Interception(driver, adapter, 64, receivePath);
     }
 
-    public Nat Nat { get; }
+    /// <summary>The current generation's NAT; null while there is no tunnel.</summary>
+    public Nat? Nat => _nat;
+
+    public SelectedPath Path => _path;
+
+    /// <summary>A new tunnel's NAT: routed flows go into it from their next packet. Mappings start afresh — the tunnel's
+    /// address may have changed, and the server forgot the old ones.</summary>
+    public void Commit(Nat nat)
+    {
+        _nat = nat;
+        _path = SelectedPath.Tunnel;
+    }
+
+    /// <summary>The tunnel has gone: routed flows are held until the next, or sent direct.</summary>
+    public void Retire(bool direct)
+    {
+        _path = direct ? SelectedPath.Direct : SelectedPath.Held;
+        _nat = null;
+    }
 
     /// <summary>What becomes of a routed packet too big for the tunnel in one piece and free to be split: sent whole
     /// (false), so Windows splits the outer datagram and the server puts it back together, or split here (true). Whole:
     /// the far end then receives the datagram as it was sent. Split, it receives pieces, and Google's STUN server, which
     /// answers a whole 1500-byte request, answered neither of two split ones (measured, gate 5).</summary>
-    public bool SplitOversized { get; init; }
+    public bool SplitOversized { get; set; }
 
     public Interception Interception => _interception;
     public OwnerTable Owners => _owners;
@@ -110,6 +138,13 @@ public sealed class Router : IDisposable
     public long LateFlows { get; private set; }
     public long LatePackets { get; private set; }
     public long HandedUp { get; private set; }
+    /// <summary>Selected packets dropped while held, and passed on while direct: no tunnel to take them.</summary>
+    public long HeldWhileDown { get; private set; }
+    public long DirectWhileDown { get; private set; }
+    /// <summary>Packets the tunnel returned with no generation to take them (between two tunnels).</summary>
+    public long NoTunnel { get; private set; }
+    /// <summary>Packets a measurement's cut dropped.</summary>
+    public long Discarded { get; private set; }
     public long HandUpRefused { get; private set; }
     public long RoutedFlows { get; private set; }
     public long RoutedTcpFlows { get; private set; }
@@ -174,7 +209,12 @@ public sealed class Router : IDisposable
     /// <summary>A packet the tunnel returned: turned back and handed up, or refused and counted.</summary>
     public void FromTunnel(byte[] packet)
     {
-        var refusal = Nat.Inbound(packet, out var mapping);
+        if (_nat is not { } nat)
+        {
+            NoTunnel++;
+            return;
+        }
+        var refusal = nat.Inbound(packet, out var mapping);
         lock (_injectLock)
         {
             if (refusal == InboundRefusal.PieceAhead)
@@ -212,6 +252,11 @@ public sealed class Router : IDisposable
 
     private bool Decide(DriverPacket packet)
     {
+        if (_discard?.Invoke(packet) == true)
+        {
+            Discarded++;
+            return true;
+        }
         if (packet.Direction != PacketDirection.Send) return false;
         var frame = packet.Frame;
         return Frames.TryReadOutbound(frame, out var flow) switch
@@ -236,20 +281,23 @@ public sealed class Router : IDisposable
             case Verdict.Blocked: Block(decision.Reason, frame[..link], ip, flow.Protocol == Flow.Tcp ? (ip[0] & 0x0F) * 4 : -1); return true;
         }
 
+        if (WhileDown() is { } passed) return passed;
+        var nat = _nat;
+        if (nat is null) { HeldWhileDown++; return true; }
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
         // A frame shorter than the packet it says it holds — a segmentation offload's, which none measured was (gate 5).
         if (total > ip.Length) { HeldBack++; return true; }
-        if (total > Nat.Mtu && (ip[6] & 0x40) != 0)
+        if (total > nat.Mtu && (ip[6] & 0x40) != 0)
         {
             // Don't-fragment, and too big for the tunnel: the program is told so, as a router on its path would tell it.
-            if (HandUp(frame[..link], Replies.FragmentationNeeded(ip, Nat.Mtu))) TooBig++;
+            if (HandUp(frame[..link], Replies.FragmentationNeeded(ip, nat.Mtu))) TooBig++;
             return true;
         }
         // The frame may be padded past the packet to Ethernet's 60-byte minimum.
         var copy = ip[..total].ToArray();
-        if (Nat.Outbound(copy, frame[..link]) is null) { HeldBack++; return true; }
+        if (nat.Outbound(copy, frame[..link]) is null) { HeldBack++; return true; }
         Asked(flow, ip);
-        ToTunnel(copy);
+        ToTunnel(copy, nat.Mtu);
         return true;
     }
 
@@ -292,12 +340,15 @@ public sealed class Router : IDisposable
             case Verdict.Unowned: UnownedPackets++; return false;
             case Verdict.Blocked: Block(set.Decision.Reason, frame[..link], ip, tcpAt: -1); return true;
         }
+        if (WhileDown() is { } passed) return passed;
+        var nat = _nat;
+        if (nat is null) { HeldWhileDown++; return true; }
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
         if (total > ip.Length) { HeldBack++; return true; }
         var copy = ip[..total].ToArray();
-        Nat.OutboundPiece(copy);
+        nat.OutboundPiece(copy);
         PiecesRouted++;
-        ToTunnel(copy);
+        ToTunnel(copy, nat.Mtu);
         return true;
     }
 
@@ -349,20 +400,31 @@ public sealed class Router : IDisposable
         return decision;
     }
 
-    // A packet routed, split first if it is too big for the tunnel in one piece: split here, the outer datagram is not.
-    private void ToTunnel(byte[] packet)
+    // A routed packet with no tunnel to take it: true, dropped (held); false, passed on direct; null, there is a tunnel.
+    private bool? WhileDown()
     {
-        if (packet.Length > Nat.Mtu && (packet[0] & 0x0F) != 5) { HeldBack++; return; }
+        switch (_path)
+        {
+            case SelectedPath.Held: HeldWhileDown++; return true;
+            case SelectedPath.Direct: DirectWhileDown++; return false;
+            default: return null;
+        }
+    }
+
+    // A packet routed, split first if it is too big for the tunnel in one piece and the policy splits.
+    private void ToTunnel(byte[] packet, int mtu)
+    {
+        if (packet.Length > mtu && SplitOversized && (packet[0] & 0x0F) != 5) { HeldBack++; return; }
         RoutedPackets++;
         if (packet.Length > LargestRouted) LargestRouted = packet.Length;
-        if (packet.Length <= Nat.Mtu || !SplitOversized)
+        if (packet.Length <= mtu || !SplitOversized)
         {
-            if (packet.Length > Nat.Mtu) OversizedWhole++;
+            if (packet.Length > mtu) OversizedWhole++;
             _toTunnel(packet);
             return;
         }
         SplitPackets++;
-        foreach (var piece in Replies.Split(packet, Nat.Mtu)) _toTunnel(piece);
+        foreach (var piece in Replies.Split(packet, mtu)) _toTunnel(piece);
     }
 
     // A blocked packet is dropped; a connection it opens is refused at once (a reset), so the program goes on to another
@@ -479,7 +541,7 @@ public sealed class Router : IDisposable
             foreach (var key in _synSent.Where(s => s.Value < stale).Select(s => s.Key).ToList()) _synSent.Remove(key);
             foreach (var key in _udpWaiting.Where(s => s.Value < stale).Select(s => s.Key).ToList()) _udpWaiting.Remove(key);
         }
-        ExpiredMappings += Nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));
+        if (_nat is { } nat) ExpiredMappings += nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));
     }
 
     private void HoldAhead(byte[] packet)
@@ -502,7 +564,7 @@ public sealed class Router : IDisposable
         foreach (var held in _ahead.Where(a => a.Source == source && a.Protocol == first[9] && a.Id == id).ToList())
         {
             _ahead.Remove(held);
-            if (Nat.Inbound(held.Packet, out var mapping) == InboundRefusal.None && Inject(Nat.Frame(mapping!, held.Packet))) HandedUp++;
+            if (_nat?.Inbound(held.Packet, out var mapping) == InboundRefusal.None && Inject(Nat.Frame(mapping!, held.Packet))) HandedUp++;
             else PiecesAheadLost++;
         }
     }

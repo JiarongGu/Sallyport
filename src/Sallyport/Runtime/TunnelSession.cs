@@ -72,6 +72,9 @@ public sealed class TunnelSession : IAsyncDisposable
     /// <summary>Raised when a generation's tunnel has gone and its consumer is disposed, with why it went.</summary>
     public event Action<int, string?>? TunnelDown;
 
+    /// <summary>Raised when a consumer threw as it was disposed; the session goes on.</summary>
+    public event Action<Exception>? ConsumerFailed;
+
     public SessionStatus Status
     {
         get
@@ -104,7 +107,7 @@ public sealed class TunnelSession : IAsyncDisposable
             return;
         }
         var connect = _options.Connect ?? ((remote, timeout, token) => Tunnel.ConnectAsync(_profile, remote, timeout,
-            _options.Tunnel with { Ping = _policy.Ping, PingRestart = _policy.PingRestart }, ct: token));
+            _options.Tunnel with { Ping = _policy.Ping, PingRestart = _policy.PingRestart, KeepaliveOverridesServer = _policy.KeepaliveOverridesServer }, ct: token));
         var attempts = 0;
         var reconnects = 0;
         var failedRounds = 0;
@@ -204,7 +207,10 @@ public sealed class TunnelSession : IAsyncDisposable
         var tunnel = _tunnel;
         _network = null;
         _consumer = null;
-        if (consumer is not null) await consumer.DisposeAsync();
+        // A consumer's failure to let go ends that consumer, not the session: the tunnel still goes, and the next comes.
+        if (consumer is not null)
+            try { await consumer.DisposeAsync(); }
+            catch (Exception e) { ConsumerFailed?.Invoke(e); }
         if (tunnel is null) return;
         await tunnel.DisposeAsync();
         // Detached before its bytes join the totals, so a status read in between counts them at most once.

@@ -86,6 +86,10 @@ public sealed class OvpnProfile
                     break;
                 case "ping" when parts.Length >= 2 && int.TryParse(parts[1], out var ping) && ping > 0: policy = policy with { Ping = ping }; break;
                 case "ping-restart" when parts.Length >= 2 && int.TryParse(parts[1], out var restart) && restart > 0: policy = policy with { PingRestart = restart }; break;
+                case "pull-filter" when parts.Length >= 3 && parts[1].Equals("ignore", StringComparison.OrdinalIgnoreCase)
+                                        && parts[2].Trim('"') is "ping" or "ping-restart" or "keepalive":
+                    policy = policy with { KeepaliveOverridesServer = true };
+                    break;
                 case "keepalive" when parts.Length >= 3 && int.TryParse(parts[1], out var every) && int.TryParse(parts[2], out var dead) && every > 0 && dead > 0:
                     policy = policy with { Ping = every, PingRestart = dead };
                     break;

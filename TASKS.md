@@ -125,15 +125,32 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
      fifth failed round and 8.2 s after the sixth — the manual's doubling after five; **up again 14.3 s after the cut
      was freed**, as generation 2 (that 8 s wait, then the dead remote's 5 s). **An authentication refusal could not be
      checked against the server**, which refuses nobody; the session ends on one in tests (`FakeServer`).
-2. **Consumer generations:** a game route's packet consumer on a session; the tunnel dropped and reopened → one reader
-   for each tunnel, nothing of the old generation handed on. ← next
+2. **Consumer generations — measured 2026-10-20, with step 5's router, in one process** (`Sallyport.Windows.Routing`:
+   `GameRoute` over a `Router` whose selected traffic goes into the current generation's NAT, is held, or goes direct;
+   `Sallyport.Driver route --workload steady`: a selected child asks Google's STUN server every 500 ms and says which
+   address it was seen at; 25 s in, the server's address dropped at the adapter both ways for 80 s, inside the router's
+   own interception; guard 0 failed). Each tunnel's pump commits its generation and retires it when the session lets
+   the tunnel go; one reader each; nothing stale handed up in any run. **Every reconnect brought a new tunnel address**
+   (…111 → …112, …113 → …114, …116 → …117), and the child was seen at the VPN's again within 2 s of it.
+   - **Hold:** no answer from the cut until generation 2 (61 packets held); up 1.2 s after the cut was freed.
+   - **Direct:** from the moment the loss was noticed the far end saw the home address (61 packets direct); the VPN's
+     again 1.3 s after the cut was freed.
+   - **Stop:** the home address from the moment the loss was noticed; no reconnect.
+   - **Hold, direct after 15 s, and the client's own `ping-restart 15` over the server's** (`pull-filter ignore`):
+     the loss noticed 15.0 s after the cut, held 15 s, then the home address; the VPN's 4.3 s after the cut was freed.
+   - **What a loss costs before any policy acts: the ping-restart in force** — the server pushes 50 s, so for 50 s the
+     game's packets go into a dead tunnel. The person can set a shorter one of their own (OpenVPN's `pull-filter
+     ignore "ping-restart"`, read from the profile too); `docs/design/product.md` change 4 keeps OpenVPN's precedence
+     with that override, Codex's own proposal in the end.
+   - Found and fixed on the way: a tunnel's packets end with the error that ended it, which escaped a pump's dispose
+     and took the session down; a consumer that throws as it goes now ends itself, not the session (`ConsumerFailed`).
 3. **The service skeleton:** `apps/Sallyport.Service` — the SCM host, a supervisor and a worker in a job object, the
    guard (D13), the session's pipe and its DACL. Authorized, unauthorized, stale and malformed clients; the worker and
-   the supervisor killed or hung → refused, or cleaned up in bounded time with every adapter direct.
+   the supervisor killed or hung → refused, or cleaned up in bounded time with every adapter direct. ← next
 4. **The packet pipe:** gate 4's selected workload through the service beside a direct control, and under load →
    exits and replies right, the pipe's cost measured, the tunnel's own socket direct.
-5. **The router across generations:** the tunnel dropped under Hold, Direct and Stop, and back with the same and with
-   a changed address → held, direct or stopped as chosen; fresh mappings; nothing stale injected.
+5. **The router across generations, through the service:** step 2's measurements again with the pipe between the
+   tunnel and the router (in one process they hold, above).
 6. **Adapters:** Wi-Fi and Ethernet both up, a handover, sleep, the driver removed → what the packets did, every gap
    said, the machine back on its own.
 7. **Zenless through the service:** Run from launch, attach and detach, a real drop under each policy, sleep → the

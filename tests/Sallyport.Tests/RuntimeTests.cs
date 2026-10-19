@@ -314,6 +314,36 @@ public class TunnelSessionTests
         Assert.Null(session.Network);
     }
 
+    [Fact]
+    public async Task AConsumerThatThrowsAsItGoesDoesNotEndTheSession()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key));
+        var restart = new TaskCompletionSource();
+        await using var farm = new ServerFarm(pki, key) { ServerFor = n => n == 1 ? new FakeServer { RestartWhen = restart } : new FakeServer() };
+        await using var session = new TunnelSession(profile, farm.Options(profile, consumer: (_, generation) => new Throwing(generation)));
+        var failures = new List<Exception>();
+        session.ConsumerFailed += e => { lock (failures) failures.Add(e); };
+        var log = new StatusLog();
+        session.StatusChanged += log.Add;
+        using var stop = new CancellationTokenSource();
+        var running = session.RunAsync(stop.Token);
+        await log.WaitAsync(s => s.State == SessionState.Up);
+        restart.SetResult();
+        await log.WaitAsync(s => s.State == SessionState.Up, count: 2);
+        await stop.CancelAsync();
+        await running;
+
+        Assert.Equal(2, failures.Count);
+        Assert.Equal(SessionState.Stopped, session.Status.State);
+    }
+
+    private sealed class Throwing(int generation) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.FromException(new InvalidOperationException($"generation {generation} would not let go"));
+    }
+
     private sealed class Consumer(int generation) : IAsyncDisposable
     {
         public int Generation { get; } = generation;
@@ -331,7 +361,7 @@ public class TunnelSessionTests
     {
         var policy = OvpnProfile.Parse(string.Join("\n",
             "client", "remote vpn.example.test 1194 udp", "connect-retry 5 120", "connect-retry-max 8", "remote-random",
-            "server-poll-timeout 12", "auth-retry nointeract", "keepalive 15 90", "persist-tun"));
+            "server-poll-timeout 12", "auth-retry nointeract", "keepalive 15 90", "persist-tun", "pull-filter ignore \"ping-restart\""));
 
         Assert.Equal(TimeSpan.FromSeconds(5), policy.Policy.RetryWait);
         Assert.Equal(TimeSpan.FromSeconds(120), policy.Policy.RetryWaitMax);
@@ -341,6 +371,7 @@ public class TunnelSessionTests
         Assert.True(policy.Policy.RetryAfterAuthFailure);
         Assert.Equal((15, 90), (policy.Policy.Ping, policy.Policy.PingRestart));
         Assert.True(policy.PersistTun);
+        Assert.True(policy.Policy.KeepaliveOverridesServer);
 
         var plain = OvpnProfile.Parse("remote vpn.example.test 1194 udp\nauth-retry none\n").Policy;
         Assert.Equal(new ConnectionPolicy(), plain);

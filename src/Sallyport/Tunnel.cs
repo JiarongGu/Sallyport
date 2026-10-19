@@ -33,9 +33,11 @@ public sealed record TunnelOptions
     /// <see cref="TunnelCounters.OppositeDirection"/> says when it is wrong.</summary>
     public int DataSendHalf { get; init; }
     /// <summary>The keepalive when the server pushes none (<see cref="ConnectionPolicy.Ping"/>,
-    /// <see cref="ConnectionPolicy.PingRestart"/>): a pushed value outranks the client's, as in OpenVPN.</summary>
+    /// <see cref="ConnectionPolicy.PingRestart"/>): a pushed value outranks the client's, as in OpenVPN, unless
+    /// <see cref="KeepaliveOverridesServer"/> (its <c>pull-filter ignore</c>).</summary>
     public int? Ping { get; init; }
     public int? PingRestart { get; init; }
+    public bool KeepaliveOverridesServer { get; init; }
 }
 
 /// <summary>
@@ -238,8 +240,9 @@ public sealed class Tunnel : IAsyncDisposable
                 Config = config,
                 ConnectTime = clock.Elapsed,
             };
-            tunnel._ping = config.Ping > 0 ? config.Ping : options.Ping ?? 0;
-            tunnel._pingRestart = config.PingRestart > 0 ? config.PingRestart : options.PingRestart ?? 0;
+            var ownKeepalive = options.KeepaliveOverridesServer;
+            tunnel._ping = ownKeepalive && options.Ping is { } ping ? ping : config.Ping > 0 ? config.Ping : options.Ping ?? 0;
+            tunnel._pingRestart = ownKeepalive && options.PingRestart is { } restart ? restart : config.PingRestart > 0 ? config.PingRestart : options.PingRestart ?? 0;
             tunnel.Start();
             log?.Invoke($"data channel ready: {cipher}, peer-id {peerId}");
             return tunnel;

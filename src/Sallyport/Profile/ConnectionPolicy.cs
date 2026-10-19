@@ -40,6 +40,11 @@ public sealed record ConnectionPolicy
     /// transport fails, which a UDP socket never does.</summary>
     public int? PingRestart { get; init; } = 60;
 
+    /// <summary><c>pull-filter ignore "ping"</c> / <c>"ping-restart"</c>: this side's keepalive outranks the server's.
+    /// A server's ping-restart is how long a game's packets go into a dead tunnel before anything can act on it (50 s
+    /// from the JP server, measured); a shorter one of the client's own notices sooner.</summary>
+    public bool KeepaliveOverridesServer { get; init; }
+
     /// <summary>The wait before the round after <paramref name="failedRounds"/> rounds in a row connected nowhere, before
     /// <see cref="Jitter"/>.</summary>
     public TimeSpan WaitAfter(int failedRounds)
