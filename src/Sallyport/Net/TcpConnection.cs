@@ -46,12 +46,16 @@ internal sealed class TcpConnection : Stream, IHalfClosable
     private readonly IPAddress _local;
     private readonly ByteRing _send = new(SendCapacity), _receive = new(ReceiveCapacity);
     private readonly SortedDictionary<uint, (byte[] Data, bool Fin)> _early = new(SeqComparer.Instance);
+    /// <summary>What <see cref="_early"/> holds, as contiguous ranges in sequence order, kept as segments arrive. Every
+    /// early segment is answered at once with SACK blocks; built from the segments each time, one hole in a 4 MB window
+    /// cost 3000 answers × 3000 segments, and the reader fell behind the tunnel and dropped packets of its own.</summary>
+    private readonly List<(uint Left, uint Right)> _held = [];
     private readonly TaskCompletionSource _connected = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly byte[] _segment = new byte[OurMss];
     private TaskCompletionSource? _readable, _writable;
     private State _state;
     private SocketException? _error;
-    private bool _aborted, _disposed, _ackPending;
+    private bool _aborted, _disposed, _ackPending, _readablePending;
 
     private uint _iss, _sndUna, _sndNxt, _rcvNxt;
     private int _sndWnd, _sendMss = 536, _cwnd, _ssthresh = int.MaxValue, _dupAcks, _advertised;
@@ -122,13 +126,20 @@ internal sealed class TcpConnection : Stream, IHalfClosable
         }
     }
 
-    /// <summary>Sends the ACK owed for what arrived. Called once the tunnel's queue is drained, so a burst of segments
-    /// is acknowledged by one ACK rather than one each.</summary>
+    /// <summary>Sends the ACK owed for what arrived, and wakes a reader waiting for it. Called once the tunnel's queue
+    /// is drained, so a burst of segments is acknowledged by one ACK rather than one each — and hands the application
+    /// one wake-up: waking it per segment queued a continuation per packet, and the woken reader then fought the
+    /// network's reader for this connection's lock while the burst was still arriving.</summary>
     public void FlushAck()
     {
         lock (_gate)
         {
             if (_ackPending && !_aborted && _state is State.Established or State.Closed) Emit(_sndNxt, TcpFlags.Ack, []);
+            if (_readablePending)
+            {
+                _readablePending = false;
+                Signal(ref _readable);
+            }
         }
     }
 
@@ -281,13 +292,17 @@ internal sealed class TcpConnection : Stream, IHalfClosable
             Accept(data, fin);
             DrainEarly();
             _ackPending = true;
-            Signal(ref _readable);
+            _readablePending = true;
             return;
         }
         // Past a gap: kept if it fits the window, and acknowledged at once, so the repeated ACK tells the peer what is missing.
         var offset = (int)(seq - _rcvNxt);
         SegmentsOutOfOrder++;
-        if (offset + data.Length <= _receive.Free && !_early.ContainsKey(seq)) _early[seq] = (data.ToArray(), fin);
+        if (offset + data.Length <= _receive.Free && !_early.ContainsKey(seq))
+        {
+            _early[seq] = (data.ToArray(), fin);
+            if (data.Length > 0) Hold(seq, seq + (uint)data.Length);
+        }
         _lastEarly = seq;
         Emit(_sndNxt, TcpFlags.Ack, []);
     }
@@ -316,7 +331,35 @@ internal sealed class TcpConnection : Stream, IHalfClosable
             if (skip > data.Length || skip == data.Length && !fin) continue;
             Accept(data.AsSpan(skip), fin);
         }
-        if (_peerFin) _early.Clear();
+        if (_peerFin)
+        {
+            _early.Clear();
+            _held.Clear();
+            return;
+        }
+        while (_held.Count > 0 && Seq.Le(_held[0].Right, _rcvNxt)) _held.RemoveAt(0);
+        if (_held.Count > 0 && Seq.Lt(_held[0].Left, _rcvNxt)) _held[0] = (_rcvNxt, _held[0].Right);
+    }
+
+    /// <summary>Adds [left, right) to <see cref="_held"/>, joining every range it touches.</summary>
+    private void Hold(uint left, uint right)
+    {
+        // Past a hole, segments mostly arrive in order, so the place is looked for from the end.
+        var at = _held.Count;
+        while (at > 0 && Seq.Gt(_held[at - 1].Left, left)) at--;
+        if (at > 0 && Seq.Ge(_held[at - 1].Right, left))
+        {
+            at--;
+            left = _held[at].Left;
+            if (Seq.Gt(_held[at].Right, right)) right = _held[at].Right;
+            _held.RemoveAt(at);
+        }
+        while (at < _held.Count && Seq.Le(_held[at].Left, right))
+        {
+            if (Seq.Gt(_held[at].Right, right)) right = _held[at].Right;
+            _held.RemoveAt(at);
+        }
+        _held.Insert(at, (left, right));
     }
 
     /// <summary>Sends what the windows allow, then the FIN once everything written has been sent.</summary>
@@ -436,21 +479,12 @@ internal sealed class TcpConnection : Stream, IHalfClosable
     /// arrival first, so the peer can resend only the holes rather than everything after the first one.</summary>
     private (uint Left, uint Right)[] SackBlocks()
     {
-        var ranges = new List<(uint Left, uint Right)>();
-        foreach (var (seq, (data, _)) in _early)
-        {
-            if (data.Length == 0) continue;
-            var right = seq + (uint)data.Length;
-            if (ranges.Count > 0 && Seq.Le(seq, ranges[^1].Right))
-            {
-                if (Seq.Gt(right, ranges[^1].Right)) ranges[^1] = (ranges[^1].Left, right);
-            }
-            else ranges.Add((seq, right));
-        }
-        var latest = ranges.FindIndex(r => Seq.Ge(_lastEarly, r.Left) && Seq.Lt(_lastEarly, r.Right));
+        var latest = -1;
+        for (var i = _held.Count - 1; i >= 0 && latest < 0; i--)
+            if (Seq.Ge(_lastEarly, _held[i].Left) && Seq.Lt(_lastEarly, _held[i].Right)) latest = i;
         var ordered = new List<(uint, uint)>(Tcp.MaxSackBlocks);
-        if (latest >= 0) ordered.Add(ranges[latest]);
-        for (var i = ranges.Count - 1; i >= 0 && ordered.Count < Tcp.MaxSackBlocks; i--) if (i != latest) ordered.Add(ranges[i]);
+        if (latest >= 0) ordered.Add(_held[latest]);
+        for (var i = _held.Count - 1; i >= 0 && ordered.Count < Tcp.MaxSackBlocks; i--) if (i != latest) ordered.Add(_held[i]);
         return [.. ordered];
     }
 
@@ -468,7 +502,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
         _advertised = Advertisable(syn);
         var field = syn || !_scaling ? _advertised : _advertised >> OurScale;
         var ack = (flags & TcpFlags.Ack) != 0 ? _rcvNxt : 0;
-        var sack = (flags & TcpFlags.Ack) != 0 && _sackOk && _early.Count > 0 ? SackBlocks() : [];
+        var sack = (flags & TcpFlags.Ack) != 0 && _sackOk && _held.Count > 0 ? SackBlocks() : [];
         _sink.Send(Tcp.Build(_local, Remote, _sink.NextIpId(), LocalPort, RemotePort, seq, ack, flags, (ushort)field, payload,
             syn ? OurMss : null, syn ? OurScale : null, sackPermitted: syn, sack));
         if ((flags & TcpFlags.Ack) != 0) _ackPending = false;

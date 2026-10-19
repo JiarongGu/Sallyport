@@ -698,6 +698,83 @@ public class TcpReceiveTests
     }
 
     [Fact]
+    public async Task AnEarlySegmentResentWithOtherBoundariesWidensItsBlockRatherThanAddingOne()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+        var stream = TcpRig.Bytes(2500);
+        rig.Data(rig.RcvBase + 1000, stream[1000..2000]);
+        rig.Sink.Drain();
+
+        // The peer resegmented: [1500, 2500) overlaps what is held.
+        rig.Data(rig.RcvBase + 1500, stream[1500..]);
+
+        Assert.Equal([(rig.RcvBase + 1000, rig.RcvBase + 2500)], Assert.Single(rig.Sink.Drain()).Sack);
+        rig.Data(rig.RcvBase, stream[..1000]);
+        Assert.Equal(stream, await rig.Read(2500));
+    }
+
+    [Fact]
+    public void AnEarlySegmentSpanningSeveralHeldRangesJoinsThemAll()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+        rig.Data(rig.RcvBase + 1000, TcpRig.Bytes(500));
+        rig.Data(rig.RcvBase + 2000, TcpRig.Bytes(500));
+        rig.Data(rig.RcvBase + 3000, TcpRig.Bytes(500));
+        rig.Sink.Drain();
+
+        rig.Data(rig.RcvBase + 1200, TcpRig.Bytes(2500));
+
+        Assert.Equal([(rig.RcvBase + 1000, rig.RcvBase + 3700)], Assert.Single(rig.Sink.Drain()).Sack);
+    }
+
+    [Fact]
+    public async Task FillingTheFirstOfTwoHolesLeavesOnlyTheRangePastTheSecondInTheSackBlocks()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+        var stream = TcpRig.Bytes(4000);
+        rig.Data(rig.RcvBase + 1000, stream[1000..2000]);
+        rig.Data(rig.RcvBase + 3000, stream[3000..]);
+        rig.Sink.Drain();
+
+        rig.Data(rig.RcvBase, stream[..1000]);
+        rig.Conn.FlushAck();
+
+        var ack = Assert.Single(rig.Sink.Drain());
+        Assert.Equal(rig.RcvBase + 2000, ack.Seg.Ack);
+        Assert.Equal([(rig.RcvBase + 3000, rig.RcvBase + 4000)], ack.Sack);
+
+        rig.Data(rig.RcvBase + 2000, stream[2000..3000]);
+        rig.Conn.FlushAck();
+        var last = Assert.Single(rig.Sink.Drain());
+        Assert.Equal(rig.RcvBase + 4000, last.Seg.Ack);
+        Assert.Empty(last.Sack);
+        Assert.Equal(stream, await rig.Read(4000));
+    }
+
+    [Fact]
+    public async Task AFinHeldPastAHoleEndsTheStreamOnceTheHoleFillsAndNothingIsSackedAfter()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+        var stream = TcpRig.Bytes(2000);
+        rig.Data(rig.RcvBase + 1000, stream[1000..], flags: TcpFlags.Ack | TcpFlags.Fin);
+        Assert.Equal([(rig.RcvBase + 1000, rig.RcvBase + 2000)], Assert.Single(rig.Sink.Drain()).Sack);
+
+        rig.Data(rig.RcvBase, stream[..1000]);
+        rig.Conn.FlushAck();
+
+        var ack = Assert.Single(rig.Sink.Drain());
+        // The FIN takes a sequence number of its own.
+        Assert.Equal(rig.RcvBase + 2001, ack.Seg.Ack);
+        Assert.Empty(ack.Sack);
+        Assert.Equal(stream, await rig.Read(2000));
+        Assert.Equal(0, await rig.ReadOnce());
+    }
+
+    [Fact]
     public void NoSackBlocksAreSentWhenThePeerDidNotOfferSack()
     {
         var rig = new TcpRig();
