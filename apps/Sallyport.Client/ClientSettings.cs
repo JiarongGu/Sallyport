@@ -46,8 +46,9 @@ internal sealed record PolicyOverride(
 }
 
 /// <summary>
-/// What the client remembers besides the profiles themselves: each profile's SOCKS port and the routed applications.
-/// One JSON file, rewritten whole.
+/// What the client remembers besides the profiles and the apps: each profile's SOCKS port and connection settings. One
+/// JSON file, rewritten whole. The apps and games an earlier client kept here are read once, into
+/// <see cref="RoutedItemStore"/>, and left as they were.
 /// </summary>
 internal sealed class ClientSettings
 {
@@ -119,26 +120,11 @@ internal sealed class ClientSettings
         }
     }
 
-    public GameChoice ChoiceFor(string gameId)
+    /// <summary>Each game's profile and loss policy as an earlier client kept them, for <see cref="RoutedItemStore"/>'s
+    /// migration; never written since.</summary>
+    public IReadOnlyDictionary<string, GameChoice> LegacyChoices
     {
-        lock (_gate) return _saved.Games.GetValueOrDefault(gameId) ?? new GameChoice(null, LossMode.Hold, null);
-    }
-
-    public void PutChoice(string gameId, GameChoice choice)
-    {
-        lock (_gate)
-        {
-            _saved.Games[gameId] = choice;
-            Save();
-        }
-    }
-
-    public void ForgetGame(string gameId)
-    {
-        lock (_gate)
-        {
-            if (_saved.Games.Remove(gameId)) Save();
-        }
+        get { lock (_gate) return new Dictionary<string, GameChoice>(_saved.Games); }
     }
 
     public PolicyOverride PolicyOf(string profileId)
@@ -156,35 +142,11 @@ internal sealed class ClientSettings
         }
     }
 
+    /// <summary>The proxy apps as an earlier client kept them, for <see cref="RoutedItemStore"/>'s migration; never
+    /// written since.</summary>
     public IReadOnlyList<RoutedApp> Apps
     {
         get { lock (_gate) return [.. _saved.Apps]; }
-    }
-
-    public RoutedApp? FindApp(string id)
-    {
-        lock (_gate) return _saved.Apps.FirstOrDefault(a => a.Id == id);
-    }
-
-    public void PutApp(RoutedApp app)
-    {
-        lock (_gate)
-        {
-            var at = _saved.Apps.FindIndex(a => a.Id == app.Id);
-            if (at < 0) _saved.Apps.Add(app);
-            else _saved.Apps[at] = app;
-            Save();
-        }
-    }
-
-    public bool RemoveApp(string id)
-    {
-        lock (_gate)
-        {
-            if (_saved.Apps.RemoveAll(a => a.Id == id) == 0) return false;
-            Save();
-            return true;
-        }
     }
 
     /// <summary>Whether a loopback listener could take <paramref name="port"/> now. Not a reservation: something can

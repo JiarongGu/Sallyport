@@ -209,8 +209,12 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       channel connected with Zenless as its selection; Stop routing there → the service's run ended ("stopped by the
       client"), the adapter `None -> None`, 0 queued. Could not be checked through UI Automation: the tray's Open
       Network and Settings items (the tray's menu is not reached from it).
-   2. **One store:** `RoutedItemStore` — an app is a program or a folder, each program with its methods — migrated from
-      games, game choices and proxy apps, IDs kept, read back before it counts.
+   2. **One store — measured 2026-10-20** (`apps/Sallyport.Client/RoutedItems.cs`): an app is a program or a folder,
+      each program with an id, its inclusion and who chose it, and its methods (packets; proxy at launch with its own
+      browser folder); one versioned `library\apps.json`, written beside and moved in, the migration read back before
+      it counts; the earlier games folder and settings left as they were. On the installed client the first start
+      migrated the owner's Zenless (its 8 programs, their choices and reasons, jp, hold) — the window showed it as
+      before; a program included from the window was still included after a restart, and left out again.
    3. **One reader per tunnel:** a dispatcher, the port split (proxy 40960–49151, the router's NAT the rest), pieces to
       the router; measured with packet TCP/UDP and proxy TCP/DNS through one login at once.
    4. **`ChannelManager`:** one channel per profile, shared by proxy and packet routing; the "one profile serves a game

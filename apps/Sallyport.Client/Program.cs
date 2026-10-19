@@ -31,7 +31,21 @@ internal static class Program
         builder.Services.AddSingleton(sp => new ProfileStore(sp.GetRequiredService<ShenoraPaths>().DataArea("profiles"), new DpapiProtector()));
         builder.Services.AddSingleton(sp => new ClientSettings(Path.Combine(sp.GetRequiredService<ShenoraPaths>().DataArea("config"), "client.json")));
         builder.Services.AddSingleton<Connections>();
-        builder.Services.AddSingleton(sp => new GameProfileStore(sp.GetRequiredService<ShenoraPaths>().DataArea("games")));
+        builder.Services.AddSingleton(sp =>
+        {
+            var paths = sp.GetRequiredService<ShenoraPaths>();
+            var settings = sp.GetRequiredService<ClientSettings>();
+            // The earlier stores, read only if the apps have never been migrated: a game per file, and the choices and
+            // proxy apps in the client's settings.
+            return new RoutedItemStore(paths.DataArea("library"), () =>
+            {
+                var folder = Path.Combine(paths.DataDir, "games");
+                if (!Directory.Exists(folder)) return ([], 0, settings.LegacyChoices, settings.Apps);
+                var games = new GameProfileStore(folder).List();
+                var files = Directory.EnumerateFiles(folder, "*.json").Count();
+                return (games, files - games.Count, settings.LegacyChoices, settings.Apps);
+            });
+        });
         builder.Services.AddSingleton<GameRunner>();
         builder.Services.AddSingleton<ClientCore>();
 

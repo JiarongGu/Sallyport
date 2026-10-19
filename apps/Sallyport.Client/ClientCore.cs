@@ -37,7 +37,7 @@ internal sealed class ClientCore
     private readonly ProfileStore _store;
     private readonly ClientSettings _settings;
     private readonly Connections _connections;
-    private readonly GameProfileStore _games;
+    private readonly RoutedItemStore _items;
     private readonly GameRunner _runner;
     private readonly PacketFilterSetup _driverSetup;
     private readonly ShenoraPaths _paths;
@@ -74,13 +74,13 @@ internal sealed class ClientCore
     /// <summary>Raised with every notice, so the tray can say it while the window is hidden.</summary>
     public event Action<Notice>? Noticed;
 
-    public ClientCore(ProfileStore store, ClientSettings settings, Connections connections, GameProfileStore games, GameRunner runner,
+    public ClientCore(ProfileStore store, ClientSettings settings, Connections connections, RoutedItemStore items, GameRunner runner,
         ShenoraPaths paths, IEventBus events, IFileDialogs dialogs)
     {
         _store = store;
         _settings = settings;
         _connections = connections;
-        _games = games;
+        _items = items;
         _runner = runner;
         _paths = paths;
         _events = events;
@@ -88,6 +88,11 @@ internal sealed class ClientCore
         _driverSetup = new PacketFilterSetup(paths.DataArea("drivers"));
         _connections.Changed += Publish;
         _runner.Changed += Publish;
+        // Said once, where the person will see it: the window shows warnings until they are dismissed.
+        if (items.Unreadable is { } why)
+            Notify(NoticeKind.Warning, $"Your apps could not be read: {why}. Sallyport starts without them and keeps the file as it is until you change an app.");
+        else if (items.Migrated is { Unreadable: > 0 and var lost })
+            Notify(NoticeKind.Warning, $"Some apps could not be migrated: {lost} earlier game file{(lost == 1 ? "" : "s")} could not be read. They are kept as they were.");
     }
 
     public ClientState Snapshot()
@@ -263,9 +268,9 @@ internal sealed class ClientCore
         var profile = Profile(id);
         if (_connections.IsRunning(id)) throw new ShenoraException("CONNECTED", "id", id, $"Disconnect {profile.Name} before removing it.");
         if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, "Stop routing the game that uses it first.");
-        var shortcuts = _settings.Apps.Count(a => a.ProfileId == id);
+        var inUse = _items.List().Count(i => i.ProfileId == id || i.Programs.Any(p => p.ProfileId == id));
         var text = "Deletes Sallyport's encrypted copy. The original file stays unchanged." +
-            (shortcuts == 0 ? "" : shortcuts == 1 ? " 1 app shortcut will need another profile." : $" {shortcuts} app shortcuts will need another profile.");
+            (inUse == 0 ? "" : inUse == 1 ? " 1 app will need another profile." : $" {inUse} apps will need another profile.");
         Confirm("remove-profile", id, $"Remove {profile.Name}?", text, "Remove profile", "Keep profile");
     }
 
@@ -340,19 +345,18 @@ internal sealed class ClientCore
     public void AddGame(string folder)
     {
         if (!Directory.Exists(folder)) throw new ShenoraException("GAME_FOLDER", "folder", folder, "That folder is not there.");
-        GameProfile game;
+        RoutedItem item;
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
         if (name.Length == 0) name = "game";
         if (name.Length > LongestName) name = name[..LongestName];
-        try { game = _games.Create(name, folder); }
+        var profile = _store.List().FirstOrDefault(p => p.Unsupported is null);
+        try { item = _items.CreateFromFolder(name, folder, profile?.Id); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new ShenoraException("GAME_FOLDER", "folder", name, $"{name} could not be read: {e.GetType().Name}."); }
-        var profile = _store.List().FirstOrDefault(p => p.Unsupported is null);
-        _settings.PutChoice(game.Id, new GameChoice(profile?.Id, LossMode.Hold, null));
-        var included = game.Executables.Count(e => e.Included);
-        Notify(NoticeKind.Info, game.Executables.Count == 0
-            ? $"Added {game.Name}, but its folder holds no program. Scan it again once the game is installed."
-            : $"Added {game.Name}: {included} of its {game.Executables.Count} programs will be routed.", new("game", game.Id));
+        var included = item.Programs.Count(p => p.Included);
+        Notify(NoticeKind.Info, item.Programs.Count == 0
+            ? $"Added {item.Name}, but its folder holds no program. Scan it again once the game is installed."
+            : $"Added {item.Name}: {included} of its {item.Programs.Count} programs will be routed.", new("game", item.Id));
     }
 
     public void RescanGame(string id)
@@ -360,11 +364,11 @@ internal sealed class ClientCore
         var before = Game(id);
         if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
             throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before scanning again.");
-        GameProfile after;
-        try { after = _games.Rescan(id); }
+        RoutedItem after;
+        try { after = _items.Rescan(id); }
         catch (DirectoryNotFoundException) { throw new ShenoraException("GAME_FOLDER", "id", id, $"{before.Name}'s folder is not there any more."); }
-        var added = after.Executables.Count(e => !before.Executables.Any(b => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
-        var gone = before.Executables.Count(b => !after.Executables.Any(e => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
+        var added = after.Programs.Count(e => !before.Programs.Any(b => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
+        var gone = before.Programs.Count(b => !after.Programs.Any(e => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
         Notify(NoticeKind.Info, added + gone == 0 ? $"{after.Name}'s folder holds the same programs." :
             $"{after.Name}: {added} new program{(added == 1 ? "" : "s")}, {gone} gone. Your choices for the rest stand.", new("game", id));
     }
@@ -374,7 +378,7 @@ internal sealed class ClientCore
         Game(id);
         if (_runner.Facts() is { GameId: var running, Ended: null } && running == id)
             throw new ShenoraException("GAME_RUNNING", "id", id, "Stop routing before changing its programs.");
-        try { _games.Choose(id, path, included); }
+        try { _items.Choose(id, path, included); }
         catch (ArgumentException) { throw new ShenoraException("GAME_PROGRAM", "id", id, "That program is not one of this game's."); }
         Publish();
     }
@@ -382,7 +386,7 @@ internal sealed class ClientCore
     public void BeginGameEdit(string id)
     {
         var game = Game(id);
-        var choice = _settings.ChoiceFor(id);
+        var choice = game.Choice;
         lock (_gate)
             _editor = new OpenEditor(NewToken(), "game", id, new GameValues(game.Name, _store.Find(choice.ProfileId ?? "") is null ? null : choice.ProfileId,
                 choice.Loss, choice.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? ""), Empty);
@@ -413,8 +417,7 @@ internal sealed class ClientCore
             if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
             else
             {
-                if (name != game.Name) _games.Rename(game.Id, name);
-                _settings.PutChoice(game.Id, new GameChoice(values.ProfileId, values.Loss, directAfter));
+                _items.Put(game with { Name = name, ProfileId = values.ProfileId, Loss = values.Loss, DirectAfterSeconds = directAfter });
                 _editor = null;
             }
         }
@@ -431,9 +434,8 @@ internal sealed class ClientCore
 
     private void RemoveGame(string id)
     {
-        var name = _games.Find(id)?.Name;
-        if (!_games.Remove(id)) return;
-        _settings.ForgetGame(id);
+        var name = _items.Find(id)?.Name;
+        if (!_items.Remove(id)) return;
         Notify(NoticeKind.Info, $"Removed {name} from Sallyport. The game itself is unchanged.");
     }
 
@@ -441,8 +443,9 @@ internal sealed class ClientCore
     /// routed from the first; run while it plays, its connections move to the VPN and the game may need to rejoin.</summary>
     public void RunGame(string id)
     {
-        var game = Game(id);
-        var choice = _settings.ChoiceFor(id);
+        var item = Game(id);
+        var game = item.AsGame();
+        var choice = item.Choice;
         if (choice.ProfileId is null || _store.Find(choice.ProfileId) is not { } stored)
             throw new ShenoraException("GAME_NO_PROFILE", "id", id, $"Choose a VPN profile for {game.Name} first (Edit).");
         if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, $"This version cannot connect {stored.Name}: {why}.");
@@ -598,15 +601,14 @@ internal sealed class ClientCore
         var name = new[] { info.FileDescription, info.ProductName, Path.GetFileNameWithoutExtension(path) }
             .First(n => !string.IsNullOrWhiteSpace(n))!.Trim();
         if (name.Length > LongestName) name = name[..LongestName];
-        var app = new RoutedApp(Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)), name, path, AppLauncher.Guess(path),
-            _store.List().FirstOrDefault(p => p.Unsupported is null)?.Id ?? "", "");
-        _settings.PutApp(app);
-        Notify(NoticeKind.Info, $"Added {app.Name} as a {ClientView.KindLabel(app.Kind).ToLowerInvariant()}.", new("app", app.Id));
+        var kind = AppLauncher.Guess(path);
+        var item = _items.CreateFromProgram(name, path, kind, _store.List().FirstOrDefault(p => p.Unsupported is null)?.Id);
+        Notify(NoticeKind.Info, $"Added {item.Name} as a {ClientView.KindLabel(kind).ToLowerInvariant()}.", new("app", item.Id));
     }
 
     public void BeginAppEdit(string id)
     {
-        var app = App(id);
+        var app = App(id).AsApp()!;
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, "Wait for the launch to finish.");
         lock (_gate)
             _editor = new OpenEditor(NewToken(), "app", id,
@@ -617,7 +619,8 @@ internal sealed class ClientCore
     public void UpdateApp(string token, AppValues values)
     {
         if (EditorFor(token, "app") is not { } editor) return;
-        var app = App(editor.SubjectId);
+        var item = App(editor.SubjectId);
+        var app = item.AsApp()!;
         var name = values.Name?.Trim() ?? "";
         var arguments = values.Arguments?.Trim() ?? "";
         var errors = new Dictionary<string, string>();
@@ -633,7 +636,13 @@ internal sealed class ClientCore
             if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
             else
             {
-                _settings.PutApp(app with { Name = name, ProfileId = values.ProfileId!, Kind = values.Kind, Arguments = arguments });
+                var program = item.ProxyProgram!;
+                _items.Put(item with
+                {
+                    Name = name,
+                    ProfileId = values.ProfileId,
+                    Programs = [.. item.Programs.Select(p => p.Id == program.Id ? p with { Proxy = p.Proxy! with { Kind = values.Kind, Arguments = arguments } } : p)],
+                });
                 _editor = null;
             }
         }
@@ -654,7 +663,7 @@ internal sealed class ClientCore
     {
         var app = App(id);
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, "Wait for the launch to finish.");
-        if (!_settings.RemoveApp(id)) return;
+        if (!_items.Remove(id)) return;
         lock (_gate)
         {
             if (_editor?.SubjectId == id) _editor = null;
@@ -666,7 +675,8 @@ internal sealed class ClientCore
     /// that ends without the tunnel up never launches later.</summary>
     public async Task LaunchAsync(string id, CancellationToken ct)
     {
-        var app = App(id);
+        var item = App(id);
+        var app = item.AsApp()!;
         var profile = _store.Find(app.ProfileId) ?? throw new ShenoraException("APP_NO_PROFILE", "id", id, $"Choose a profile for {app.Name} before launching.");
         if (!_launching.TryAdd(id, AppPhase.Connecting)) return;
         Publish();
@@ -680,7 +690,7 @@ internal sealed class ClientCore
             catch (ShenoraException e) { throw new ShenoraException(e.Code, "id", id, $"{app.Name} was not started. {Capital(e.Message)}"); }
             _launching[id] = AppPhase.Starting;
             Publish();
-            try { AppLauncher.Launch(app, _settings.PortOf(app.ProfileId), OwnProfile(app)); }
+            try { AppLauncher.Launch(app, _settings.PortOf(app.ProfileId), OwnProfile(item)); }
             catch (FileNotFoundException) { throw new ShenoraException("APP_MISSING", "id", id, $"{app.Name} was not found where it was added from."); }
             catch (System.ComponentModel.Win32Exception e) { throw new ShenoraException("APP_FAILED", "id", id, $"Windows did not start {app.Name}: {e.Message}"); }
         }
@@ -703,7 +713,8 @@ internal sealed class ClientCore
     private ClientState Take()
     {
         var stored = _store.List();
-        var games = _games.List();
+        var items = _items.List();
+        var games = items.Where(i => i.RoutesPackets).ToList();
         var run = _runner.Facts();
         var routedThrough = run is { Ended: null } ? run.ProfileId : null;
         var routedGame = routedThrough is null ? null : games.FirstOrDefault(g => g.Id == run!.GameId)?.Name ?? "a game";
@@ -715,16 +726,17 @@ internal sealed class ClientCore
         var driver = GameViews.Driver(Driver());
         var gameViews = games.Select(g =>
             {
-                var choice = _settings.ChoiceFor(g.Id);
+                var choice = g.Choice;
                 var profile = stored.FirstOrDefault(p => p.Id == choice.ProfileId);
-                return GameViews.Game(g, choice, profile, run, run is { Ended: null } && run.GameId != g.Id,
+                return GameViews.Game(g.AsGame(), choice, profile, run, run is { Ended: null } && run.GameId != g.Id,
                     profile is not null && _connections.IsRunning(profile.Id), driver.Phase == DriverPhase.Ready, Volatile.Read(ref _dialog) is not null);
             })
             .ToList();
-        var apps = _settings.Apps.Select(a =>
+        var apps = items.Where(i => i.ProxyProgram is not null).Select(i =>
             {
+                var a = i.AsApp()!;
                 var profile = stored.FirstOrDefault(p => p.Id == a.ProfileId);
-                var settings = profile is null ? [] : AppLauncher.Describe(a, _settings.PortOf(profile.Id), OwnProfile(a));
+                var settings = profile is null ? [] : AppLauncher.Describe(a, _settings.PortOf(profile.Id), OwnProfile(i));
                 return ClientView.App(a, profile, File.Exists(a.Path), settings, _launching.TryGetValue(a.Id, out var phase) ? phase : null);
             })
             .ToList();
@@ -808,11 +820,11 @@ internal sealed class ClientCore
     private StoredProfile Profile(string id) =>
         _store.Find(id) ?? throw new ShenoraException("PROFILE_GONE", "id", id, "That profile is no longer stored.");
 
-    private RoutedApp App(string id) =>
-        _settings.FindApp(id) ?? throw new ShenoraException("APP_GONE", "id", id, "That app is no longer listed.");
+    private RoutedItem App(string id) =>
+        _items.Find(id) is { ProxyProgram: not null } item ? item : throw new ShenoraException("APP_GONE", "id", id, "That app is no longer listed.");
 
-    private GameProfile Game(string id) =>
-        _games.Find(id) ?? throw new ShenoraException("GAME_GONE", "id", id, "That game is no longer listed.");
+    private RoutedItem Game(string id) =>
+        _items.Find(id) is { RoutesPackets: true } item ? item : throw new ShenoraException("GAME_GONE", "id", id, "That game is no longer listed.");
 
     private async Task<FileDialogResult?> WithDialogAsync(string which, Func<Task<FileDialogResult>> show)
     {
@@ -836,5 +848,5 @@ internal sealed class ClientCore
     }
 
     /// <summary>Where a browser started through Sallyport keeps its own profile, apart from the person's usual one.</summary>
-    private string OwnProfile(RoutedApp app) => Path.Combine(_paths.DataDir, "apps", app.Id);
+    private string OwnProfile(RoutedItem item) => Path.Combine(_paths.DataDir, "apps", item.ProxyProgram!.Proxy!.DataKey);
 }
