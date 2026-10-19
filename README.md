@@ -16,6 +16,20 @@ Linux OpenVPN does on the same server, and carries a browser page's dozens of co
 Phase 4 is what a long-running client needs (see `TASKS.md`). First consumer: [Kobo](../Kobo/apps/kobo), whose browser
 route runs `Sallyport.Host` before it is released.
 
+## The client
+
+`apps/Sallyport.Client` is the tray and window: import a profile (Sallyport keeps a copy encrypted for your Windows
+account), connect it — each profile is a SOCKS5 port on 127.0.0.1, from 1088 up — and launch apps through it: a browser
+with a profile of its own, Firefox, an Electron app, or any tool that reads `ALL_PROXY`. Everything else on the machine
+keeps its own connection. Games and programs that ignore proxy settings are not routed yet (`docs/design/architecture.md`).
+
+```
+Sallyport.Client.exe [profile.ovpn ...] [--tray] [--exit]
+```
+
+A profile path imports it; `--tray` starts out of sight; `--exit` asks the running client to disconnect everything and
+quit. Building it needs Node.js for its page (`apps/Sallyport.Client/web`, built into the executable).
+
 ## Licence and provenance
 
 MIT. **Written from the OpenVPN protocol's public description, not from OpenVPN's source code** — OpenVPN 2 is GPLv2 and

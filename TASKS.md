@@ -23,16 +23,16 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
       private (14 MB idle) until the next collection — not a leak: four bursts, no growth. What holds it is not
       measured; the receive buffers, each growing toward 4 MB, are the likely part.
 
-## The client and game routing — `docs/design/architecture.md` (D9–D11)
-Steps 1 (the restructure) and 2 (the runtime: `TunnelSession`, `ProfileStore`) are done. In order:
+## The client and game routing — `docs/design/architecture.md`, `docs/design/client-ui.md`
+The client works in proxy mode (D14, D15). Open:
 - [ ] **Decide how a game's destinations reach the VPN (D12).** Measured: the plug-in runs, and an app filter (with an
       explicit protocol) confines a split route to the listed program — but a default route takes the whole machine,
       and a forced program cannot reach what the VPN does not route. Per-game server prefixes, known or learned from the
       game's own connections, is the shape the measurements allow. Then the real tunnel inside the plug-in: the
       program reads the server's address while another reads AU. Every run under the guard (D13).
-- [ ] **`Sallyport.Windows` + `apps/Sallyport.Service`**: the packet router and the runtime in a LocalSystem service —
-      a session per stored profile, the DPAPI protector and the store's folder ACL (D11), and a named-pipe management
-      API (its contracts in `Sallyport.Runtime`) the unelevated client may use.
-- [ ] **`apps/Sallyport.Client`** on Shenora (WebView2): profiles (import a copy), routed applications, live status.
-- [ ] **Proxy-mode launch recipes** in the client: Chromium/Electron flags with their own profile directory, a Firefox
-      profile, proxy environment variables.
+- [ ] **What the client's measurement did not reach (2026-10-19).** The file dialogs past opening and cancelling: this
+      machine's dialog shows UI Automation no File name box, and typed keys arrived mangled, so the app shortcuts were
+      seeded into the settings instead. Firefox and Electron launches. The dark theme of the new window (the machine
+      is light). The tray's menu and icon colours, driven by hand.
+- [ ] **Ship the client**: a published build, a Start-menu entry, `.ovpn` files opened with it, start with Windows
+      (`--tray`).

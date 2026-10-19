@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shenora by a decision (D9): rule 4 binds the packages, and an application may take one by a decision. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <IsPackable>false</IsPackable>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Shenora's packages and WinForms reference different builds of the same framework assemblies; the newer wins. -->
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
+    <PackageReference Include="Shenora.Windows" />
+    <InternalsVisibleTo Include="Sallyport.Client.Tests" />
+  </ItemGroup>
+
+  <!-- The page, built from web/ into wwwroot/ (gitignored) and embedded. WithCulture="false": a name like msg.fr.json
+       would otherwise go to a satellite assembly, out of the bundle. -->
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot\**" WithCulture="false" />
+  </ItemGroup>
+
+  <!-- A fresh clone has no wwwroot, and the glob above was evaluated before this ran: the files it builds are added here. -->
+  <Target Name="BuildPage" BeforeTargets="BeforeBuild" Condition="!Exists('wwwroot\index.html')">
+    <Exec Command="npm install --no-audit --no-fund" WorkingDirectory="web" Condition="!Exists('web\node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="web" />
+    <ItemGroup>
+      <EmbeddedResource Include="wwwroot\**" WithCulture="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

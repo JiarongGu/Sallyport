@@ -150,7 +150,7 @@ an EV certificate. So WinDivert's signed driver is used unmodified, a separate f
 narrow interface in `Sallyport.Windows`. Replacing it with a driver of our own (C, WDK, signing) would change nothing
 above that interface.
 
-## D11 — Imported profiles are held by the service, encrypted (2026-10-19)
+## D11 — Imported profiles are held by the service, encrypted (2026-10-19; superseded by D14)
 
 A profile holds a private key and a static key. The client imports a copy (the owner chose a copy over a path, so it
 keeps working when the original moves), and the service owns it: `%ProgramData%\Sallyport\profiles`, readable by SYSTEM
@@ -220,3 +220,41 @@ since: a proper backup first — when the network stops, the VPN is disabled.
 Measured: with 1.1.1.1 black-holed it tripped 4.4 s after connecting; with a default route, 0.6 s after, torn down by
 3.8 s; the direct path was back within 0.1 s each time and no profile was left. The plug-in's own deadline is not a
 failsafe (D12): the guard outside is the one that is.
+
+## D14 — The client runs the runtime itself, unelevated; imported profiles are sealed for the user (2026-10-19; supersedes D11)
+
+D11 gave the store to a LocalSystem service because packet routing (D10) needed one. WinDivert is gone (D10) and game
+routing is open (D12), and nothing the client does today needs administrator rights: proxy mode is a loopback SOCKS
+port. So `apps/Sallyport.Client` runs `TunnelService` in its own process — a session per connected profile, each on
+its own loopback port (1088 upward by default; 1080 is Kobo's Host) — and there is no service.
+
+Imported copies live in `%LOCALAPPDATA%\Sallyport\profiles`, sealed with DPAPI for the current user (`ProtectedData`,
+which ships in the Windows Desktop runtime the client already runs on: no package, no P/Invoke), with a purpose
+string as entropy so that another DPAPI consumer of the same user does not open them by mistake — it is a label, not a
+secret. What that scope buys: the copy is unreadable to other users, to another machine, and in a backup or a synced
+folder; any program running as the user can still open it, as it could the `.ovpn` the user imported from. The page
+(WebView2) sees names, transports and status, never key material; a profile is opened only in the moment it connects.
+
+D13 does not bind proxy mode: a SOCKS port carries only what an application sends it, so a dead tunnel stops those
+applications and nothing else. If game routing brings a privileged part, the store moves with it and D11's reasoning
+applies again.
+
+## D15 — The client's window shows what its host decides (2026-10-19)
+
+The owner: *"use event messaging so ui just for display"*. The page (React in WebView2) is sent `CLIENT.STATE` — the
+whole view model, every state-dependent word included — on Shenora's ready handshake and on every change, and
+`CLIENT.NOTICE` for each outcome; it posts intents that answer nothing (`post`, which Shenora's own D23 makes the
+default; never `invoke`). An edit, a confirmation, an open dialog and a launch under way are host state; the page keeps
+only what is visual — the page shown, a row folded, text being typed. So the tray and the window render one view and
+cannot disagree, and what the client decides is tested in C# (`tests/Sallyport.Client.Tests`) without a browser. The
+contract is `apps/Sallyport.Client/web/src/contract.ts`; the design that needed it, Codex's, is
+`docs/design/client-ui.md`.
+
+The window is frameless — Shenora's `FramelessChrome` with `NativeCaptionButtons`: the page draws the title bar and
+reports its caption buttons, the form paints them in that hole, so Snap Layouts stay — and follows the OS's light or
+dark, which the client reads from the registry because Shenora.Windows does not say.
+
+No DevTools port on the packaged page. Shenora drops remote-debugging switches outside development since 2026-09-29
+(its `6aed4927`): a port there hands any local process the page's IPC, which for this client is connect and launch.
+Tests drive the development build instead — the same host and page, the page served by Vite.
+

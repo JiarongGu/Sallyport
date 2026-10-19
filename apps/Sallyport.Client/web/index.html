@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Sallyport</title>
+    <!-- Match the system surface before the page's stylesheet loads to avoid a bright first paint. -->
+    <style>
+      html, body { margin: 0; background: #15171c; }
+      @media (prefers-color-scheme: light) { html, body { background: #f5f6f8; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
