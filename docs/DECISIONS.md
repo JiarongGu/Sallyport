@@ -348,3 +348,15 @@ Stage 2.
 First measured before anything is built on it: that Defender accepts the driver (it blocked WinDivert, D10), that
 Zenless Zone Zero runs beside it, and whether opening it needs administrator.
 
+**Amended 2026-10-20: WTFast, read from its own installer.** WTFast 5.5.42's installer (Inno Setup, signed by AAA
+Internet Publishing Inc) was downloaded and read — not installed, nothing of it run; innoextract listed and unpacked
+its `Driver` folder. It ships `WtfEngineDrv.sys` ("WTFastEngine Driver Win8 x64", 3.0.0.334, a KMDF 1.9 service
+installed by its `DriverTool.exe`), signed by **Initeks, OOO** of Saint Petersburg — Initex, Proxifier's maker. Its
+import table: twenty WFP functions (`fwpkclnt.sys`) — callouts and filters (`FwpsCalloutRegister1`, `FwpmFilterAdd0`),
+**connect redirection** (`FwpsRedirectHandleCreate0`, `FwpsQueryConnectionRedirectState0`,
+`FwpsAcquireWritableLayerDataPointer0`, `FwpsApplyModifiedLayerData0`) and **packet injection**
+(`FwpsInjectTransportSendAsync0`, `FwpsInjectNetworkReceiveAsync0`, `FwpsAllocateCloneNetBufferList0`,
+`FwpsQueryPacketInjectionState0`) — and only three NDIS buffer helpers, so no NDIS filter. Its client is .NET over
+gRPC. So WTFast selects a game's traffic in a WFP driver of its own: connections redirected to its local engine at
+connect time, packets cloned and injected for the rest — the shape of Stage 2 here (D18).
+
