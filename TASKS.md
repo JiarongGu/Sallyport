@@ -25,6 +25,11 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
 
 ## The client and game routing — `docs/design/architecture.md`, `docs/design/client-ui.md`
 The client works in proxy mode (D14, D15). Open:
+- [ ] **Game routing, next steps (`docs/design/game-routing.md` §6).** The observer is built and measured (its README):
+      Zenless Zone Zero's gameplay is one UDP server plus HTTPS, learned elevated. Next: a stored per-game plan from
+      observations, and the fixed-routing step — a fresh game session through the bridge with the plan's /32s,
+      measured against the server. Open in the observer: short-lived children and launcher handoff; IPv6; a killed
+      observer's session left running.
 - [ ] **How a game is selected (D17) — the owner's choice.** Windows' VPN platform routes by destination, never by
       process alone (measured twice). Either driverless: each game's ranges, learned from its own connections (TCP from
       the owner tables; UDP needs ETW, so administrator) or supplied per game, then a real game routed and measured. Or
