@@ -66,9 +66,9 @@ async Task<int> RouteAsync(string profilePath)
         return Fail("route needs --for <1..600 seconds>: an unguarded, unbounded route is not offered");
     var probe = IPEndPoint.Parse(Values("--probe").FirstOrDefault() ?? "1.1.1.1:443");
     if (routes.Any(r => r.Length > 0 && Covers(r, probe.Address))) return Fail("a --prefix covers the guard's probe: it must stay direct to mean anything");
-    // Kept off the VPN whatever the routes: the guard's probe, which measures the direct path only while it is one, and
-    // (below) the VPN server, which carries this bridge's own tunnel.
-    var exclusions = new List<IPAddress> { probe.Address };
+    // No exclusion routes: on this platform an excluded address is carried INTO the VPN (the guard's own probe was, twice:
+    // D17's default-route run and a split run of /32s, which tripped 2.1 s after connecting). The probe and the server
+    // are kept off the VPN by refusing any prefix that covers them, above and below.
 
     OvpnProfile profile;
     // The profile's text is never echoed: it holds a private key.
@@ -93,7 +93,6 @@ async Task<int> RouteAsync(string profilePath)
         try
         {
             tunnel = await Tunnel.ConnectAsync(profile, remote, TimeSpan.FromSeconds(30));
-            exclusions.AddRange(server.Where(a => a.AddressFamily == AddressFamily.InterNetwork));
             break;
         }
         catch (Exception e) { Console.WriteLine($"tunnel: {remote.Proto}/{remote.Port} did not connect ({e.GetType().Name})"); }
@@ -121,7 +120,6 @@ async Task<int> RouteAsync(string profilePath)
         new XElement("policy", policy),
         defaultRoute ? new XElement("defaultRoute", "allow") : null,
         routes.Select(r => new XElement("prefix", $"{r.Network}/{r.Length}")),
-        exclusions.Distinct().Select(a => new XElement("exclude", $"{a}/32")),
         apps.Select(a => new XElement("app", a)));
     var vpn = new VpnPlugInProfile
     {

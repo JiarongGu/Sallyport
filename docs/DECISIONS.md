@@ -322,3 +322,10 @@ products also ship; (b) a driver of our own — C, not .NET, a WFP callout redir
 like the rest. It needs an EV code-signing certificate and Microsoft's attestation signing to load on an ordinary
 machine; development needs test signing, which anti-cheats refuse, so a separate machine.
 
+**Amended 2026-10-19: an exclusion route carries its address INTO the VPN.** After D17 the bridge kept adding exclusion
+routes for the guard's probe and the VPN server to every run. A split run of nine /32s for Zenless Zone Zero then had
+the guard trip 2.1 s after connecting — the probe (1.1.1.1, excluded) went into the VPN and the plug-in dropped it —
+torn down by 7.4 s, the direct path back 4.1 s after. The same nine /32s without exclusion routes held the full 300 s
+with no trip. So exclusion routes are gone from the bridge and the plug-in; the probe and the server stay direct only
+because no prefix may cover them, which the bridge refuses.
+

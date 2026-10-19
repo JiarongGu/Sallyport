@@ -26,7 +26,6 @@ internal sealed partial class RelayPlugin : IVpnPlugIn
 
     private DatagramSocket? _socket;
     private List<(uint Network, uint Mask)> _prefixes = [];
-    private List<(uint Network, uint Mask)> _excluded = [];
     private long _out, _in, _dropped;
 
     public void Connect(VpnChannel channel)
@@ -42,7 +41,6 @@ internal sealed partial class RelayPlugin : IVpnPlugIn
             var mtu = (uint)Math.Clamp((int?)config.Element("mtu") ?? 1400, 576, 1500);
             var apps = config.Elements("app").Select(e => e.Value).ToList();
             _prefixes = [.. config.Elements("prefix").Select(e => Prefix(e.Value))];
-            _excluded = [.. config.Elements("exclude").Select(e => Prefix(e.Value))];
             if (_prefixes.Count == 0) throw new InvalidOperationException("the profile routes no prefix");
             // A default route took the whole machine in the spike (D12): only when the profile names it, which the bridge
             // does only when asked to measure it, under its guard.
@@ -69,11 +67,9 @@ internal sealed partial class RelayPlugin : IVpnPlugIn
             var routes = new VpnRouteAssignment();
             foreach (var (network, mask) in _prefixes)
                 routes.Ipv4InclusionRoutes.Add(new VpnRoute(new HostName(Text(network)), (byte)System.Numerics.BitOperations.PopCount(mask)));
-            foreach (var (network, mask) in _excluded)
-                routes.Ipv4ExclusionRoutes.Add(new VpnRoute(new HostName(Text(network)), (byte)System.Numerics.BitOperations.PopCount(mask)));
 
             channel.StartWithTrafficFilter([new HostName(address)], null, null, routes, null, mtu, mtu + 100, false, _socket, null, filters);
-            Log.Write($"connected: relay 127.0.0.1:{port}, address {address}, mtu {mtu}, {_prefixes.Count} prefix(es), {_excluded.Count} excluded, {policy}, {apps.Count} program(s)");
+            Log.Write($"connected: relay 127.0.0.1:{port}, address {address}, mtu {mtu}, {_prefixes.Count} prefix(es), {policy}, {apps.Count} program(s)");
         }
         catch (Exception e)
         {
@@ -140,8 +136,7 @@ internal sealed partial class RelayPlugin : IVpnPlugIn
     /// <summary>Unicast inside the routes. Multicast and the limited broadcast Windows sends on every new interface (IGMP,
     /// mDNS, NetBIOS) are not the programs' and are dropped quietly with the rest.</summary>
     private bool Routed(uint destination) =>
-        destination >> 28 != 0xE && destination != uint.MaxValue && _prefixes.Any(p => (destination & p.Mask) == p.Network)
-        && !_excluded.Any(p => (destination & p.Mask) == p.Network);
+        destination >> 28 != 0xE && destination != uint.MaxValue && _prefixes.Any(p => (destination & p.Mask) == p.Network);
 
     private static (uint Network, uint Mask) Prefix(string text)
     {
