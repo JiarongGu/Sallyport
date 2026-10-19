@@ -10,6 +10,7 @@ using Windows.Networking.Vpn;
 using Windows.Storage;
 
 // sallyport-vpn route <profile.ovpn> --app <program.exe>... --prefix <a.b.c.d/n>... --for <1..600 s> [--probe <ip:port>]
+//                     [--policy split|force] [--default-route allow]
 //               list | log [clear] | panic
 // Run through the package's execution alias, so it has the package's identity and its networkingVpnProvider capability.
 //
@@ -54,11 +55,20 @@ async Task<int> RouteAsync(string profilePath)
     try { routes = [.. Values("--prefix").Select(Prefix)]; }
     catch (FormatException) { return Fail("a --prefix is a.b.c.d/n"); }
     if (routes.Count == 0) return Fail("route needs at least one --prefix");
-    if (routes.Any(r => r.Length == 0)) return Fail("a default route takes the whole machine, app filter or not (D12): refused");
+    // A default route took the whole machine in the spike (D12): it is offered only to measure whether the app filter
+    // confines it now, and only by name.
+    var defaultRoute = routes.Any(r => r.Length == 0);
+    if (defaultRoute && Values("--default-route").FirstOrDefault() != "allow")
+        return Fail("a default route took the whole machine in the spike (D12): refused unless --default-route allow");
+    var policy = Values("--policy").FirstOrDefault() ?? "split";
+    if (policy is not ("split" or "force")) return Fail("--policy is split or force");
     if (!int.TryParse(Values("--for").FirstOrDefault(), out var seconds) || seconds is < 1 or > 600)
         return Fail("route needs --for <1..600 seconds>: an unguarded, unbounded route is not offered");
     var probe = IPEndPoint.Parse(Values("--probe").FirstOrDefault() ?? "1.1.1.1:443");
-    if (routes.Any(r => Covers(r, probe.Address))) return Fail("a --prefix covers the guard's probe: it must stay direct to mean anything");
+    if (routes.Any(r => r.Length > 0 && Covers(r, probe.Address))) return Fail("a --prefix covers the guard's probe: it must stay direct to mean anything");
+    // Kept off the VPN whatever the routes: the guard's probe, which measures the direct path only while it is one, and
+    // (below) the VPN server, which carries this bridge's own tunnel.
+    var exclusions = new List<IPAddress> { probe.Address };
 
     OvpnProfile profile;
     // The profile's text is never echoed: it holds a private key.
@@ -78,11 +88,12 @@ async Task<int> RouteAsync(string profilePath)
         IPAddress[] server;
         try { server = await Dns.GetHostAddressesAsync(remote.Host); }
         catch (SocketException) { Console.WriteLine($"tunnel: {remote.Proto}/{remote.Port}: its server name does not resolve"); continue; }
-        if (server.Any(a => routes.Any(r => Covers(r, a))))
+        if (server.Any(a => routes.Any(r => r.Length > 0 && Covers(r, a))))
             return Fail($"a --prefix covers the VPN server of {remote.Proto}/{remote.Port}: its tunnel would be cut");
         try
         {
             tunnel = await Tunnel.ConnectAsync(profile, remote, TimeSpan.FromSeconds(30));
+            exclusions.AddRange(server.Where(a => a.AddressFamily == AddressFamily.InterNetwork));
             break;
         }
         catch (Exception e) { Console.WriteLine($"tunnel: {remote.Proto}/{remote.Port} did not connect ({e.GetType().Name})"); }
@@ -107,7 +118,10 @@ async Task<int> RouteAsync(string profilePath)
         new XElement("relay", new XAttribute("port", ((IPEndPoint)relay.Client.LocalEndPoint!).Port), new XAttribute("token", Convert.ToHexString(token))),
         new XElement("address", address.ToString()),
         new XElement("mtu", 1400),
+        new XElement("policy", policy),
+        defaultRoute ? new XElement("defaultRoute", "allow") : null,
         routes.Select(r => new XElement("prefix", $"{r.Network}/{r.Length}")),
+        exclusions.Distinct().Select(a => new XElement("exclude", $"{a}/32")),
         apps.Select(a => new XElement("app", a)));
     var vpn = new VpnPlugInProfile
     {
@@ -122,7 +136,7 @@ async Task<int> RouteAsync(string profilePath)
     vpn.ServerUris.Add(new Uri("https://localhost"));
     var added = await agent.AddProfileFromObjectAsync(vpn);
     if (added != VpnManagementErrorStatus.Ok) return Fail($"the VPN profile was not added: {added}");
-    Console.WriteLine($"vpn: {routes.Count} prefix(es) for {string.Join(", ", apps.Select(Path.GetFileName))}");
+    Console.WriteLine($"vpn: {(defaultRoute ? "the default route" : $"{routes.Count} prefix(es)")}, {policy} policy, for {string.Join(", ", apps.Select(Path.GetFileName))}");
 
     int verdict;
     try { verdict = await GuardAsync(vpn, probe, seconds, tunnel); }
@@ -139,7 +153,10 @@ async Task<int> RouteAsync(string profilePath)
     }
 
     pumps.Cancel();
-    try { await relaying; } catch (OperationCanceledException) { }
+    // A tunnel that ended (the guard's own verdict, often) ends the relay with its reason; by now that is only worth saying.
+    try { await relaying; }
+    catch (OperationCanceledException) { }
+    catch (Exception e) { Console.WriteLine($"relay: ended with the tunnel ({e.GetType().Name}: {e.Message})"); }
     Console.WriteLine($"relay: {counts.ToTunnel} packet(s) to the tunnel, {counts.ToPlugin} to the plug-in, {counts.Refused} refused (no hello, or another sender)");
     return verdict;
 }

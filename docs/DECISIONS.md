@@ -292,3 +292,33 @@ Measured 2026-10-19 with Kobo's JP profile, the package test-signed, and only /3
 Open: which prefixes a game needs (known, or learned from its own connections); the bridge folded into the client; a
 release certificate, and the exemption made at install.
 
+## D17 — Windows' VPN platform cannot route by process alone; the products that do bring a kernel driver (2026-10-19; measured)
+
+The owner expected routing by process — a game's traffic, every destination — rather than by address range. So the
+spike's default-route finding (D12) was measured again, now with the filter's protocols set and the relay working
+(D16): one listed program (a curl copy), routes 0.0.0.0/0, and exclusion routes for the VPN server and the guard's
+probe. Both runs were under the guard, `--default-route allow`, and 30 s at most.
+- **Split policy:** the guard's probe — from the bridge, an unlisted program, to an *excluded* address — went into the
+  VPN anyway; the plug-in received it and dropped it as excluded. The guard tripped 2.1 s after connecting. The
+  bridge's own socket to the excluded VPN server failed with WSAEINVAL. Torn down by 6.8 s, the direct path back within
+  3.3 s.
+- **Forced policy:** the bridge's tunnel failed the moment the VPN came up (WSAEINVAL). 18 packets went into the
+  plug-in and 63 were dropped. Torn down by 6.2 s, the direct path back within 5.3 s.
+
+So D12 holds: on this platform an app filter selects the program but cannot narrow a default route, and exclusion
+routes did not keep traffic off it. A game is routed by its destinations here or not at all.
+
+The products that route by process do it below the platform, each with a signed kernel driver of its own:
+- Mudfish: a WFP driver (MUDWFP), "each process's traffic is handled using the WFP function"; its other mode changes the
+  routing table, as D16 does.
+- ExitLag: `ndextlag.sys`, "NDIS 6 LWF packet redirector driver".
+- PingAim: a kernel-level WFP driver matching the game by process name.
+- Proxifier v4: a WFP callout driver that intercepts connections. Its maker, Initex, publishes WTFast's Windows client;
+  WTFast documents no mechanism.
+
+Open, the owner's to choose: (a) stay driverless — the VPN platform with each game's ranges, learned from its own
+connections (TCP's are in the owner tables; UDP's need ETW, which needs administrator) or supplied per game, as the
+products also ship; (b) a driver of our own — C, not .NET, a WFP callout redirecting the game's flows to the bridge, MIT
+like the rest. It needs an EV code-signing certificate and Microsoft's attestation signing to load on an ordinary
+machine; development needs test signing, which anti-cheats refuse, so a separate machine.
+

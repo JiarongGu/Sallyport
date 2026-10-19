@@ -25,9 +25,11 @@ a whole 10 MB download at 1.34 MB/s in one run (TCP inside TCP; not compared wit
 
 ## The client and game routing — `docs/design/architecture.md`, `docs/design/client-ui.md`
 The client works in proxy mode (D14, D15). Open:
-- [ ] **A game's prefixes (D16).** Routing works for the prefixes it is given; a game's are not known yet. Learn them from
-      the game's own connections (its process's TCP and UDP tables while it runs direct), keep them per game, let the
-      person add known ones. Then route a real game, measured: its servers see the tunnel's address.
+- [ ] **How a game is selected (D17) — the owner's choice.** Windows' VPN platform routes by destination, never by
+      process alone (measured twice). Either driverless: each game's ranges, learned from its own connections (TCP from
+      the owner tables; UDP needs ETW, so administrator) or supplied per game, then a real game routed and measured. Or
+      a WFP callout driver of our own, as Mudfish, ExitLag and Proxifier have: C, an EV certificate, Microsoft's
+      attestation signing, and a separate machine for test signing.
 - [ ] **The bridge in the client.** Today `sallyport-vpn route` is a console. The client should drive it: games as an
       app kind, the guard in the client's process (D13), reconnects through `TunnelSession` rather than one `Tunnel`.
       Managing the VPN profile needs the package's identity, so either the client joins the package or it drives the

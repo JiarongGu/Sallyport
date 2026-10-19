@@ -15,6 +15,7 @@ programs' packets into it, for the listed destinations; everything else on the m
 
 ```
 sallyport-vpn route <profile.ovpn> --app <program.exe>... --prefix <a.b.c.d/n>... --for <1..600 s> [--probe <ip:port>]
+                    [--policy split|force] [--default-route allow]   # the last only to re-measure D17, under the guard
 sallyport-vpn list | log [clear] | panic
 ```
 
