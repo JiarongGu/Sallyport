@@ -50,6 +50,11 @@ Classification: `routable`, `loopback`, RFC1918/shared-address `private`, `link-
 `ipv6-unsupported`. `routable` is an address classification, not route approval: directed broadcasts on a particular
 subnet, VPN peer overlap and other local-network exclusions still require the future routing planner's checks.
 
+## A game's folder
+
+`Sallyport.Observer scan <game folder>` lists what a game profile made from that folder would route and what it leaves
+out, and why (`Sallyport.Runtime.GameFolder`). `learn --folder <game folder>` watches every program that scan includes.
+
 ## JSON schema (version 1)
 
 `--json` writes endpoint metadata only, replacing the destination file. No directory is created automatically.

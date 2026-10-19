@@ -9,7 +9,7 @@ using Windows.ApplicationModel;
 using Windows.Networking.Vpn;
 using Windows.Storage;
 
-// sallyport-vpn route <profile.ovpn> --app <program.exe>... --prefix <a.b.c.d/n>... --for <1..600 s> [--probe <ip:port>]
+// sallyport-vpn route <profile.ovpn> (--app <program.exe> | --folder <game folder>)... --prefix <a.b.c.d/n>... --for <1..600 s> [--probe <ip:port>]
 //                     [--policy split|force] [--default-route allow]
 //               list | log [clear] | panic
 // Run through the package's execution alias, so it has the package's identity and its networkingVpnProvider capability.
@@ -48,8 +48,12 @@ switch (args.FirstOrDefault())
 
 async Task<int> RouteAsync(string profilePath)
 {
-    var apps = Values("--app").Select(Path.GetFullPath).ToList();
-    if (apps.Count == 0) return Fail("route needs at least one --app");
+    // A game's folder stands for every program its profile would include (GameFolder): the app filter names programs by
+    // exact path, never by folder (D16), so the folder is expanded here.
+    var apps = Values("--app").Select(Path.GetFullPath)
+        .Concat(Values("--folder").SelectMany(folder => Sallyport.Runtime.GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path)))
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    if (apps.Count == 0) return Fail("route needs at least one --app or a --folder with a program in it");
     if (apps.FirstOrDefault(a => !File.Exists(a)) is { } missing) return Fail($"no program at {missing}");
     List<(IPAddress Network, int Length)> routes;
     try { routes = [.. Values("--prefix").Select(Prefix)]; }

@@ -16,6 +16,21 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        if (args is ["scan", var folder])
+        {
+            // What a game profile made from this folder would route, and what it would leave out and why.
+            try
+            {
+                foreach (var found in Sallyport.Runtime.GameFolder.Scan(folder))
+                    Console.WriteLine($"{(found.Included ? "include" : "leave out")}  {found.Path}{(found.Reason is { } why ? $"  ({why})" : "")}");
+                return 0;
+            }
+            catch (DirectoryNotFoundException error)
+            {
+                Console.Error.WriteLine(error.Message);
+                return 2;
+            }
+        }
         LearnOptions options;
         try { options = LearnOptions.Parse(args); }
         catch (ArgumentException error)

@@ -6,4 +6,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Sallyport.Observer.Tests" />
   </ItemGroup>
+  <!-- A game's programs are found as its profile finds them (GameFolder), so the observer watches what will be routed. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
+  </ItemGroup>
 </Project>

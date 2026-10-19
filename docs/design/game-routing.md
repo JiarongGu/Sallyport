@@ -277,3 +277,34 @@ Without Helldivers 2, build a BCL-only diagnostic peer application with generate
 Record server configuration, sent/returned metadata, external mappings and cleanup. Missing remote visibility means verification unavailable. Harness success establishes mechanisms; a later runnable peer game must establish game compatibility.
 
 Refuse claims of universal peer support, guaranteed hosting, automatic relay selection, seamless source changes or Helldivers compatibility without measurement. Refuse broad prefix expansion, machine-wide routing/DNS changes, anti-cheat bypasses and unrelated platform-process admission as shortcuts. Helldivers remains untested here; its conflict with bun is not justification to bypass it.
+
+---
+
+## Amendment 2 — game profiles, and running a game with a VPN profile (2026-10-19)
+
+**The owner.** *"so if the processer is attached we need to route all trafic, and we should be able to scan a game
+folder for all of its possible executables"*, then *"and we should be able to configubale a game profile (so include
+exetuables or exclude) and when run the vpn we can select a profile of game and a profile of vpn to run"*.
+
+**A game profile** (`Sallyport.Runtime.GameProfile`, kept by `GameProfileStore` beside the VPN profiles) is a name, the
+game's folder, and every executable under that folder — each included or left out by the person. `GameFolder.Scan`
+finds them all, subfolders included: a game's helpers sit beside it (Zenless Zone Zero's in-game browser
+`ZFGameBrowser.exe` lives in `ZenlessZoneZero_Data\Plugins\x86_64`), and Windows' app filter names programs by exact
+path, never by folder (D16), so each must be listed. Programs that install, remove, redistribute or report crashes are
+listed but left out by default, with the reason; the person's choice overrides either way. A rescan after a game
+update keeps every choice for a program still there, takes the default for a new one, and drops one that is gone. A
+program from elsewhere (a launcher) can be added. Measured on Zenless Zone Zero's folder: seven programs; the game, its
+in-game browser and a launcher plug-in included; four crash reporters left out.
+
+**Running** is a pair: one game profile and one VPN profile. The window offers both choices and a Run; the bridge is
+given the game profile's included executables (`--app`, or `--folder` for the same scan) and the VPN profile.
+
+**"Route all traffic of an attached process."** On Windows' VPN platform the selection is the program AND a
+destination (D17, measured twice): the driverless backend can route every destination the game's programs have been
+seen using — their learned destinations — but not one they reach for the first time, and Zenless Zone Zero's HTTPS
+endpoints churn between sessions (session 2 shared three of about fifteen with session 1). All of a process's traffic
+from its first packet needs the driver backend (§5): a WFP driver of our own, or an existing signed packet driver —
+Windows Packet Filter (`ndisrd.sys`, free for personal use, a paid licence to redistribute commercially; its user-mode
+library is MIT; ProxiFyre routes per process on it). The owner chooses which; until then a game profile runs on the
+driverless backend and says it routes learned destinations only.
+

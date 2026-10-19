@@ -1,4 +1,5 @@
 using System.Globalization;
+using Sallyport.Runtime;
 
 namespace Sallyport.Observer;
 
@@ -6,7 +7,7 @@ public sealed record LearnOptions(IReadOnlyList<string> Executables, int Seconds
 {
     public static LearnOptions Parse(string[] args)
     {
-        const string usage = "Usage: Sallyport.Observer learn --exe <full path>... --for <1..3600 s> [--json <file>]";
+        const string usage = "Usage: Sallyport.Observer learn (--exe <full path>... | --folder <game folder>)... --for <1..3600 s> [--json <file>]";
         if (args.Length == 0 || args[0] != "learn") throw new ArgumentException(usage);
         List<string> paths = [];
         int? seconds = null;
@@ -24,6 +25,11 @@ public sealed record LearnOptions(IReadOnlyList<string> Executables, int Seconds
                         paths.Add(Path.GetFullPath(path));
                     }
                     if (paths.Count == before) throw new ArgumentException(usage);
+                    break;
+                case "--folder":
+                    if (++i == args.Length || !Path.IsPathFullyQualified(args[i])) throw new ArgumentException("--folder requires a full path.");
+                    // Every program the game's profile would include: the observer watches what will be routed.
+                    paths.AddRange(GameFolder.Scan(args[i]).Where(e => e.Included).Select(e => e.Path));
                     break;
                 case "--for":
                     if (seconds is not null || ++i == args.Length ||
