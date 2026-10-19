@@ -6,7 +6,8 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <PackageId>Sallyport.Windows</PackageId>
     <IsPackable>false</IsPackable>
-    <!-- LibraryImport's generated stubs marshal through pointers; nothing written here is unsafe. -->
+    <!-- The driver is handed its packet buffers by address (ETH_M_REQUEST carries pointers), so they live in native
+         memory and are reached through pointers; LibraryImport's stubs need it too. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 

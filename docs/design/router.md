@@ -56,6 +56,11 @@ too"*, *"you can co work with codex with the design"*.
    the supervisor resets the adapters' modes through its own handle — whether a second handle may do that is measured
    in the same step. Neither measured yet; until both are, nothing intercepts without a guard that can undo it.
 
+   **Measured the same night (TASKS item 1, gate 1): both hold.** An interceptor killed mid-stream without a word to
+   the driver left its adapter in mode `None` with an empty queue, and a guard probing twice a second saw no failure;
+   a second handle read the first's tunnel mode and set it to `None`, and the first's packets stopped at once. So the
+   supervisor's remedy for a worker that stops draining is to kill it, and its own handle is the second remedy.
+
 Everything else is adopted as written, including LocalSystem, the pipe's ACL and peer checks, tunnel mode on send and
 receive, endpoint-independent UDP mappings preserving ports, MSS clamping and ICMP for DF, selected IPv6 blocked, game
 traffic dropped (not sent direct) while the tunnel is down, fail open when the router fails, and the build gates of §9.

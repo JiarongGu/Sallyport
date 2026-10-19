@@ -24,6 +24,19 @@ internal static partial class Native
     /// 0x830, METHOD_BUFFERED and FILE_ANY_ACCESS both 0; the version is answered as one 4-byte ULONG.</summary>
     public static readonly uint IoctlGetVersion = ControlCode(0x8300, 0x830, 0, 0);
 
+    // The rest of the interface the router uses: NDISRD_IOCTL_INDEX + n, all METHOD_BUFFERED and FILE_ANY_ACCESS.
+    public static readonly uint IoctlGetTcpipInterfaces = Ioctl(1);
+    public static readonly uint IoctlSetAdapterMode = Ioctl(5);
+    public static readonly uint IoctlFlushAdapterQueue = Ioctl(6);
+    public static readonly uint IoctlSetEvent = Ioctl(7);
+    public static readonly uint IoctlAdapterQueueSize = Ioctl(12);
+    public static readonly uint IoctlGetAdapterMode = Ioctl(13);
+    public static readonly uint IoctlSendPacketsToAdapter = Ioctl(20);
+    public static readonly uint IoctlSendPacketsToMstcp = Ioctl(21);
+    public static readonly uint IoctlReadPackets = Ioctl(22);
+
+    private static uint Ioctl(uint n) => ControlCode(0x8300, 0x830 + n, 0, 0);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct ServiceStatus
     {
@@ -57,4 +70,14 @@ internal static partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DeviceIoControl(SafeFileHandle device, uint code, IntPtr input, uint inputSize,
         out uint output, uint outputSize, out uint returned, IntPtr overlapped);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static unsafe partial bool DeviceIoControl(SafeFileHandle device, uint code, void* input, uint inputSize,
+        void* output, uint outputSize, out uint returned, IntPtr overlapped);
+
+    /// <summary>The interface Windows would send a packet for <paramref name="destination"/> through (IPAddr: the address's
+    /// four bytes in network order, as they lie in memory).</summary>
+    [LibraryImport("iphlpapi.dll")]
+    public static partial uint GetBestInterface(uint destination, out uint interfaceIndex);
 }

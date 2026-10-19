@@ -24,10 +24,19 @@ NT Kernel's, free for personal use.
 - **The router is designed** (`docs/design/router.md`, Codex's, checked and adopted with three changes): a LocalSystem
   service takes, attributes, NATs and injects; the tunnel stays in the client and only packets cross the pipe. Built
   in the design's gates, each measured before the next:
-  1. **The driver's interface and recovery** — adapters listed, events, one adapter in tunnel mode passing every packet
-     back unchanged under a guard that can undo it; what a closed handle leaves behind; whether a second handle can
-     reset a mode. ← next
-  2. Unchanged forwarding on every adapter: cost (CPU, latency p50/p95/p99, loss) against the direct baseline.
+  1. **The driver's interface and recovery — measured 2026-10-20** (`tools/Sallyport.Driver adapters | pass | reset |
+     guard`, a guard probing 1.1.1.1:443 and 8.8.8.8:443 twice a second outside every interceptor): the adapter list
+     read back as the header lays it out (12 adapters, names, MACs, MTUs matching Windows'); Wi-Fi, the route to the
+     internet, put in tunnel mode and every packet handed back unchanged for 20 s and 15 s — ~180,000 packets each,
+     guard 0 failed of 272 and 43 rounds, connect p50 21.8 ms against 19.1 ms without. **A killed interceptor leaves
+     nothing behind:** the adapter read `None`, queue 0, at once, no probe failed. **A second handle resets a mode:** it
+     read the first's `SentTunnel, ReceiveTunnel` and set `None`; the first's packets stopped that second, nothing
+     broke. The driver answers a read of an empty queue with error 87, and writes no count back for a send (its
+     success is the answer); the largest frame either way was 1514.
+  2. Unchanged forwarding — cost (CPU, latency p50/p95/p99, loss) against the direct baseline. ← next
+     Measured in gate 1: 3.0 s of CPU over 15 s at ~12,500 packets/s, 95% of them inbound (a download). Routed replies
+     come out of the tunnel, not off the adapter, so the router may not need the receive path: measure whether
+     `SEND_PACKETS_TO_MSTCP` delivers on an adapter that is not in receive-tunnel mode.
   3. Attribution: short-lived, reused and shared sockets — owner found, or counted as unattributed.
   4. One program routed from its first TCP SYN and UDP datagram through the real VPN; another program direct.
   5. Packet boundaries: DF/MSS, fragments, ICMP, offloads; selected IPv6 blocked.
