@@ -2,6 +2,13 @@
 
 ## 0.1.0 — unreleased
 
+- Many connections at once (2026-10-19). The receiver keeps its SACK blocks as ranges as segments arrive — rebuilt from
+  every held segment, one hole cost the network's reader 105 µs a segment and at 64 downloads it fell behind the tunnel
+  and dropped thousands of packets itself. A waiting reader is woken once per burst, not per segment. A half-closed
+  relay whose other side is silent for a minute is let go (D8). `TunnelCounters.Overflowed` counts packets this process
+  drops itself; `Sallyport.Probe --concurrent N` measures N connections at once. Measured: 32 and 64 at once, twice,
+  all whole and all from the server's address, 12.1 and 18.2 MB/s together, nothing overflowed; a cold Edge session
+  (Yahoo! JAPAN, nikkei.com) through the proxy held up to 49 at once with none failing (D7).
 - Phase 3, the userspace network (2026-10-12): `TunnelNetwork` — outbound TCP (MSS, window scaling, SACK, RFC 6298
   retransmission, slow start, fast retransmit, reassembly, FIN both ways) and DNS through the pushed resolvers with a TTL
   cache — and `TunnelConnector`, which makes `Socks5Server` dial through the tunnel. Measured: ipinfo.io through the

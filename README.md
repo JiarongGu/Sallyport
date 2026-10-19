@@ -12,8 +12,9 @@ no system routes, no WSL.
 
 Phases 1–3 of 4 work against a real OpenVPN server (2026-10-12): the control channel (`tls-crypt`, client certificate,
 TLS 1.3), the data channel (AES-256-GCM), and a userspace TCP behind a loopback SOCKS5 proxy that downloads as fast as
-Linux OpenVPN does on the same server. Phase 3's unit tests and Kobo's adoption are next (see `TASKS.md`); phase 4 is
-what a long-running client needs. First consumer: [Kobo](../Kobo/apps/kobo), whose browser route uses it before it is released.
+Linux OpenVPN does on the same server, and carries a browser page's dozens of connections at once (2026-10-19, D7).
+Phase 4 is what a long-running client needs (see `TASKS.md`). First consumer: [Kobo](../Kobo/apps/kobo), whose browser
+route runs `Sallyport.Host` before it is released.
 
 ## Licence and provenance
 
@@ -29,6 +30,7 @@ and is not affiliated with or endorsed by OpenVPN Inc.
 dotnet build Sallyport.slnx
 dotnet test Sallyport.slnx
 dotnet run --project src/Sallyport.Probe -- <profile.ovpn>     # phase 1: connect and print the server's PUSH_REPLY
+dotnet run --project src/Sallyport.Probe -c Release -- <profile.ovpn> --concurrent 64   # phase 3: 64 connections at once
 ```
 
 A profile holds a private key: it is read from wherever the caller keeps it and never copied into this repository.

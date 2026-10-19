@@ -47,8 +47,8 @@ nothing in either direction.
 ## D6 — The userspace TCP is sized by measurement: 4 MB window, 4 MB socket buffer, SACK (2026-10-12)
 
 **Axis measured: one connection's 10 MB download, from Australia through the Tokyo server, against WSL's OpenVPN
-(Linux TCP) on the same server, runs interleaved.** Many concurrent connections, uploads and hours-long sessions were
-not measured.
+(Linux TCP) on the same server, runs interleaved.** Uploads and hours-long sessions were not measured; many concurrent
+connections are D7.
 
 | change | Sallyport | WSL in the same window | what the counters showed |
 |---|---|---|---|
@@ -61,3 +61,46 @@ A connection's ceiling is window ÷ round trip, so 512 KB at 200 ms could never 
 as bytes queue, so the 4 MB is a ceiling, not a cost per connection. Without SACK a server repairs one hole per round
 trip; with it, many. The counters that made this visible — segments out of order, ids missing from the server's data
 packets — stay, because a download's loss is otherwise invisible from the receiving side.
+
+## D7 — Many connections at once: the reader's cost per segment was the limit; the GC stays the default (2026-10-19)
+
+**Axis measured: 32 and 64 connections opened at once through the proxy against the Tokyo server — each asking one of
+six Cloudflare hosts where it came from, then each downloading 1 MB — from a client in the same process
+(`Sallyport.Probe --concurrent N`); and a real browser page.** Not compared with Linux OpenVPN.
+
+At 64 the network's single reader fell behind the tunnel: its queue reached 4,096 of 4,096 and 61, 1,345 and 10,510
+packets were thrown away by this process itself — invisible until `TunnelCounters.Overflowed` counted them, because it
+looks exactly like loss on the path. Every early segment is answered at once with SACK blocks, and those were rebuilt
+from every segment held past the hole: offline, a hole of 3,000 segments cost 105 µs a segment, against 1 µs in order.
+Each drop made a new hole, so the reader slowed as it fell behind.
+
+| change | 64 × 1 MB at once, together | what the counters showed |
+|---|---|---|
+| as it was (Debug build, 3 runs) | 9.8–15.2 MB/s | 61, 1,345 and 10,510 overflowed; the queue full |
+| SACK ranges kept as segments arrive (9 runs) | 11.3–16.6 | a hole 4.6–9.7 µs a segment offline; 0 overflowed in 8 runs, 2,568 in one |
+| a waiting reader woken once per burst, not per segment (12 runs, Release) | 11.8–18.2 | contended locks 190–325 → 24–51 a round; 0 overflowed; the queue at most 3,378 once, otherwise 289–881 |
+
+What still stalls the reader is mostly the collector: of its single dispatches that took 5 ms or more in three timed
+runs, 24 of 27 held a gen 0/1 collection of 5–11 ms (two earlier stalls of 62 and 101 ms were not timed that way).
+About 300 MB is allocated per 64 MB downloaded, the client's share included.
+
+**Server GC was measured and not taken.** In the probe, where the client shares the process, it cut pauses from
+115–146 ms a round to 50–55 and the queue's peak to 88–119. In `Sallyport.Host`, with the client in another process as
+Kobo's browser is (64 parallel curl downloads, two runs each), it changed nothing measurable — 8.9–10.1 MB/s against
+9.2–10.2 — and cost 30 MB more at peak (145–148 MB private against 110–117). A host that runs Sallyport in its own
+process chooses its own GC.
+
+At 32 at once (6 runs, before the fixes and after): 8.2–13.4 MB/s together, 0 overflowed. A real page through the
+proxy, headless Edge with a cold cache (Yahoo! JAPAN, then nikkei.com, after a trace page that said JP): up to 49
+connections at once, 98–114 opened, 0 failed to connect, 0 overflowed.
+
+## D8 — A half-closed relay whose other side is silent for a minute is let go (2026-10-19)
+
+The proxy sees only end-of-stream, never whether a client shut down its sending side or closed outright, so it passes
+it on as a half-close and keeps the reply open (RFC 1928 says nothing either way). A browser closes outright, and some
+servers never close their side after our FIN. Measured: a cold Edge session left 6 of its 114 connections held 90 s
+after it exited, each with our FIN acknowledged and none from the server. A Host up all day would only gather them.
+An operating system bounds the same state for a closed socket — Linux gives it a minute (`tcp_fin_timeout`) — so once
+one direction of a relay has ended, the relay ends when the other has been silent for 60 s, every byte on it postponing
+that. Measured with it, the same cold session served for 150 s: three relays were still held when the last page
+ended, none by 80 s, and no connection was left in the network by 110 s, after the linger.
