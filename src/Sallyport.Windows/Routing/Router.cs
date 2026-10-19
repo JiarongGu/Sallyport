@@ -13,6 +13,8 @@ public sealed class FlowDecision(Verdict verdict, int pid)
     public Verdict Verdict { get; internal set; } = verdict;
     public int Pid { get; internal set; } = pid;
     public long Packets { get; internal set; }
+    /// <summary>Environment.TickCount64 of its last packet.</summary>
+    public long LastSeen { get; internal set; } = Environment.TickCount64;
 }
 
 /// <summary>
@@ -27,8 +29,13 @@ public sealed class Router : IDisposable
     /// by another process was misattributed for 250 ms when nothing refreshed (measured, gate 3).</summary>
     public static readonly TimeSpan Recheck = TimeSpan.FromMilliseconds(250);
 
+    /// <summary>How long a decision or a mapping outlives its last packet once no socket holds its local end. Two
+    /// minutes, as home routers commonly keep a UDP mapping — a game keeps its own alive more often than that.</summary>
+    public static readonly TimeSpan Idle = TimeSpan.FromMinutes(2);
+
     // A miss refreshes the tables, but not more than once per this: a refresh costs 1-4 ms (measured, gate 3).
     private static readonly TimeSpan RefreshGap = TimeSpan.FromMilliseconds(2);
+    private static readonly TimeSpan SweepEvery = TimeSpan.FromSeconds(10);
 
     private readonly PacketDriver _driver;
     private readonly Interception _interception;
@@ -41,6 +48,7 @@ public sealed class Router : IDisposable
     private readonly Dictionary<InboundRefusal, long> _refused = [];
     private long _lastRefresh;
     private long _lastRecheck;
+    private long _lastSweep = Stopwatch.GetTimestamp();
 
     public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Nat nat, Action<byte[]> toTunnel)
     {
@@ -67,6 +75,10 @@ public sealed class Router : IDisposable
     public long LatePackets { get; private set; }
     public long HandedUp { get; private set; }
     public long HandUpRefused { get; private set; }
+    public long RoutedFlows { get; private set; }
+    public long RoutedTcpFlows { get; private set; }
+    public long ExpiredFlows { get; private set; }
+    public long ExpiredMappings { get; private set; }
     public IReadOnlyDictionary<InboundRefusal, long> Refused { get { lock (_injectLock) return new Dictionary<InboundRefusal, long>(_refused); } }
 
     public IReadOnlyDictionary<Flow, FlowDecision> Flows => _flows;
@@ -80,6 +92,7 @@ public sealed class Router : IDisposable
             {
                 _interception.Wait(50);
                 if (Stopwatch.GetElapsedTime(_lastRecheck) >= Recheck) RecheckUdp();
+                if (Stopwatch.GetElapsedTime(_lastSweep) >= SweepEvery) Sweep();
                 _interception.Drain(Decide);
             }
         }
@@ -117,8 +130,14 @@ public sealed class Router : IDisposable
         {
             decision = Classify(flow);
             _flows[flow] = decision;
+            if (decision.Verdict == Verdict.Routed)
+            {
+                RoutedFlows++;
+                if (flow.Protocol == Flow.Tcp) RoutedTcpFlows++;
+            }
         }
         decision.Packets++;
+        decision.LastSeen = Environment.TickCount64;
         switch (decision.Verdict)
         {
             case Verdict.Direct: DirectPackets++; return false;
@@ -168,6 +187,21 @@ public sealed class Router : IDisposable
             decision.Verdict = routed ? Verdict.Routed : Verdict.Direct;
             decision.Pid = pid;
         }
+    }
+
+    // Decisions and mappings idle past Idle go, unless a socket still holds their local end: a game's UDP socket quiet in
+    // a menu keeps its tunnel port, so the server can still reach it.
+    private void Sweep()
+    {
+        _lastSweep = Stopwatch.GetTimestamp();
+        var idleSince = Environment.TickCount64 - (long)Idle.TotalMilliseconds;
+        foreach (var flow in _flows.Where(f => f.Value.LastSeen < idleSince && !_owners.Holds(f.Key.Protocol, f.Key.LocalAddress, f.Key.LocalPort))
+                     .Select(f => f.Key).ToList())
+        {
+            _flows.Remove(flow);
+            ExpiredFlows++;
+        }
+        ExpiredMappings += Nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));
     }
 
     private void Refresh()

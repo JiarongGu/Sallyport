@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Channels;
 using Sallyport;
 using Sallyport.Profile;
+using Sallyport.Runtime;
 using Sallyport.Net;
 using Sallyport.Windows.PacketFilter;
 using Sallyport.Windows.Routing;
@@ -60,7 +61,7 @@ switch (args.FirstOrDefault())
     case "workload":
         return await WorkloadAsync();
     case "route":
-        return await RouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60));
+        return await RouteAsync(args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null, Option("--seconds", 60), Text("--folder"));
     case "routed-workload":
         if (Console.ReadLine() != "go") return 2;
         await ExerciseAsync();
@@ -72,7 +73,7 @@ switch (args.FirstOrDefault())
     default:
         Console.Error.WriteLine("usage: Sallyport.Driver status | fetch | install | uninstall | adapters"
             + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
-            + " | rtt [--count N] | attribute [--seconds N] | route <profile.ovpn> | reset | guard [--seconds N]");
+            + " | rtt [--count N] | attribute [--seconds N] | route <profile.ovpn> [--folder <game folder>] [--seconds N] | reset | guard [--seconds N]");
         return 2;
 }
 
@@ -81,6 +82,12 @@ bool ReceivePath()
 {
     var at = Array.IndexOf(args, "--mode");
     return !(at >= 0 && at + 1 < args.Length && args[at + 1] == "send");
+}
+
+string? Text(string name)
+{
+    var at = Array.IndexOf(args, name);
+    return at >= 0 && at + 1 < args.Length ? args[at + 1] : null;
 }
 
 int Option(string name, int fallback)
@@ -461,16 +468,27 @@ async Task<int> WorkloadAsync()
     return 0;
 }
 
-// Gate 4: one program routed through the real VPN from its first packet, while this one stays direct. The profile is
-// read where its owner keeps it and nothing of it is printed (rule 2). The tunnel lives here, as the client will hold
-// it (docs/design/router.md change 1); the router takes the child's packets from the driver and hands its replies up.
-async Task<int> RouteAsync(string? profilePath, int seconds)
+// Gate 4 and on: programs routed through the real VPN from their first packet. Without --folder, a child process is
+// selected and plays a measured workload while this one does the same direct. With --folder, every program the game
+// folder's scan includes (GameFolder) is selected, for as long as --seconds, reporting every 10 s — a game played by
+// its owner. The profile is read where its owner keeps it and nothing of it is printed (rule 2). The tunnel lives here,
+// as the client will hold it (docs/design/router.md change 1). If it ends, routing stops and the game goes direct.
+async Task<int> RouteAsync(string? profilePath, int seconds, string? folder)
 {
-    if (profilePath is null) { Console.Error.WriteLine("usage: Sallyport.Driver route <profile.ovpn>"); return 2; }
+    if (profilePath is null) { Console.Error.WriteLine("usage: Sallyport.Driver route <profile.ovpn> [--folder <game folder>] [--seconds N]"); return 2; }
     OvpnProfile profile;
     // The exception's type only: a parse error's message may quote the profile.
     try { profile = OvpnProfile.Parse(File.ReadAllText(profilePath)); }
     catch (Exception e) { Console.WriteLine($"could not read the profile ({e.GetType().Name})"); return 2; }
+
+    ProgramSelection? selection = null;
+    if (folder is not null)
+    {
+        var included = GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path).ToList();
+        if (included.Count == 0) { Console.WriteLine("the folder holds no program to route"); return 2; }
+        selection = new ProgramSelection(included);
+        Console.WriteLine($"selected: {included.Count} programs — {string.Join(", ", included.Select(Path.GetFileName))}");
+    }
 
     using var driver = OpenDriver();
     if (driver is null) return 1;
@@ -491,8 +509,9 @@ async Task<int> RouteAsync(string? profilePath, int seconds)
 
         var outbound = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var child = 0;
+        Func<int, bool> selects = selection is not null ? selection.Selects : pid => pid == Volatile.Read(ref child);
         var nat = new Nat(BinaryPrimitives.ReadUInt32LittleEndian(tunnelAddress.GetAddressBytes()));
-        using var router = new Router(driver, adapter.Handle, pid => pid == Volatile.Read(ref child), nat, p => outbound.Writer.TryWrite(p));
+        using var router = new Router(driver, adapter.Handle, selects, nat, p => outbound.Writer.TryWrite(p));
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         var routing = Task.Factory.StartNew(() => router.Run(stop.Token), TaskCreationOptions.LongRunning);
         var sending = Task.Run(async () =>
@@ -506,39 +525,73 @@ async Task<int> RouteAsync(string? profilePath, int seconds)
             try { await foreach (var packet in tunnel.Packets.ReadAllAsync(stop.Token)) router.FromTunnel(packet); }
             catch (OperationCanceledException) { }
         });
+        // The tunnel gone means routed packets have nowhere to go: give the adapter back, and the game goes direct.
+        _ = tunnel.Completion.ContinueWith(t =>
+        {
+            // Closed by this program once routing is over: nothing to say.
+            if (stop.IsCancellationRequested) return;
+            Console.WriteLine($"{Now()} route: TUNNEL ENDED ({t.Exception?.InnerException?.Message ?? "closed"}); routing stops, the game goes direct");
+            stop.Cancel();
+        }, TaskContinuationOptions.ExecuteSynchronously);
         Console.WriteLine($"{Now()} route: adapter 0x{adapter.Handle:X} in mode {driver.Mode(adapter.Handle)}");
 
-        Console.WriteLine("direct — this process, not selected:");
-        await ExerciseAsync();
-
-        using (var process = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "routed-workload")
-               { RedirectStandardInput = true, RedirectStandardOutput = true })!)
+        if (selection is null)
         {
+            Console.WriteLine("direct — this process, not selected:");
+            await ExerciseAsync();
+            using var process = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "routed-workload")
+                { RedirectStandardInput = true, RedirectStandardOutput = true })!;
             // Selected before it sends anything: its first packet is the one this gate is about.
             Volatile.Write(ref child, process.Id);
             Console.WriteLine($"routed — child {process.Id}, selected:");
             await process.StandardInput.WriteLineAsync("go");
             while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine(line);
             await process.WaitForExitAsync();
+            await Task.Delay(500);
+            await stop.CancelAsync();
         }
-        await Task.Delay(500);
-        await stop.CancelAsync();
-        outbound.Writer.Complete();
+        else
+        {
+            var clock = Stopwatch.StartNew();
+            long lastRouted = 0, lastUp = 0;
+            while (!stop.IsCancellationRequested)
+            {
+                try { await Task.Delay(10_000, stop.Token); } catch (OperationCanceledException) { }
+                var routed = router.RoutedPackets;
+                var up = router.HandedUp;
+                Console.WriteLine($"{Now()} t={clock.Elapsed.TotalSeconds,4:F0}s  routed {routed} (+{routed - lastRouted}), handed up {up} (+{up - lastUp}),"
+                    + $" flows routed {router.RoutedFlows} (TCP {router.RoutedTcpFlows}, UDP {router.RoutedFlows - router.RoutedTcpFlows}),"
+                    + $" held back {router.HeldBack}, late {router.LateFlows}, mappings {nat.Count}, refused from tunnel {router.Refused.Values.Sum()}");
+                lastRouted = routed;
+                lastUp = up;
+            }
+        }
+        outbound.Writer.TryComplete();
         await Task.WhenAll(routing, sending, receiving);
 
         Console.WriteLine($"{Now()} route: routed {router.RoutedPackets}, direct {router.DirectPackets}, unowned {router.UnownedPackets},"
             + $" held back {router.HeldBack}, late flows {router.LateFlows} ({router.LatePackets} packets); handed up {router.HandedUp},"
-            + $" hand-up refused {router.HandUpRefused}; from the tunnel refused: "
+            + $" hand-up refused {router.HandUpRefused}; expired flows {router.ExpiredFlows}, mappings {router.ExpiredMappings}; from the tunnel refused: "
             + (router.Refused.Count == 0 ? "none" : string.Join(", ", router.Refused.Select(r => $"{r.Key} {r.Value}"))));
         Console.WriteLine($"{Now()} route: NAT mappings {nat.Count}; owner-table refreshes {router.Owners.Refreshes}; {router.Interception}");
-        var childFlows = router.Flows.Where(f => f.Value.Pid == child || f.Value.Verdict == Verdict.Routed).ToList();
-        Console.WriteLine($"the child's flows ({childFlows.Count}):");
-        foreach (var (flow, decision) in childFlows)
-            Console.WriteLine($"  {decision.Verdict,-8} {decision.Packets,5} packets  {(flow.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{flow.LocalPort} -> {flow.Remote}:{flow.RemotePort}"
-                + (decision.Pid == child && decision.Verdict != Verdict.Routed ? "  <- LEFT DIRECT" : ""));
-        var counters = tunnel.Counters;
-        Console.WriteLine($"tunnel: {counters}");
+        if (selection is not null)
+        {
+            Console.WriteLine($"selected processes: {string.Join(", ", selection.Selected.Select(pid => $"{pid} {ProcessName(pid)}"))}");
+            Console.WriteLine($"processes whose program could not be read: {(selection.Unreadable.Count == 0 ? "none" : string.Join(", ", selection.Unreadable))}");
+        }
+        var selected = router.Flows.Where(f => f.Value.Verdict == Verdict.Routed || (selection is null ? f.Value.Pid == child : selection.Selected.Contains(f.Value.Pid))).ToList();
+        Console.WriteLine($"the selected programs' flows ({selected.Count}), most packets first:");
+        foreach (var (flow, decision) in selected.OrderByDescending(f => f.Value.Packets).Take(40))
+            Console.WriteLine($"  {decision.Verdict,-8} {decision.Packets,6} packets  {(flow.Protocol == Flow.Tcp ? "TCP" : "UDP")} :{flow.LocalPort} -> {flow.Remote}:{flow.RemotePort}  pid {decision.Pid}"
+                + (decision.Verdict != Verdict.Routed ? "  <- LEFT DIRECT" : ""));
+        Console.WriteLine($"tunnel: {tunnel.Counters}");
         return 0;
+    }
+
+    static string ProcessName(int pid)
+    {
+        try { using var p = Process.GetProcessById(pid); return p.ProcessName; }
+        catch (ArgumentException) { return "(exited)"; }
     }
 }
 

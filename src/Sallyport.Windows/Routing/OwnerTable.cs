@@ -27,6 +27,7 @@ public sealed partial class OwnerTable
     internal const int UdpRowSize = 12;
 
     private readonly Dictionary<(uint, ushort, uint, ushort), int> _tcp = [];
+    private readonly HashSet<(uint, ushort)> _tcpLocal = [];
     private readonly Dictionary<(uint, ushort), int> _udp = [];
     private byte[] _buffer = new byte[64 * 1024];
 
@@ -40,6 +41,8 @@ public sealed partial class OwnerTable
         var started = Stopwatch.GetTimestamp();
         var tcp = Read(TCP_TABLE_OWNER_PID_ALL, tcp: true);
         IndexTcp(_buffer.AsSpan(0, tcp), _tcp);
+        _tcpLocal.Clear();
+        foreach (var (local, port, _, _) in _tcp.Keys) _tcpLocal.Add((local, port));
         var udp = Read(UDP_TABLE_OWNER_PID, tcp: false);
         IndexUdp(_buffer.AsSpan(0, udp), _udp);
         Refreshes++;
@@ -61,6 +64,11 @@ public sealed partial class OwnerTable
         if (specific && wildcard && specificPid != wildcardPid) { pid = 0; return Ownership.Ambiguous; }
         return specific ? Answer(true, specificPid, out pid) : Answer(wildcard, wildcardPid, out pid);
     }
+
+    /// <summary>Whether a socket still holds this local end in the snapshot — what keeps an idle mapping alive.</summary>
+    public bool Holds(byte protocol, uint localAddress, ushort localPort) => protocol == Flow.Tcp
+        ? _tcpLocal.Contains((localAddress, localPort))
+        : _udp.ContainsKey((localAddress, localPort)) || _udp.ContainsKey((0u, localPort));
 
     private static Ownership Answer(bool found, int row, out int pid)
     {

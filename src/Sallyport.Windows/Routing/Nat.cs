@@ -26,6 +26,8 @@ public sealed class NatMapping
     internal byte[] ReplyLink { get; set; } = [];
     public long PacketsOut { get; internal set; }
     public long PacketsIn { get; internal set; }
+    /// <summary>Environment.TickCount64 of its last packet either way.</summary>
+    public long LastUsed { get; internal set; } = Environment.TickCount64;
 }
 
 /// <summary>Why the tunnel's packet was not handed up.</summary>
@@ -78,6 +80,7 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss)
             }
             mapping.Peers.Add(peer);
             mapping.PacketsOut++;
+            mapping.LastUsed = Environment.TickCount64;
         }
 
         BinaryPrimitives.WriteUInt32LittleEndian(ip[12..], TunnelAddress);
@@ -109,6 +112,7 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss)
             if (!_byTunnelPort.TryGetValue((protocol, BinaryPrimitives.ReadUInt16BigEndian(segment[2..])), out mapping)) return InboundRefusal.NoMapping;
             if (!mapping.Peers.Contains(peer)) { mapping = null; return InboundRefusal.UnknownPeer; }
             mapping.PacketsIn++;
+            mapping.LastUsed = Environment.TickCount64;
         }
 
         BinaryPrimitives.WriteUInt32LittleEndian(ip[16..], mapping.LocalAddress);
@@ -116,6 +120,22 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss)
         Checksum.WriteIpv4Header(ip, headerLength);
         Checksum.WriteTransport(ip, headerLength);
         return InboundRefusal.None;
+    }
+
+    /// <summary>Lets go of mappings idle since <paramref name="idleSince"/> (a TickCount64) that
+    /// <paramref name="stillHeld"/> does not keep — their tunnel ports become free, their peers forgotten.</summary>
+    public int Expire(long idleSince, Func<NatMapping, bool> stillHeld)
+    {
+        lock (_lock)
+        {
+            var gone = _byLocal.Where(m => m.Value.LastUsed < idleSince && !stillHeld(m.Value)).ToList();
+            foreach (var (key, mapping) in gone)
+            {
+                _byLocal.Remove(key);
+                _byTunnelPort.Remove((mapping.Protocol, mapping.TunnelPort));
+            }
+            return gone.Count;
+        }
     }
 
     /// <summary>A reply frame for <paramref name="ip"/>: the mapping's link header, then the packet.</summary>
