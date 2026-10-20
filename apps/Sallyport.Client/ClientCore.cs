@@ -96,6 +96,9 @@ internal sealed class ClientCore
         // What is routed follows what the person connected and which apps are on (D23): looked at again whenever either
         // changes.
         _connections.Changed += Replan;
+        // A profile that signs in connects with its remembered login or one typed for this connection (D29).
+        _connections.LoginFor = LoginFor;
+        _connections.SignInRefused += SignInRefusedBy;
         _runner.Changed += Publish;
         _runner.Lost += TurnOffOnLoss;
         _runner.Failed += SayFailed;
@@ -247,7 +250,7 @@ internal sealed class ClientCore
         else if (file.Length > LargestProfile) why = L.T("{0} is far larger than any profile.", file.Name);
         else
             try { text = File.ReadAllText(file.FullName); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { why = L.T("{0} could not be read: {1}.", file.Name, e.GetType().Name); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { why = L.T("Could not read this file. Choose it again or use another file."); }
         Read(token, values with { Source = "file" }, file.Name, Path.GetFileNameWithoutExtension(file.Name), text, why);
     }
 
@@ -265,13 +268,26 @@ internal sealed class ClientCore
         lock (_gate) _fetching = token;
         Publish();
         try { got = await ProfileDownload.GetAsync(Downloads, address, values.SignIn ? values.Username : null, values.SignIn ? values.Password : null, CancellationToken.None); }
+        // Never a way past it: a server that cannot prove who it is gets no password and sends no keys.
+        catch (HttpRequestException e) when (e.InnerException is System.Security.Authentication.AuthenticationException)
+        { got = new(null, false, L.T("Could not verify {0}'s identity. Check the address or contact your provider.", address.Host)); }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException)
-        { got = new(null, false, L.T("{0} could not be reached ({1}).", address.Host, e is TaskCanceledException ? L.T("no answer in time") : e.GetType().Name)); }
+        { got = new(null, false, L.T("Could not reach {0}. Try again.", address.Host)); }
         finally { lock (_gate) _fetching = null; }
         if (got.SignIn)
         {
-            Refuse(token, values with { Source = "link", SignIn = true, Password = "" }, got.Why is null ? "form" : "password",
-                got.Why ?? L.T("{0} asks who you are: type the username and password your VPN provider gave you.", address.Host));
+            // Under a new token, so the page takes the sign-in it now shows; what the person typed in the link stays.
+            lock (_gate)
+            {
+                if (_editor?.Token != token) return;
+                _reading = null;
+                _editor = new OpenEditor(NewToken(), "new-profile", "", values with { Source = "link", SignIn = true, Password = "" },
+                    new Dictionary<string, string>
+                    {
+                        [got.Why is null ? "form" : "password"] = got.Why ?? L.T("{0} asks who you are: type the username and password your VPN provider gave you.", address.Host),
+                    });
+            }
+            Publish();
             return;
         }
         Read(token, values with { Source = "link", Password = "" }, address.Host, ProfileDownload.NameFor(address), got.Text, got.Why);
@@ -287,16 +303,25 @@ internal sealed class ClientCore
         if (text is not null && why is null)
             // The store's own reasons never quote the text, so they may cross to the page.
             try { preview = ProfileStore.Preview(text); }
-            catch (InvalidDataException e) { why = L.T("{0} is not a profile Sallyport can import: {1}.", origin, e.Message); }
+            catch (InvalidDataException) { why = null; }
         if (preview is null)
         {
-            Refuse(token, values, values.Source == "link" ? "link" : "form", why ?? L.T("{0} is not a profile Sallyport can import.", origin));
+            Refuse(token, values, values.Source == "link" ? "link" : "form", why ?? (values.Source == "link"
+                ? L.T("This address did not provide a VPN profile. Check it with your provider.")
+                : L.T("This file does not contain a usable VPN profile. Ask whoever supplied it for another copy.")));
             return;
         }
         lock (_gate)
         {
             if (_editor?.Token != token) return;
-            var next = new OpenEditor(NewToken(), "new-profile", "", values with { Name = UniqueName(suggested), Connect = values.Connect && preview.Unsupported is null }, Empty);
+            // The username the profile carries, else the one the person signed in to its provider with, to start from; the
+            // provider's password is never taken for the VPN's.
+            var next = new OpenEditor(NewToken(), "new-profile", "", values with
+            {
+                Name = UniqueName(suggested), Connect = values.Connect && preview.Unsupported is null,
+                NeedsLogin = preview.NeedsLogin && preview.Unsupported is null,
+                Username = preview.Username ?? (values.SignIn ? values.Username : ""), Password = "", Remember = false, SignIn = false,
+            }, Empty);
             _editor = next;
             _reading = (next.Token, origin, text!, preview);
         }
@@ -336,16 +361,32 @@ internal sealed class ClientCore
             Refuse(token, values, "form", L.T("Choose a file or get the profile from its link first."));
             return;
         }
+        var errors = new Dictionary<string, string>();
         var name = values.Name?.Trim() ?? "";
-        if (name.Length is 0 or > LongestName)
+        if (name.Length is 0 or > LongestName) errors["name"] = L.T("Use 1 to {0} characters.", LongestName);
+        // Never over another: two sections of one name would be told apart by nothing on the Overview.
+        else if (_store.List().Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            errors["name"] = L.T("A profile already uses this name. Choose another name.");
+        // A username and password are needed now only to remember them or to connect: otherwise asked when it connects.
+        var signsIn = preview.NeedsLogin && preview.Unsupported is null;
+        var username = values.Username?.Trim() ?? "";
+        var password = values.Password ?? "";
+        if (signsIn && (values.Remember || values.Connect))
         {
-            lock (_gate) if (_editor?.Token == token) _editor = _editor with { Values = values, Errors = new Dictionary<string, string> { ["name"] = L.T("Use 1 to {0} characters.", LongestName) } };
+            if (username.Length == 0) errors["username"] = L.T("Enter a username.");
+            if (password.Length == 0) errors["password"] = L.T("Enter a password.");
+        }
+        if (errors.Count > 0)
+        {
+            lock (_gate) if (_editor?.Token == token) _editor = _editor with { Values = values with { Password = "" }, Errors = errors };
             Publish();
             return;
         }
         StoredProfile stored;
         try { stored = _store.Import(name, text); }
         catch (InvalidDataException e) { Refuse(token, values, "form", L.T("{0} was not imported: {1}.", reading.Value.Origin, e.Message)); return; }
+        if (signsIn && username.Length > 0) KeepLogin(stored.Id, username, values.Remember ? password : null);
+        if (signsIn && values.Connect && !values.Remember) _sessionLogins[stored.Id] = new Login(username, password);
         lock (_gate)
         {
             if (_editor?.Token == token) _editor = null;
@@ -373,10 +414,158 @@ internal sealed class ClientCore
         catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException or FileNotFoundException or IOException) { return []; }
     });
 
+    // ---- Signing in (D29): a profile that asks for a username and password connects with one the person remembered,
+    // or one typed for this connection alone — kept in memory until they disconnect or Sallyport quits.
+
+    private readonly ConcurrentDictionary<string, Login> _sessionLogins = new();
+    // The sign-in open over the window, for one profile at a time, with why the last one did not do.
+    private (string Token, string ProfileId, string? Error)? _signIn;
+    // Each profile's username and whether its password is kept, read from its sealed login once: its row shows them.
+    private readonly ConcurrentDictionary<string, LoginState> _logins = new();
+
+    private Login? LoginFor(string id) => _sessionLogins.TryGetValue(id, out var typed) ? typed : _store.SavedLogin(id);
+
+    private LoginState LoginStateOf(string id) => _logins.GetOrAdd(id, key =>
+    {
+        try { return _store.LoginOf(key); }
+        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or IOException) { return new LoginState(null, false); }
+    });
+
+    private void KeepLogin(string id, string username, string? password)
+    {
+        _store.SetLogin(id, username, password);
+        _logins.TryRemove(id, out _);
+    }
+
+    private void OpenSignIn(string id, string? error)
+    {
+        lock (_gate) _signIn = (NewToken(), id, error);
+        Publish();
+    }
+
+    // The server did not accept them: what was typed for this connection is let go, and the person asked again — a
+    // remembered one is not tried again on its own.
+    private void SignInRefusedBy(string id)
+    {
+        _sessionLogins.TryRemove(id, out _);
+        if (_store.Find(id) is null) return;
+        OpenSignIn(id, L.T("The VPN server did not accept this username and password. Check them and try again."));
+    }
+
+    /// <summary>Connect, from the sign-in: the username kept, and the password too when the person chose to remember it.</summary>
+    public void SignIn(string token, SignInValues values)
+    {
+        string id;
+        lock (_gate)
+        {
+            if (_signIn is not { } open || open.Token != token) return;
+            id = open.ProfileId;
+        }
+        var username = values.Username?.Trim() ?? "";
+        var password = values.Password ?? "";
+        var error = username.Length == 0 ? L.T("Enter a username.") : password.Length == 0 ? L.T("Enter a password.") : null;
+        if (error is not null)
+        {
+            lock (_gate) if (_signIn?.Token == token) _signIn = (token, id, error);
+            Publish();
+            return;
+        }
+        KeepLogin(id, username, values.Remember ? password : null);
+        if (values.Remember) _sessionLogins.TryRemove(id, out _);
+        else _sessionLogins[id] = new Login(username, password);
+        lock (_gate) _signIn = null;
+        Connect(id);
+        Publish();
+    }
+
+    /// <summary>Not now: the profile stays as it was, disconnected.</summary>
+    public void CancelSignIn(string token)
+    {
+        lock (_gate)
+        {
+            if (_signIn?.Token != token) return;
+            _signIn = null;
+        }
+        Publish();
+    }
+
+    // ---- Edit a profile (D29): its name, and for one that signs in, its username and kept password.
+
+    public void BeginProfileEdit(string id)
+    {
+        var profile = Profile(id);
+        var login = profile.NeedsLogin ? LoginStateOf(id) : new LoginState(null, false);
+        lock (_gate) _editor = new OpenEditor(NewToken(), "profile-edit", id,
+            new ProfileEditValues(profile.Name, login.Username ?? "", "", false, false, profile.NeedsLogin, login.PasswordSaved), Empty);
+        Publish();
+    }
+
+    public void SaveProfileEdit(string token, ProfileEditValues values)
+    {
+        if (EditorFor(token, "profile-edit") is not { } editor) return;
+        var profile = Profile(editor.SubjectId);
+        var errors = new Dictionary<string, string>();
+        var name = values.Name?.Trim() ?? "";
+        if (name.Length is 0 or > LongestName) errors["name"] = L.T("Use 1 to {0} characters.", LongestName);
+        else if (_store.List().Any(p => p.Id != profile.Id && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            errors["name"] = L.T("A profile already uses this name. Choose another name.");
+        var username = values.Username?.Trim() ?? "";
+        if (profile.NeedsLogin && values.ChangePassword && string.IsNullOrEmpty(values.Password)) errors["password"] = L.T("Enter a password.");
+        if (profile.NeedsLogin && values.ChangePassword && username.Length == 0) errors["username"] = L.T("Enter a username.");
+        if (errors.Count > 0)
+        {
+            lock (_gate) if (_editor?.Token == token) _editor = _editor with { Values = values with { Password = "" }, Errors = errors };
+            Publish();
+            return;
+        }
+        if (name != profile.Name) _store.Rename(profile.Id, name);
+        if (profile.NeedsLogin)
+        {
+            var kept = LoginStateOf(profile.Id);
+            // A kept password belongs to its username: a new username without a new password forgets it.
+            if (values.ChangePassword) KeepLogin(profile.Id, username, values.Password);
+            else if (values.ForgetPassword || username != (kept.Username ?? "")) KeepLogin(profile.Id, username, null);
+        }
+        lock (_gate) if (_editor?.Token == token) _editor = null;
+        Notify(NoticeKind.Info, L.T("Saved {0}.", name), new("profile", profile.Id));
+        Publish();
+    }
+
+    // ---- Profiles dropped on the window, or opened from Explorer: onto the import page, one at a time.
+
+    /// <summary>The files given: one profile goes to the import page, as one chosen there would; several, or anything that
+    /// is not a profile, are said and left.</summary>
+    public void OpenProfileFiles(IReadOnlyList<string> paths)
+    {
+        if (paths.Count == 0) return;
+        if (paths.Count > 1) { Notify(NoticeKind.Warning, L.T("Import one profile at a time.")); return; }
+        if (!(paths[0].EndsWith(".ovpn", StringComparison.OrdinalIgnoreCase) || paths[0].EndsWith(".conf", StringComparison.OrdinalIgnoreCase)))
+        {
+            Notify(NoticeKind.Warning, L.T("That is not an OpenVPN profile. Choose a .ovpn file."));
+            return;
+        }
+        bool signingIn, editing;
+        lock (_gate)
+        {
+            signingIn = _signIn is not null;
+            editing = _editor is { Kind: not "new-profile" };
+        }
+        // What the person was doing is not thrown away under them.
+        if (signingIn) { Notify(NoticeKind.Warning, L.T("Finish signing in before importing a profile.")); return; }
+        if (editing) { Notify(NoticeKind.Warning, L.T("Finish or cancel what you are editing first, then import the profile.")); return; }
+        OpenProfileFile(paths[0]);
+    }
+
     public void Connect(string id)
     {
         var profile = Profile(id);
-        if (profile.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}.", profile.Name, why));
+        if (profile.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}", profile.Name, ClientView.CannotConnect(why)));
+        // Signed in first: one that asks for a username and password, with none for this connection, asks for them.
+        if (profile.NeedsLogin && LoginFor(id) is null)
+        {
+            OpenSignIn(id, null);
+            return;
+        }
         _locationFailed.TryRemove(id, out _);
         _connections.Connect(id);
         // Connecting is asking again: apps whose route ended on its own for this profile are tried once more.
@@ -408,6 +597,8 @@ internal sealed class ClientCore
         try { await _connections.DisconnectAsync(id); }
         finally
         {
+            // A password typed for this connection alone goes with it.
+            _sessionLogins.TryRemove(id, out _);
             _disconnecting.TryRemove(id, out _);
             _locationFailed.TryRemove(id, out _);
             Publish();
@@ -493,6 +684,8 @@ internal sealed class ClientCore
             await _connections.DisconnectAsync(id);
             if (!_store.Remove(id)) return;
             _servers.TryRemove(id, out _);
+            _logins.TryRemove(id, out _);
+            _sessionLogins.TryRemove(id, out _);
             _settings.Forget(id);
             _items.Forget(id);
         }
@@ -1431,7 +1624,8 @@ internal sealed class ClientCore
                 p, _connections.ProxyPortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
                 live?.LaneFor(p.Id) is { } lane ? L.List(lane.Apps.Keys.Select(a => items.FirstOrDefault(g => g.Id == a)?.Name).OfType<string>()) : null,
-                _connections.NextAttemptOf(p.Id), _settings.ChoicesFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)), ServersOf(p.Id))))
+                _connections.NextAttemptOf(p.Id), _settings.ChoicesFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)), ServersOf(p.Id),
+                p.NeedsLogin ? LoginStateOf(p.Id) : null)))
             .ToList();
         var driver = GameViews.Driver(Driver());
         var dialog = Volatile.Read(ref _dialog);
@@ -1462,9 +1656,11 @@ internal sealed class ClientCore
         (string Token, SetupPreview Preview)? setup;
         (string Token, BackupFile File, string Name)? importing;
         (string Token, string Origin, string Text, ProfilePreview Preview)? profileRead;
+        (string Token, string ProfileId, string? Error)? signIn;
         bool fetching;
         lock (_gate)
         {
+            signIn = _signIn;
             editor = _editor;
             importing = _importing is { } reading && reading.Token == editor?.Token ? reading : null;
             profileRead = _reading is { } looked && looked.Token == editor?.Token ? looked : null;
@@ -1522,7 +1718,8 @@ internal sealed class ClientCore
                 editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown(L.T("Follow Settings")) : UiAction.Hidden,
                 // A password the person typed is never sent back to the page: the page keeps what it was given.
                 editor.Kind, editor.Values is MoveValues move ? move with { Password = "", Confirm = "" }
-                    : editor.Values is NewProfileValues signIn ? signIn with { Password = "" } : editor.Values,
+                    : editor.Values is NewProfileValues typed ? typed with { Password = "" }
+                    : editor.Values is ProfileEditValues changing ? changing with { Password = "" } : editor.Values,
                 // What Launch may start: the app's included programs. The connection types the profile has servers for.
                 // Only an app Sallyport starts has a choice of what it starts: one of its programs told of the proxy.
                 editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited && edited.PacketPrograms.Count == 0
@@ -1545,14 +1742,22 @@ internal sealed class ClientCore
                     ? [.. iconed.Programs.Select(p => (Program: p, Url: _icons.Of(p.Path))).Where(c => c.Url is not null).DistinctBy(c => c.Url)
                         .Select(c => new IconChoice(c.Program.Id, Path.GetFileName(c.Program.Path), c.Url!))]
                     : null,
-                // What was read, as OpenVPN Connect's Imported Profile shows it: its server, locked, and where it came from.
+                // What was read, as OpenVPN Connect's Imported Profile shows it: its servers, locked, and where it came from;
+                // an edited profile's servers, which no edit changes.
                 editor.Kind == "new-profile" && profileRead is { } got
-                    ? [new Fact(L.T("Server"), ClientView.ServerText(got.Preview.Servers)), new Fact(L.T("From"), got.Origin)]
+                    ? [new Fact(L.T("Server"), string.Join(", ", got.Preview.Servers)), new Fact(L.T("From"), got.Origin)]
+                    : editor.Kind == "profile-edit" ? [new Fact(L.T("Server"), string.Join(", ", ServersOf(editor.SubjectId)))]
                     : null),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),
             notices,
-            L.Code);
+            L.Code,
+            // The sign-in a connect is waiting for, over whatever page is shown; its username kept, never a password.
+            signIn is { } asking && stored.FirstOrDefault(p => p.Id == asking.ProfileId) is { } signing
+                ? new SignInView(asking.Token, signing.Id, L.T("Sign in to {0}", signing.Name), string.Join(", ", ServersOf(signing.Id)),
+                    LoginStateOf(signing.Id).Username ?? "", LoginStateOf(signing.Id).PasswordSaved, asking.Error,
+                    UiAction.Shown(L.T("Connect")), UiAction.Shown(L.T("Cancel")))
+                : null);
     }
 
     private static IReadOnlyList<EditorOption> MoveParts(int profiles, int apps, bool connection) =>

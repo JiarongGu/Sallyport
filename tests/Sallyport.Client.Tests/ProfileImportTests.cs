@@ -20,7 +20,7 @@ public sealed class ProfileImportTests
     }
 
     [Theory]
-    [InlineData("http://vpn.example.com/jp.ovpn", "Use an https:// link")]
+    [InlineData("http://vpn.example.com/jp.ovpn", "Use an https:// address or link")]
     [InlineData("", "Type your VPN provider")]
     [InlineData("https://", "That is not a link")]
     public void A_link_that_could_send_the_keys_in_the_clear_or_is_no_link_is_refused(string typed, string reason)

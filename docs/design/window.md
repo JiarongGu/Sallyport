@@ -142,6 +142,9 @@ Show **Direct**, **Through VPN**, **Tunnel gateway**, target, sample count and t
 - **Defaults for new apps:** VPN profile and packet-loss policy, including optional direct-after delay. Existing apps remain explicit.
 - **How to use**, manual SOCKS5 setup with profile-specific endpoint and remote DNS guidance, and **About** with client/service/protocol versions.
 
+Since D29 (`docs/design/profile-flow.md`): adding a profile is a page of its own — a file, a drop or a link, then the
+profile looked at — and a profile's row has one action, **Edit…**, whose page holds its name, its sign-in, Connection
+settings… and Remove profile; the row adds its server and, for one that signs in, its username. The rest stands:
 Profiles is each profile's settings, not its connection (the owner: "we kind dont need the connect in profile page anymore"; it is Overview's switch and the tray's): a row each, nothing folded ("remove the dropdown for this and display some detail in the row") — its name and state, its proxy for other programs while connected, **Connection settings…** (the profile's own view, above) and **Remove profile** ("Disconnect it on Overview first." while it is connected); then **VPN protocol** and **If it cannot connect** in Settings' words, each "(as in Settings)" or "(this profile only)", **More settings: Changed for this profile** when it has other changes of its own, and **Imported**; the exit-location check while connected. Never its servers' "udp/1194, tcp/443": the owner read them as the only traffic it carries. The tunnel's own facts (SOCKS5 port, connected over, tunnel address, counts) are Overview's details.
 
 **Keep D15 throughout the contract.** Preserve `UiAction`, `Fact`, `EmptyView`, sequence ordering, notices and tokenized host-held editors/confirmations. Add host-authored navigation, field help and state labels; React must not derive permission, coverage or operational sentences from counters.

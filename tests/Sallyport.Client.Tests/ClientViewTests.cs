@@ -101,7 +101,24 @@ public class ClientViewTests
         Assert.Equal(ProfilePhase.Unsupported, view.Phase);
         Assert.True(view.Actions.Connect is { Visible: true, Enabled: false });
         Assert.NotNull(view.Actions.Connect.Reason);
-        Assert.Contains("tls-auth is not supported yet", view.DetailText);
+        // In the person's words (D29), not the protocol's: "tls-auth" tells them nothing they can act on.
+        Assert.Equal(("Unavailable in this version", "Its security setup is not supported yet."), (view.StatusText, view.DetailText));
+        Assert.Equal("It is missing a part it needs to connect. Ask whoever gave it to you for a new copy.", ClientView.CannotConnect("the profile has no <ca>"));
+    }
+
+    [Fact]
+    public void A_profile_that_signs_in_names_its_username_or_says_none_is_set_and_one_that_does_not_says_nothing_of_it()
+    {
+        var signs = new StoredProfile("ad50a53b0da826ad", "work", ["udp/1194"], At, null, NeedsLogin: true);
+
+        var named = ClientView.Profile(new ProfileFacts(signs, null, null, null, false, false, null, false, false, Login: new LoginState("alex", true)));
+        var unnamed = ClientView.Profile(new ProfileFacts(signs, null, null, null, false, false, null, false, false));
+        var plain = View();
+
+        Assert.Contains(new Fact("Username", "alex"), named.Details!);
+        Assert.Contains(new Fact("Username", "Not set"), unnamed.Details!);
+        Assert.DoesNotContain(plain.Details!, f => f.Label == "Username");
+        Assert.True(named.Actions.Edit is { Visible: true, Enabled: true, Label: "Edit…" });
     }
 
     [Fact]

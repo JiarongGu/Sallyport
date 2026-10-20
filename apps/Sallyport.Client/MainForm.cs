@@ -128,12 +128,9 @@ internal sealed class MainForm : OptimizedForm
             _tray.Exit();
             return;
         }
-        foreach (var path in args.Where(a => !a.StartsWith('-')))
-        {
-            if (!path.EndsWith(".ovpn", StringComparison.OrdinalIgnoreCase) && !path.EndsWith(".conf", StringComparison.OrdinalIgnoreCase)) continue;
-            // Onto the import page, as one chosen there is: the person sees its name and server before it is kept.
-            _core.OpenProfileFile(path);
-        }
+        // Onto the import page, as one chosen there is: the person sees its name and server before it is kept.
+        _core.OpenProfileFiles([.. args.Where(a => !a.StartsWith('-')
+            && (a.EndsWith(".ovpn", StringComparison.OrdinalIgnoreCase) || a.EndsWith(".conf", StringComparison.OrdinalIgnoreCase)))]);
         var addGame = Array.IndexOf(args, "--add-game");
         if (addGame >= 0 && addGame + 1 < args.Length)
             try { _core.AddFolder(args[addGame + 1]); }
@@ -174,6 +171,13 @@ internal sealed class MainForm : OptimizedForm
                     LiftSplash();
                 };
                 fallback.Start();
+            };
+            // A profile dropped on the window (D29): the page hands over the files themselves, never their text, and they
+            // are read here as one chosen with Choose a file… is. Shenora's own messages are strings; this one is not.
+            _webView.CoreWebView2.WebMessageReceived += (_, message) =>
+            {
+                if (message.AdditionalObjects is not { Count: > 0 } objects) return;
+                _core.OpenProfileFiles([.. objects.OfType<Microsoft.Web.WebView2.Core.CoreWebView2File>().Select(f => f.Path)]);
             };
             _host.Navigate();
             Receive(_start.Arguments, atStart: true);

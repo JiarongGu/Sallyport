@@ -7,7 +7,18 @@ namespace Sallyport.Client;
 /// <summary>"Import a VPN profile" (D29), as OpenVPN Connect's Import Profile has it: from a file or from a link, then
 /// the profile looked at before it is kept. <see cref="Source"/>: "file" or "link". <see cref="SignIn"/>: the link's
 /// server asked for a username and password, so the page asks for them. <see cref="Connect"/>: connect it once imported.</summary>
-internal sealed record NewProfileValues(string Source, string Link, string Username, string Password, string Name, bool Connect, bool SignIn = false);
+internal sealed record NewProfileValues(string Source, string Link, string Username, string Password, string Name, bool Connect, bool SignIn = false,
+    bool Remember = false, bool NeedsLogin = false);
+
+/// <summary>The sign-in a profile asks for when it connects without one (D29): <see cref="Remember"/> keeps the password,
+/// sealed, for the next time; otherwise it lasts until the person disconnects or Sallyport quits.</summary>
+internal sealed record SignInValues(string Username, string Password, bool Remember);
+
+/// <summary>Edit a profile (D29): its name, and for one that signs in, its username and its kept password —
+/// <see cref="ChangePassword"/> with a new <see cref="Password"/> keeps that one, <see cref="ForgetPassword"/> lets the
+/// kept one go. <see cref="NeedsLogin"/> and <see cref="PasswordSaved"/> are the host's, for the page to show.</summary>
+internal sealed record ProfileEditValues(string Name, string Username, string Password, bool ChangePassword, bool ForgetPassword,
+    bool NeedsLogin = false, bool PasswordSaved = false);
 
 /// <summary>A profile fetched from a link: its text, or that the server wants the person signed in, or why not.</summary>
 internal sealed record Downloaded(string? Text, bool SignIn, string? Why);
@@ -34,7 +45,7 @@ internal static class ProfileDownload
         if (text.Length == 0) { why = L.T("Type your VPN provider's address or the link to your profile."); return null; }
         if (!text.Contains("://", StringComparison.Ordinal)) text = "https://" + text;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host)) { why = L.T("That is not a link Windows can open."); return null; }
-        if (uri.Scheme != Uri.UriSchemeHttps) { why = L.T("Use an https:// link: a profile holds your keys, and anything else would send them in the clear."); return null; }
+        if (uri.Scheme != Uri.UriSchemeHttps) { why = L.T("Use an https:// address or link."); return null; }
         return uri.AbsolutePath is "" or "/" ? new UriBuilder(uri) { Path = AccessServerProfile }.Uri : uri;
     }
 
@@ -46,6 +57,8 @@ internal static class ProfileDownload
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             return new(null, true, string.IsNullOrEmpty(username) ? null : L.T("{0} did not accept that username and password.", address.Host));
+        // Nothing there is the person's answer as much as a page that is not a profile is.
+        if (response.StatusCode == HttpStatusCode.NotFound) return new(null, false, L.T("This address did not provide a VPN profile. Check it with your provider."));
         if (!response.IsSuccessStatusCode) return new(null, false, L.T("{0} answered {1} ({2}).", address.Host, (int)response.StatusCode, response.ReasonPhrase ?? ""));
         await using var body = await response.Content.ReadAsStreamAsync(ct);
         var buffer = new MemoryStream();

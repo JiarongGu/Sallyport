@@ -5,9 +5,9 @@ import { setLanguage, t } from './i18n';
 import { MODULE } from './contract';
 import { AppPage, Apps } from './Apps';
 import { Network } from './Network';
-import { ProfileSettings, Profiles } from './Profiles';
+import { ProfileEdit, ProfileSettings, Profiles } from './Profiles';
 import { Settings } from './Settings';
-import { EditorForm, NewAppForm, NewProfileForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
+import { EditorForm, NewAppForm, NewProfileForm, ProfileEditForm, RemovalConfirmation, seedDraft, SignInDialog, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
 import { MainHeader, pages, Sidebar } from './ui/Chrome';
 import { ActionButton } from './ui/shared';
@@ -23,11 +23,41 @@ export function App() {
   const [earlierOpen, setEarlierOpen] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [now, setNow] = useState(Date.now);
+  // A file being dragged over the window: one target for all of it, whatever page is shown (D29).
+  const [dropping, setDropping] = useState(false);
   // Visual state only: which profile the Overview puts first.
   const polite = useRef<HTMLDivElement>(null);
   const alert = useRef<HTMLDivElement>(null);
   const editorToken = useRef<string | null>(null);
   const navigationRequest = useRef<number | null>(null);
+  // A profile dropped anywhere on the window goes to the host as the file itself — WebView2 hands it the path — and never
+  // as its text; the host decides what it is. Without this the window would open the file as a page.
+  useEffect(() => {
+    let depth = 0;
+    const files = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false;
+    const enter = (event: DragEvent) => { if (files(event)) { depth++; setDropping(true); } };
+    const over = (event: DragEvent) => { if (files(event)) { event.preventDefault(); event.dataTransfer!.dropEffect = 'copy'; } };
+    const leave = (event: DragEvent) => { if (files(event) && --depth <= 0) { depth = 0; setDropping(false); } };
+    const drop = (event: DragEvent) => {
+      if (!files(event)) return;
+      event.preventDefault();
+      depth = 0;
+      setDropping(false);
+      const dropped = [...(event.dataTransfer?.files ?? [])];
+      const webview = (window as unknown as { chrome?: { webview?: { postMessageWithAdditionalObjects?: (message: unknown, objects: File[]) => void } } }).chrome?.webview;
+      if (dropped.length > 0) webview?.postMessageWithAdditionalObjects?.({ kind: 'dropped-files' }, dropped);
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
   const take = useCallback((next: ClientState) => {
     setState((current) => !current || next.sequence > current.sequence ? next : current);
   }, []);
@@ -79,7 +109,7 @@ export function App() {
   useEffect(() => {
     const editor = state?.editor;
     if (editor && editor.token !== editorToken.current) {
-      setPage(editor.kind === 'policy' || editor.kind === 'new-profile' ? 'profiles'
+      setPage(editor.kind === 'policy' || editor.kind === 'new-profile' || editor.kind === 'profile-edit' ? 'profiles'
         : editor.kind === 'defaults' || editor.kind === 'export' || editor.kind === 'import' ? 'settings' : 'apps');
       // An app's editors open on its page.
       if (editor.kind === 'app' || editor.kind === 'program') setAppPage(editor.subjectId.split('/')[0]);
@@ -111,11 +141,13 @@ export function App() {
   const policyName = policyEditor ? state?.profiles.find((profile) => profile.id === policyEditor.subjectId)?.name ?? '' : '';
   const newApp = shown === 'apps' && state?.editor?.kind === 'new-app' ? state.editor : null;
   const newProfile = shown === 'profiles' && state?.editor?.kind === 'new-profile' ? state.editor : null;
+  const profileEdit = shown === 'profiles' && state?.editor?.kind === 'profile-edit' ? state.editor : null;
+  const editedProfile = profileEdit ? state?.profiles.find((profile) => profile.id === profileEdit.subjectId) ?? null : null;
   const openApp = shown === 'apps' && !newApp && appPage ? state?.apps.find((app) => app.id === appPage) ?? null : null;
   // Leaving a view inside a page leaves what was being edited there.
   const leaveViews = () => {
     const editor = state?.editor;
-    if (editor && (editor.kind === 'policy' || editor.kind === 'new-app' || editor.kind === 'new-profile'
+    if (editor && (editor.kind === 'policy' || editor.kind === 'new-app' || editor.kind === 'new-profile' || editor.kind === 'profile-edit'
       || ((editor.kind === 'app' || editor.kind === 'program') && appPage)))
       post('CANCEL_EDIT', { token: editor.token });
     setAppPage(null);
@@ -136,16 +168,17 @@ export function App() {
     <Sidebar state={state} shown={shown} go={go} />
     <div className="main">
       <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : newApp ? t('Add an app') : newProfile ? t('Import a VPN profile')
-          : openApp ? openApp.name
+          : editedProfile ? t('Edit {0}', editedProfile.name) : openApp ? openApp.name
           : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
         back={policyEditor ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: policyEditor.token }) }
           : newApp ? { label: t('Back to Apps'), onClick: () => post('CANCEL_EDIT', { token: newApp.token }) }
           : newProfile ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: newProfile.token }) }
+          : profileEdit ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: profileEdit.token }) }
           : openApp ? { label: t('Back to Apps'), onClick: leaveViews } : undefined}>
         {state && shown === 'apps' && !openApp && !newApp && <>
           <ActionButton action={state.actions.addApp} glyph="plus" focusKey="add-app" onClick={() => post('ADD_APP', {})} />
         </>}
-        {state && shown === 'profiles' && !policyEditor && !newProfile && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
+        {state && shown === 'profiles' && !policyEditor && !newProfile && !profileEdit && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
       </MainHeader>
       <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
       <main className="content" id="main-content">
@@ -161,9 +194,11 @@ export function App() {
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'network' ? <Network state={state} now={now} go={setPage} /> :
           newProfile && currentDraft ? <section className="page" aria-label={t('Import a VPN profile')}>
-            <p className="page-intro secondary">{t('Your VPN provider gives you a profile: a .ovpn file, or a link to it. Sallyport keeps an encrypted copy for your Windows account.')}</p>
+            <p className="page-intro secondary">{t('Use the file or link you were given. Sallyport keeps an encrypted copy for your Windows account.')}</p>
             <NewProfileForm key={newProfile.token} editor={newProfile} draft={currentDraft} onChange={setDraft} />
           </section> :
+          editedProfile && profileEdit && currentDraft ? <ProfileEdit profile={editedProfile}
+            form={<ProfileEditForm key={profileEdit.token} editor={profileEdit} draft={currentDraft} onChange={setDraft} />} /> :
           policyEditor ? <ProfileSettings name={policyName} editorForm={editorForm} /> :
           shown === 'profiles' ? <Profiles state={state} now={now} /> :
           <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null}
@@ -173,5 +208,7 @@ export function App() {
     <div className="sr-only" ref={polite} role="status" aria-live="polite" aria-atomic="true" />
     <div className="sr-only" ref={alert} role="alert" aria-atomic="true" />
     {state?.confirmation && <RemovalConfirmation key={state.confirmation.token} confirmation={state.confirmation} />}
+    {state?.signIn && <SignInDialog key={state.signIn.token} signIn={state.signIn} />}
+    {dropping && <div className="drop-overlay" aria-hidden="true"><p>{t('Drop to import a VPN profile')}</p></div>}
   </div>;
 }

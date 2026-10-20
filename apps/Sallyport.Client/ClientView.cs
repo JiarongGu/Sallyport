@@ -36,7 +36,10 @@ internal sealed record EmptyView(string Title, string Text, string Command);
 
 internal sealed record LocationView(LocationPhase Phase, string Text, IReadOnlyList<Fact> Facts, DateTimeOffset? CheckedAt, bool PreviousResult);
 
-internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction Locate, UiAction Remove, UiAction Settings);
+/// <summary><see cref="Edit"/>: the row's one action (D29) — the profile's name, sign-in, connection settings and removal
+/// are on its Edit page.</summary>
+internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction Locate, UiAction Remove, UiAction Settings,
+    UiAction? Edit = null);
 
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
@@ -49,6 +52,11 @@ internal sealed record EditorView(
     IReadOnlyList<IconChoice>? Icons = null, IReadOnlyList<Fact>? Facts = null);
 
 internal sealed record ConfirmationView(string Token, string Title, string Text, UiAction Confirm, UiAction Cancel);
+
+/// <summary>The sign-in a profile asks for as it connects (D29), over whatever page is shown: its server, the username
+/// kept (never a password), and why the last one did not do.</summary>
+internal sealed record SignInView(string Token, string ProfileId, string Title, string Server, string Username, bool PasswordSaved,
+    string? Error, UiAction Connect, UiAction Cancel);
 
 internal sealed record NoticeSubject(string Kind, string Id);
 
@@ -73,7 +81,8 @@ internal sealed record ClientState(
     EditorView? Editor,
     ConfirmationView? Confirmation,
     IReadOnlyList<Notice> Notices,
-    string Language = "en")
+    string Language = "en",
+    SignInView? SignIn = null)
 {
     internal sealed record SummaryView(string Text, Tone Tone);
     internal sealed record TopActions(UiAction Import, UiAction AddApp);
@@ -89,7 +98,7 @@ internal sealed record ClientState(
 internal sealed record ProfileFacts(
     StoredProfile Stored, int? Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
     int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, DateTimeOffset? NextAttemptAt = null,
-    ProfileChoices? Choices = null, IReadOnlyList<string>? Servers = null);
+    ProfileChoices? Choices = null, IReadOnlyList<string>? Servers = null, LoginState? Login = null);
 
 internal static class ClientView
 {
@@ -115,7 +124,7 @@ internal static class ClientView
         {
             { Removing: true } => (ProfilePhase.Removing, Tone.Busy, L.T("Removing profile…"), (string?)null),
             { Disconnecting: true } => (ProfilePhase.Disconnecting, Tone.Busy, L.T("Disconnecting…"), null),
-            { Stored.Unsupported: { } why } => (ProfilePhase.Unsupported, Tone.Off, L.T("Unsupported profile"), L.T("This version cannot connect this profile: {0}.", why)),
+            { Stored.Unsupported: { } why } => (ProfilePhase.Unsupported, Tone.Off, L.T("Unavailable in this version"), CannotConnect(why)),
             _ => status?.State switch
             {
                 TunnelServiceStatus.Connecting when status.Attempts > 1 =>
@@ -165,7 +174,8 @@ internal static class ClientView
             Remove: UiAction.Shown(L.T("Remove profile"), !running && !busy && f.UsedBy is null,
                 // Disconnecting ends both, an app's route through it as well: one thing to do, where it is done.
                 running || f.UsedBy is not null ? L.T("Disconnect it on Overview first.") : null),
-            Settings: UiAction.Shown(L.T("Connection settings…"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")));
+            Settings: UiAction.Shown(L.T("Connection settings…"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")),
+            Edit: UiAction.Shown(L.T("Edit…"), !busy));
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.
         var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;
@@ -173,8 +183,17 @@ internal static class ClientView
             f.Port is { } port ? Endpoint(port) : L.T("a free port when it connects"), f.Port,
             facts, location, actions, next,
             Details(f.Choices ?? new([.. f.Stored.Remotes.Select(r => r.Split('/')[0]).Distinct()], null, false, 0, false, false), f.Stored.Imported,
-                f.Servers ?? []));
+                f.Servers ?? [], f.Stored.NeedsLogin ? f.Login ?? new LoginState(null, false) : null));
     }
+
+    /// <summary>Why this version cannot connect a profile, in the person's words (D29): the library's reason names the
+    /// protocol's parts — tls-crypt, a CA — which tell them nothing they can act on.</summary>
+    public static string CannotConnect(string reason) =>
+        reason.Contains("tls-crypt", StringComparison.Ordinal) || reason.Contains("tls-auth", StringComparison.Ordinal)
+            ? L.T("Its security setup is not supported yet.")
+        : reason.Contains("<ca>", StringComparison.Ordinal) || reason.Contains("certificate", StringComparison.Ordinal)
+            ? L.T("It is missing a part it needs to connect. Ask whoever gave it to you for a new copy.")
+        : L.T("It uses something this version does not support yet.");
 
     /// <summary>A profile's servers in a few words: the first it names, and how many more.</summary>
     public static string ServerText(IReadOnlyList<string> servers) => servers.Count switch
@@ -187,7 +206,7 @@ internal static class ClientView
     /// <summary>Its row on Profiles: its server, how it connects, in Settings' words, each said to follow Settings or to
     /// be its own, then when it was imported. Not its servers' "udp/1194, tcp/443": they read as the only traffic it carries (the
     /// owner: "currently still showing udp/1194, tcp/443"), and are the server's business, not the person's.</summary>
-    private static IReadOnlyList<Fact> Details(ProfileChoices c, DateTimeOffset imported, IReadOnlyList<string> servers)
+    private static IReadOnlyList<Fact> Details(ProfileChoices c, DateTimeOffset imported, IReadOnlyList<string> servers, LoginState? login)
     {
         string From(string value, bool own) => own ? L.T("{0} (this profile only)", value) : L.T("{0} (as in Settings)", value);
         var protocol = c.Protocols.Count == 1
@@ -198,6 +217,8 @@ internal static class ClientView
         [
             // Its server first, as OpenVPN Connect's list has it under each profile's name (D29).
             .. servers.Count > 0 ? [new Fact(L.T("Server"), ServerText(servers))] : Array.Empty<Fact>(),
+            // Its username, for one that signs in with one; nothing said of it for one that does not.
+            .. login is not null ? [new Fact(L.T("Username"), login.Username ?? L.T("Not set"))] : Array.Empty<Fact>(),
             new(L.T("VPN protocol"), protocol),
             new(L.T("If it cannot connect"), retry),
             .. c.OtherOwn ? [new Fact(L.T("More settings"), L.T("Changed for this profile"))] : Array.Empty<Fact>(),

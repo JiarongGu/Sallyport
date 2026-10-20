@@ -84,6 +84,13 @@ internal sealed class Connections : IDisposable
     /// why, in a sentence, for the routes that held it.</summary>
     public event Action<string, string>? ChannelEnded;
 
+    /// <summary>A profile's server did not accept its username and password (D29): the window asks for them again.</summary>
+    public event Action<string>? SignInRefused;
+
+    /// <summary>The username and password a profile that asks for them connects with, from the host: one remembered, or one
+    /// typed for this connection alone. Asked each time a channel opens.</summary>
+    public Func<string, Login?>? LoginFor { get; set; }
+
     public Connections(ProfileStore store, ClientSettings settings)
     {
         _store = store;
@@ -383,7 +390,7 @@ internal sealed class Connections : IDisposable
         // Held to a transport the profile no longer has servers of (imported again without them): said, not tried forever.
         if (policy.Protocol is { } only && !profile.Remotes.Any(r => r.Proto == only))
             throw new ShenoraException("PROTOCOL_GONE", "id", id, L.T("the profile has no {0} servers any more: change its connection type", only.ToUpperInvariant()));
-        var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = policy });
+        var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = policy, Tunnel = new TunnelOptions { Login = LoginFor?.Invoke(id) } });
         var channel = new Channel(session);
         // Bound before the session says "up", and kept across reconnects: the connector follows the session's network.
         session.NetworkUp += _ => Bind(channel);
@@ -433,7 +440,8 @@ internal sealed class Connections : IDisposable
             _channels.Remove(id);
             _ended[id] = last;
         }
-        if (channel.Holders.Count > 0)
+        if (channel.Session.Status.AuthenticationRefused) SignInRefused?.Invoke(id);
+        else if (channel.Holders.Count > 0)
             ChannelEnded?.Invoke(id, channel.Session.Status.State == SessionState.GaveUp
                 ? L.T("The connection was given up after its retries. {0}", Sentence(last.LastError)).TrimEnd()
                 : L.T("The connection was refused: {0}.", last.LastError ?? L.T("no reason given")));

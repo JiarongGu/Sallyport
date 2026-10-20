@@ -24,9 +24,26 @@ export function ProfileSettings({ name, editorForm }: { name: string; editorForm
   </section>;
 }
 
-/** One profile: its name and state, how it connects and its two buttons, nothing folded (the owner: "remove the
+/** One profile: its name and state, its server and sign-in, how it connects, and Edit…, nothing folded (the owner: "remove the
  *  dropdown for this and display some detail in the row"). Connecting is Overview's and the tray's: "we kind dont need
  *  the connect in profile page anymore". */
+/** "Edit {name}" (D29): its name and sign-in in the form; under it, how it connects and removing it. Leaving the page
+ *  cancels the edit. */
+export function ProfileEdit({ profile, form }: { profile: ProfileView; form: ReactNode }) {
+  return <section className="page" aria-label={t('Edit {0}', profile.name)}>
+    {form}
+    <div className="card profile-more">
+      <div className="row-head">
+        <p className="secondary">{t('How it connects, over the choices in Settings, and taking it off this computer.')}</p>
+        <div className="actions">
+          <ActionButton action={profile.actions.settings} focusKey={`policy:${profile.id}`} onClick={() => post('BEGIN_POLICY_EDIT', { id: profile.id })} />
+          <ActionButton action={profile.actions.remove} focusKey={`remove:${profile.id}`} danger onClick={() => post('REQUEST_REMOVE_PROFILE', { id: profile.id })} />
+        </div>
+      </div>
+    </div>
+  </section>;
+}
+
 function ProfileRow({ profile, now }: { profile: ProfileView; now: number }) {
   const headingId = useId();
   return <article className={`card tone-border-${profile.tone}`} aria-labelledby={headingId}>
@@ -44,9 +61,9 @@ function ProfileRow({ profile, now }: { profile: ProfileView; now: number }) {
           <ActionButton action={profile.actions.copy} icon="copy" onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
         </span>}
       </div>
+      {/* One action, as Connect's pencil: its name, sign-in, connection settings and removal are on its Edit page. */}
       <div className="actions">
-        <ActionButton action={profile.actions.settings} focusKey={`policy:${profile.id}`} onClick={() => post('BEGIN_POLICY_EDIT', { id: profile.id })} />
-        <ActionButton action={profile.actions.remove} focusKey={`remove:${profile.id}`} danger onClick={() => post('REQUEST_REMOVE_PROFILE', { id: profile.id })} />
+        <ActionButton action={profile.actions.edit} focusKey={`edit:${profile.id}`} onClick={() => post('BEGIN_PROFILE_EDIT', { id: profile.id })} />
       </div>
     </div>
     {profile.detailText && <p className="supporting secondary">{profile.detailText}</p>}

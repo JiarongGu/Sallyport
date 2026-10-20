@@ -443,6 +443,26 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 .segmented button.selected:hover { background: var(--accent-hover); }
 .new-profile .setup-step > .actions { justify-content: flex-start; }
 .found.cannot .glyph { color: var(--busy); }
+/* Where a file may be dropped, said in the file's own card (the whole window takes one). */
+.drop-zone { display: grid; justify-items: center; gap: 10px; padding: 28px 16px; border: 1.5px dashed var(--stroke-control); border-radius: var(--radius-card); background: var(--surface-alt); text-align: center; }
+.drop-zone > .glyph { width: 24px; height: 24px; color: var(--secondary); }
+.drop-zone p { margin: 0; color: var(--secondary); }
+/* A dragged file over any page: one target, the window's own colours, nothing under it to press. */
+.drop-overlay { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--surface) 82%, transparent); pointer-events: none; }
+.drop-overlay p { margin: 0; padding: 28px 40px; border: 2px dashed var(--accent); border-radius: var(--radius-hero); background: var(--surface); font: var(--font-subtitle); }
+/* A sign-in inside a card: the provider's (to fetch a profile) or the VPN's (to keep with it). */
+.inset.sign-in { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--radius-card); background: var(--surface-alt); }
+.inset.sign-in > legend { float: left; width: 100%; font: var(--font-body-strong); margin-bottom: 2px; }
+.inset.sign-in > .actions { justify-content: flex-start; }
+.setup-actions .change-source { margin-left: auto; align-self: center; }
+/* An Edit page's second card: apart from the form's Save, its buttons at its own edge. */
+.profile-more { margin-top: 12px; }
+.profile-more .row-head { display: flex; align-items: center; gap: 16px; }
+.profile-more .row-head > p { flex: 1; margin: 0; }
+.profile-more .actions { margin-left: auto; flex: none; }
+.sign-in-dialog form { display: grid; gap: 12px; }
+.sign-in-dialog form > .field, .sign-in-dialog form > .check-field, .sign-in-dialog form > .facts, .sign-in-dialog form > .field-error { margin: 0 24px; }
+.sign-in-dialog form > h2 { margin: 0; }
 .setup-step { display: grid; gap: 12px; }
 .setup-step > h2 { font: var(--font-body-large); }
 .path-field { display: flex; gap: 8px; align-items: center; }

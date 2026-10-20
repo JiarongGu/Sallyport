@@ -713,3 +713,88 @@ from Overview with the guard outside (234 rounds, 0 failed): the row "已连接 
 127.0.0.1:<the port it was given> with copy, the location check; disconnected from Overview, confirming "断开 jp?
 ZenlessZoneZero Game 正在经由它…" (guard 78 rounds, 0 failed). Zenless's page: 应用设置 with 编辑 under its head, then 经由,
 then 程序; Edit's icons a row of three. The Remove reason's new sentence is the view tests', not seen connected.
+
+## D28 — A release is one setup and its digest, made by a script and by a workflow started by hand (2026-10-20; measured, but for the workflow)
+
+The owner: "lets create a proper publish package now (might include a single installation exe) too", then "if you check
+other slibing repo I think you can create a action pipeline for github too".
+
+- **`apps/Sallyport.Setup/package.ps1`** makes `artifacts\release\Sallyport-<version>-win-x64-setup.exe` and its
+  `.sha256` (sha256sum's own form, so `sha256sum -c` checks a download), and `artifacts\release-notes.md`: how to
+  install it (what it needs, the SmartScreen warning of an unsigned build, the digest, the unattended options) above the
+  CHANGELOG section for that version. It refuses a version with no section, rebuilds the page from the tree every time
+  (`npm ci`, then the build: a `wwwroot` left by an earlier build would otherwise ship), and keeps its intermediates in
+  `artifacts\build`. A tool's failure is its exit code, never its stderr.
+- **`apps/Sallyport.Setup/version.ps1`** writes the version where it lives — `<Version>` in Directory.Build.props — and
+  dates its CHANGELOG section (`## Unreleased`, or `## X.Y.Z — unreleased`, becomes `## X.Y.Z — <date>`); it refuses a
+  bump nothing has been written for, and a re-run finds the section dated and leaves it.
+- **`.github/workflows/release.yml`**, as the sibling repositories do it (Daoris, Tyanor): started by hand only, no push
+  CI; Windows, since the client, setup and every test project are; inputs version, bump (none), create_tag, draft
+  (true), prerelease, dry_run (true). It writes the version, runs every test project in Release, packages, and keeps
+  the package as the run's artifact; then, unless a rehearsal, commits the two files the version step wrote, tags, and
+  makes a draft GitHub release with the setup and its `.sha256` as assets and the notes as its body. The inputs reach
+  the scripts as environment, never pasted into them.
+- **Every program says what it is** in Windows: product Sallyport, its own title (Sallyport, Sallyport Service, Sallyport
+  Setup), the copyright, and the version with its commit.
+- **An upgrade found two faults in setup, now gone:** it moved the old folder aside while WebView2's processes, which
+  outlive the client by a few seconds and keep their cache in `data`, still held files in it — and when that failed, it
+  left the service stopped and its staging folder beside the install. Setup now waits for the service's process (not
+  only for "Stopped"), moves the folder once it is free (up to 30 s, then names it), and on any failure writes why to
+  its log, removes what it staged and starts the service again.
+
+Measured 2026-10-20/21 on the owner's machine: every test project in Release, 451 then; `version.ps1` on copies (the
+first release dated, a re-run left alone, a patch with nothing written refused, a minor after `## Unreleased`, "1.0"
+refused). The package from `74bb501`: 175.4 MB, `sha256sum -c` OK, Defender "found no threats", not signed. That exact
+file as a quiet upgrade of the install with the client open: before the fix it failed after 4.4 s (the client gone at
+1.8 s, WebView2's processes still running at 3.2 s, the folder movable only once the last had gone), leaving the
+service stopped; after it, exit 0 in 7.3 s — the three programs replaced and named, the profiles, apps and settings as
+they were, the service running from the folder, the Start-menu entry, nothing beside. With a file of the test's own held
+open in the folder: exit 1 after 32 s, its log saying which folder, the service running again, nothing staged left. The
+installed release used: jp connected from the Overview with Zenless on, "VPN 已开启 · jp", disconnected (guard 174
+rounds, 0 failed). Not run: the workflow — the repository has no GitHub remote yet; its first dispatch, as a rehearsal,
+is where a hosted runner is first seen. Not done: code signing (TASKS item 6).
+
+## D29 — A profile is added on a page of its own — a file, a drop or a link, then looked at — and may sign in with a username and password (2026-10-21; measured, but for a server that asks for one)
+
+The owner: "import profile should be similar to how openvpn client does this (the default name, the server detail, and
+etc)", "it has different way to setup profile", "a dragdrop profile into the app also will be useful too", "some
+profile need username password to run, some dont and each profile usually have its username too", and "you really need
+a good ui/ux design for this not just copy/paste from openvpn client". The design is Codex's
+(`docs/design/profile-flow.md`, checked against the code; its header says where the build departs from it).
+
+- **Import a VPN profile** is a page: a file (Choose a file…, or dropped anywhere on the window — the page hands
+  WebView2's file to the host, never its text), or a link (https only; a server's address alone is asked as OpenVPN
+  Access Server serves a person's profile, `/rest/GetUserlogin`; the provider's sign-in only once it asks, HTTP Basic,
+  never kept, and never taken for the VPN's). A `.ovpn` opened from Explorer comes to the same page; one at a time.
+- **Then it is looked at**, before anything is kept: its servers (locked) and where it came from; its name (the file's,
+  made unique, "(2)"; a name taken is refused); for a profile that signs in, VPN sign-in — the username it carries
+  (Access Server writes it in) or the provider's, Remember password, and a password asked only to remember it or to
+  connect now; Connect after import ("Import and connect"). One this version cannot connect says why in plain words and
+  offers neither.
+- **Signing in at connect**: a profile that asks, with no password for this connection, opens a sign-in over whatever
+  page is shown — from the Overview's switch, or the tray's Connect, which brings the window up. A remembered password is
+  sealed with the username in `{id}.login` beside the profile (DPAPI, D14); one not remembered is kept in memory for the
+  connection and its reconnects, and let go on Disconnect or quitting. The server's AUTH_FAILED ends the session marked
+  `AuthenticationRefused`, and the person is asked again, told the server did not accept them; a remembered password is
+  not tried again on its own.
+- **The library** sends `TunnelOptions.Login` in the key-method-2 message (a class that never prints itself); a profile
+  that signs in by password needs no client certificate; one that asks and is given nothing is refused before a packet.
+- **A profile's row**: its server (the first, and how many more), its username for one that signs in ("Not set" when
+  none is kept), how it connects, when it was imported; one action, Edit…. **Its Edit page**: its name; its username;
+  its password as Saved or Not saved, Change password…, Forget password (a new username forgets the old one's); then
+  Connection settings… and Remove profile.
+
+Measured 2026-10-21 through the installed client, with stand-ins of the test's own (a CA and a tls-crypt key made for
+it, a server under `.test`, the username `alex`): opened as Explorer opens one — the review with its server, the
+username carried, Remember password showing the password field; imported without a password (its `.login` holding the
+username alone, 262 bytes); its row with server and username; two files at once refused. Its switch on the Overview
+opened "登录 standin-login" with `alex` filled in; an empty password refused ("请输入密码。"); a password for this
+connection only — connecting, retrying "No such host is known"; cancelled, connected again: asked again. Edit: renamed,
+a password kept (278 bytes), connected without being asked, forgotten again (262 bytes); removed from its Edit page,
+its `.login` with it. A link: `http://` refused before a request; `https://example.com` asked at `/rest/GetUserlogin`,
+404, "此地址未提供 VPN 配置"; httpbin's basic-auth test endpoint — 401, the sign-in shown, sent, accepted, and what came
+back refused as no profile. A keyless file: the review with its warning, nothing kept on Cancel. Not checked: a real
+server that asks for a username and password (none here to sign in to without the owner's account; their OpenVPN
+Connect lists such profiles — importing one and connecting is that measurement, rule 3); an Access Server's
+`/rest/GetUserlogin`; a drop by mouse (DevTools' drop needs a debugging port this WebView2 runtime did not open, and a
+real drag would take the owner's mouse) — the host's part of it is the path Explorer's took.

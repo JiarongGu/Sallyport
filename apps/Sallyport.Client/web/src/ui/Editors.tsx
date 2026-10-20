@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, MoveValues, NewAppValues, NewProfileValues, PolicyValues, ProgramEditValues } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, MoveValues, NewAppValues, NewProfileValues, PolicyValues, ProfileEditValues, ProgramEditValues, SignInView } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
 import { ActionButton, Disclosure, Facts, Icon } from './shared';
@@ -12,6 +12,7 @@ export type Draft =
   | { token: string; kind: 'policy'; values: PolicyValues }
   | { token: string; kind: 'new-app'; values: NewAppValues }
   | { token: string; kind: 'new-profile'; values: NewProfileValues }
+  | { token: string; kind: 'profile-edit'; values: ProfileEditValues }
   | { token: string; kind: 'export' | 'import'; values: MoveValues };
 
 export function seedDraft(editor: Editor): Draft {
@@ -22,6 +23,7 @@ export function seedDraft(editor: Editor): Draft {
     case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
     case 'new-app': return { token: editor.token, kind: 'new-app', values: { ...editor.values, included: [...editor.values.included] } };
     case 'new-profile': return { token: editor.token, kind: 'new-profile', values: { ...editor.values } };
+    case 'profile-edit': return { token: editor.token, kind: 'profile-edit', values: { ...editor.values } };
     case 'export': case 'import': return { token: editor.token, kind: editor.kind, values: { ...editor.values } };
   }
 }
@@ -409,8 +411,9 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
   </form>;
 }
 
-/** "Import a VPN profile" (D29), as OpenVPN Connect's Import Profile has it: a file or a link first, then the profile as
- *  it was read — its server, locked, and a name for it — before anything is kept. */
+/** "Import a VPN profile" (D29, docs/design/profile-flow.md): a file (chosen, or dropped anywhere on the window) or a
+ *  link first; then one review in its place — the profile's servers, locked, where it came from, its name, and its
+ *  sign-in when it has one — before anything is kept. */
 export function NewProfileForm({ editor, draft, onChange }: { editor: Editor; draft: Draft; onChange: (draft: Draft) => void }) {
   const form = useRef<HTMLFormElement>(null);
   const prefix = useId();
@@ -419,61 +422,73 @@ export function NewProfileForm({ editor, draft, onChange }: { editor: Editor; dr
   const values = draft.values;
   const read = editor.facts !== null;
   const fetching = editor.phase === 'fetching';
+  const cannot = !!editor.hint;
   const update = (next: Partial<NewProfileValues>) => onChange({ ...draft, values: { ...values, ...next } });
   const fetch = () => { if (!fetching) post('PROFILE_IMPORT_LINK', { token: editor.token, values }); };
   const error = (field: EditorField) => editor.errors[field]
     ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p> : null;
   const source = (value: NewProfileValues['source'], label: string) => <button type="button" role="radio" aria-checked={values.source === value}
     className={values.source === value ? 'selected' : ''} onClick={() => update({ source: value })}>{t(label)}</button>;
+  const host = (() => { try { return new URL(values.link.includes('://') ? values.link : `https://${values.link}`).host; } catch { return values.link; } })();
+  // A password is asked for only when it is about to be used: to remember it, or to connect now.
+  const askPassword = values.needsLogin && (values.remember || values.connect);
 
   return <form ref={form} className="new-app new-profile" tabIndex={-1} aria-label={t('Import a VPN profile')} noValidate onSubmit={(event) => {
     event.preventDefault();
-    if (editor.save.enabled) post('SAVE_PROFILE_IMPORT', { token: editor.token, values });
+    if (read && editor.save.enabled) post('SAVE_PROFILE_IMPORT', { token: editor.token, values });
   }}>
-    <section className="card setup-step" aria-labelledby={`${prefix}-where`}>
+    {!read ? <section className="card setup-step" aria-labelledby={`${prefix}-where`}>
       <h2 id={`${prefix}-where`}>{t('Where is your profile?')}</h2>
       <div className="segmented" role="radiogroup" aria-labelledby={`${prefix}-where`}>
         {source('file', 'A file')}
         {source('link', 'A link')}
       </div>
       {values.source === 'file' ? <>
-        <p className="secondary">{t('The .ovpn file your VPN provider gave you.')}</p>
-        <div className="actions">
+        {/* Dropping works on the whole window; here is where it is said. */}
+        <div className="drop-zone">
+          <Icon name="down" />
+          <p>{t('Drop your .ovpn file here')}</p>
           <button type="button" onClick={() => post('PROFILE_IMPORT_BROWSE', { token: editor.token, values })}>{t('Choose a file…')}</button>
         </div>
         {error('form')}
       </> : <>
-        <p className="secondary">{t('If your VPN provider offers it: its server’s address (OpenVPN Access Server), or a link to your profile.')}</p>
+        <p className="secondary">{t('Enter your provider’s server address or a direct link to your profile.')}</p>
         <div className="path-field">
           <input id={`${prefix}-link`} type="url" autoComplete="url" spellCheck={false} value={values.link} aria-label={t('Address or link')}
             placeholder="https://vpn.example.com" aria-invalid={!!editor.errors.link}
             aria-describedby={editor.errors.link ? `${prefix}-link-error` : undefined}
             onChange={(event) => update({ link: event.target.value })}
             onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); fetch(); } }} />
-          <button type="button" disabled={fetching} aria-busy={fetching} onClick={fetch}>{fetching ? t('Getting it…') : t('Get the profile')}</button>
+          {!values.signIn && <button type="button" disabled={fetching} aria-busy={fetching} onClick={fetch}>{fetching ? t('Getting profile…') : t('Get the profile')}</button>}
         </div>
         {error('link')}
-        {values.signIn && <div className="editor-fields">
-          <div className="field">
-            <label htmlFor={`${prefix}-username`}>{t('Username')}</label>
-            <input id={`${prefix}-username`} type="text" autoComplete="username" spellCheck={false} value={values.username}
-              onChange={(event) => update({ username: event.target.value })} />
+        {/* The provider's own sign-in, to download the profile: not the VPN's. */}
+        {values.signIn && <fieldset className="inset sign-in">
+          <legend>{t('Sign in to {0}', host)}</legend>
+          <p className="secondary metadata">{t('This sign-in downloads your profile. It does not connect the VPN.')}</p>
+          <div className="editor-fields">
+            <div className="field">
+              <label htmlFor={`${prefix}-provider-user`}>{t('Username')}</label>
+              <input id={`${prefix}-provider-user`} type="text" autoComplete="username" spellCheck={false} value={values.username}
+                onChange={(event) => update({ username: event.target.value })} />
+            </div>
+            <div className="field">
+              <label htmlFor={`${prefix}-provider-password`}>{t('Password')}</label>
+              <input id={`${prefix}-provider-password`} type="password" autoComplete="current-password" value={values.password}
+                aria-invalid={!!editor.errors.password}
+                onChange={(event) => update({ password: event.target.value })}
+                onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); fetch(); } }} />
+              {error('password')}
+            </div>
           </div>
-          <div className="field">
-            <label htmlFor={`${prefix}-password`}>{t('Password')}</label>
-            <input id={`${prefix}-password`} type="password" autoComplete="current-password" value={values.password}
-              aria-invalid={!!editor.errors.password}
-              onChange={(event) => update({ password: event.target.value })}
-              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); fetch(); } }} />
-            {error('password')}
+          <div className="actions">
+            <button type="button" className="primary" disabled={fetching} aria-busy={fetching} onClick={fetch}>{fetching ? t('Getting profile…') : t('Sign in and get profile')}</button>
           </div>
-        </div>}
+        </fieldset>}
         {error('form')}
       </>}
-    </section>
-
-    {read && <section className="card setup-step" aria-labelledby={`${prefix}-read`}>
-      <h2 id={`${prefix}-read`}>{t('Imported profile')}</h2>
+    </section> : <section className="card setup-step" aria-labelledby={`${prefix}-read`}>
+      <h2 id={`${prefix}-read`}>{t('Review profile')}</h2>
       <Facts facts={editor.facts!} />
       <div className="editor-fields">
         <div className="field">
@@ -483,19 +498,163 @@ export function NewProfileForm({ editor, draft, onChange }: { editor: Editor; dr
           {error('name')}
         </div>
       </div>
-      {editor.hint && <p className="found cannot"><Icon name="warning" /><span>{editor.hint}</span></p>}
-      <label className="check-field">
-        <input type="checkbox" checked={values.connect} disabled={!!editor.hint} onChange={(event) => update({ connect: event.target.checked })} />
-        {t('Connect after import')}
-      </label>
+      {cannot ? <p className="found cannot"><Icon name="warning" /><span>{editor.hint}</span></p> : <>
+        {values.needsLogin && <fieldset className="inset sign-in">
+          <legend>{t('VPN sign-in')}</legend>
+          <div className="editor-fields">
+            <div className="field">
+              <label htmlFor={`${prefix}-user`}>{t('Username')}</label>
+              <input id={`${prefix}-user`} type="text" autoComplete="username" spellCheck={false} value={values.username}
+                aria-invalid={!!editor.errors.username} onChange={(event) => update({ username: event.target.value })} />
+              {error('username')}
+            </div>
+            {askPassword && <div className="field">
+              <label htmlFor={`${prefix}-password`}>{t('Password')}</label>
+              <input id={`${prefix}-password`} type="password" autoComplete="current-password" value={values.password}
+                aria-invalid={!!editor.errors.password} onChange={(event) => update({ password: event.target.value })} />
+              {error('password')}
+            </div>}
+          </div>
+          <label className="check-field">
+            <input type="checkbox" checked={values.remember} onChange={(event) => update({ remember: event.target.checked })} />
+            {t('Remember password')}
+          </label>
+          {!askPassword && <p className="secondary metadata">{t('You can sign in when you connect.')}</p>}
+        </fieldset>}
+        <label className="check-field">
+          <input type="checkbox" checked={values.connect} onChange={(event) => update({ connect: event.target.checked })} />
+          {t('Connect after import')}
+        </label>
+      </>}
     </section>}
 
+    {read && error('form')}
+    <div className="actions setup-actions">
+      {read && <ActionButton action={values.connect && !cannot ? { ...editor.save, label: t('Import and connect') } : editor.save} primary type="submit" />}
+      <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
+      {/* Back to the file or link, as it was before anything was read. */}
+      {read && <button type="button" className="link change-source" onClick={() => post('IMPORT', {})}>{t('Change source…')}</button>}
+    </div>
+  </form>;
+}
+
+/** "Edit {name}" (D29): its name, and for one that signs in, its username and whether its password is kept — never the
+ *  password itself; Change password… takes a new one, Forget password lets the kept one go. */
+export function ProfileEditForm({ editor, draft, onChange }: { editor: Editor; draft: Draft; onChange: (draft: Draft) => void }) {
+  const form = useRef<HTMLFormElement>(null);
+  const prefix = useId();
+  useEditorFocus(form);
+  if (draft.kind !== 'profile-edit' || editor.kind !== 'profile-edit') return null;
+  const values = draft.values;
+  const update = (next: Partial<ProfileEditValues>) => onChange({ ...draft, values: { ...values, ...next } });
+  const error = (field: EditorField) => editor.errors[field]
+    ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p> : null;
+  const usernameChanged = values.username.trim() !== editor.values.username;
+
+  return <form ref={form} className="new-app" tabIndex={-1} aria-label={t('Edit profile')} noValidate onSubmit={(event) => {
+    event.preventDefault();
+    post('SAVE_PROFILE_EDIT', { token: editor.token, values });
+  }}>
+    <section className="card setup-step">
+      {editor.facts && <Facts facts={editor.facts} />}
+      <div className="editor-fields">
+        <div className="field">
+          <label htmlFor={`${prefix}-name`}>{t('Profile name')}</label>
+          <input id={`${prefix}-name`} type="text" autoComplete="off" value={values.name} aria-invalid={!!editor.errors.name}
+            onChange={(event) => update({ name: event.target.value })} />
+          {error('name')}
+        </div>
+      </div>
+      {values.needsLogin && <fieldset className="inset sign-in">
+        <legend>{t('VPN sign-in')}</legend>
+        <div className="editor-fields">
+          <div className="field">
+            <label htmlFor={`${prefix}-user`}>{t('Username')}</label>
+            <input id={`${prefix}-user`} type="text" autoComplete="username" spellCheck={false} value={values.username}
+              aria-invalid={!!editor.errors.username} onChange={(event) => update({ username: event.target.value })} />
+            {error('username')}
+          </div>
+          <div className="field">
+            <span className="secondary metadata">{t('Password')}</span>
+            <span>{values.forgetPassword ? t('Will be forgotten') : values.passwordSaved ? t('Saved') : t('Not saved')}</span>
+          </div>
+        </div>
+        {values.changePassword ? <div className="field">
+          <label htmlFor={`${prefix}-password`}>{t('New password')}</label>
+          <input id={`${prefix}-password`} type="password" autoComplete="new-password" value={values.password}
+            aria-invalid={!!editor.errors.password} onChange={(event) => update({ password: event.target.value })} />
+          {error('password')}
+        </div> : <div className="actions">
+          <button type="button" onClick={() => update({ changePassword: true, forgetPassword: false })}>{t('Change password…')}</button>
+          {values.passwordSaved && !values.forgetPassword && <button type="button" onClick={() => update({ forgetPassword: true })}>{t('Forget password')}</button>}
+        </div>}
+        {usernameChanged && values.passwordSaved && !values.changePassword && <p className="secondary metadata">{t('Changing the username also forgets its saved password.')}</p>}
+      </fieldset>}
+    </section>
+    {error('form')}
     <div className="actions setup-actions">
       <ActionButton action={editor.save} primary type="submit" />
       <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
     </div>
-    {!editor.save.enabled && editor.save.reason && <p className="secondary metadata">{editor.save.reason}</p>}
   </form>;
+}
+
+/** The sign-in a connect waits for (D29), as the confirmation dialog looks: its server, the username kept, the password,
+ *  Remember password. A saved password is never put back in the field. */
+export function SignInDialog({ signIn }: { signIn: SignInView }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const first = useRef<HTMLInputElement>(null);
+  const prefix = useId();
+  const [username, setUsername] = useState(signIn.username);
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(signIn.passwordSaved);
+  useLayoutEffect(() => {
+    const trigger = getFocusOrigin() ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const element = dialog.current;
+    element?.showModal();
+    paintCaptionButtons(true);
+    first.current?.focus();
+    return () => {
+      element?.close();
+      paintCaptionButtons(false);
+      queueMicrotask(() => {
+        if (!element?.isConnected) (getFocusOrigin() ?? (trigger?.isConnected ? trigger : null))?.focus();
+      });
+    };
+  }, []);
+
+  return <dialog ref={dialog} className="confirmation sign-in-dialog" tabIndex={-1} aria-labelledby={`${prefix}-title`} onCancel={(event) => {
+    event.preventDefault();
+    post('CANCEL_SIGN_IN', { token: signIn.token });
+  }}>
+    <form noValidate onSubmit={(event) => {
+      event.preventDefault();
+      post('SIGN_IN', { token: signIn.token, values: { username, password, remember } });
+      setPassword('');
+    }}>
+      <h2 id={`${prefix}-title`}>{signIn.title}</h2>
+      {signIn.server && <Facts facts={[{ label: t('Server'), value: signIn.server, figure: null }]} />}
+      {signIn.error && <p className="field-error" role="alert">{signIn.error}</p>}
+      <div className="field">
+        <label htmlFor={`${prefix}-user`}>{t('Username')}</label>
+        <input ref={signIn.username ? undefined : first} id={`${prefix}-user`} type="text" autoComplete="username" spellCheck={false}
+          value={username} onChange={(event) => setUsername(event.target.value)} />
+      </div>
+      <div className="field">
+        <label htmlFor={`${prefix}-password`}>{t('Password')}</label>
+        <input ref={signIn.username ? first : undefined} id={`${prefix}-password`} type="password" autoComplete="current-password"
+          value={password} onChange={(event) => setPassword(event.target.value)} />
+      </div>
+      <label className="check-field">
+        <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
+        {t('Remember password')}
+      </label>
+      <div className="actions">
+        <ActionButton action={signIn.cancel} onClick={() => post('CANCEL_SIGN_IN', { token: signIn.token })} />
+        <ActionButton action={signIn.connect} primary type="submit" />
+      </div>
+    </form>
+  </dialog>;
 }
 
 export function RemovalConfirmation({ confirmation }: { confirmation: Confirmation }) {

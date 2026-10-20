@@ -81,7 +81,7 @@ export interface ProfileView {
   /** Its row on Profiles: VPN protocol, If it cannot connect, More settings (each Settings' or its own), Imported. */
   details: Fact[] | null;
   location: LocationView;
-  actions: Record<'connect' | 'disconnect' | 'copy' | 'locate' | 'remove' | 'settings', Action>;
+  actions: Record<'connect' | 'disconnect' | 'copy' | 'locate' | 'remove' | 'settings' | 'edit', Action>;
   /** ISO time the next round of attempts starts, while the connection waits for it: the page counts down to it. */
   nextAttemptAt: string | null;
 }
@@ -344,7 +344,7 @@ export interface NewAppValues {
 
 export type EditorField = 'form' | 'path' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
   | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol' | 'password' | 'confirm'
-  | 'link';
+  | 'link' | 'username';
 
 /** "Import a VPN profile" (D29), as OpenVPN Connect's Import Profile: from a file or a link, then looked at before it is
  *  kept. signIn: the link's server asked who the person is, so a username and password are asked for. The host never
@@ -357,6 +357,35 @@ export interface NewProfileValues {
   name: string;
   connect: boolean;
   signIn: boolean;
+  /** Keep the VPN password, sealed, for the next connect. */
+  remember: boolean;
+  /** The host's: the profile read signs in with a username and password. */
+  needsLogin: boolean;
+}
+
+/** Edit a profile (D29): its name, and for one that signs in, its username and kept password. needsLogin and
+ *  passwordSaved are the host's; a kept password is never sent to the page. */
+export interface ProfileEditValues {
+  name: string;
+  username: string;
+  password: string;
+  changePassword: boolean;
+  forgetPassword: boolean;
+  needsLogin: boolean;
+  passwordSaved: boolean;
+}
+
+/** The sign-in a connect waits for (D29), over whatever page is shown. */
+export interface SignInView {
+  token: string;
+  profileId: string;
+  title: string;
+  server: string;
+  username: string;
+  passwordSaved: boolean;
+  error: string | null;
+  connect: Action;
+  cancel: Action;
 }
 
 /** Export and Import (D26): which parts, and the password the profiles are sealed with. The host never sends a typed
@@ -392,7 +421,7 @@ export type Editor = {
   icons: { id: string; label: string; url: string }[] | null;
   /** For a profile being imported, once read: its server and where it came from. */
   facts: Fact[] | null;
-} & ({ kind: 'app'; values: AppEditValues } | { kind: 'new-profile'; values: NewProfileValues } | { kind: 'program'; values: ProgramEditValues }
+} & ({ kind: 'app'; values: AppEditValues } | { kind: 'new-profile'; values: NewProfileValues } | { kind: 'profile-edit'; values: ProfileEditValues } | { kind: 'program'; values: ProgramEditValues }
   | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues }
   | { kind: 'export'; values: MoveValues } | { kind: 'import'; values: MoveValues });
 
@@ -441,6 +470,7 @@ export interface ClientState {
   language: string;
   /** Newest first. Info notices leave on their own after a few seconds; warnings and errors stay until dismissed. */
   notices: Notice[];
+  signIn: SignInView | null;
 }
 
 /** Every intent the page may post, with its payload. None is answered: what follows arrives as the next STATE. */
@@ -451,6 +481,10 @@ export interface Commands {
   /** Get the profile from values.link, with values.username and password once the server has asked for them. */
   PROFILE_IMPORT_LINK: { token: string; values: NewProfileValues };
   SAVE_PROFILE_IMPORT: { token: string; values: NewProfileValues };
+  SIGN_IN: { token: string; values: { username: string; password: string; remember: boolean } };
+  CANCEL_SIGN_IN: { token: string };
+  BEGIN_PROFILE_EDIT: { id: string };
+  SAVE_PROFILE_EDIT: { token: string; values: ProfileEditValues };
   CONNECT: { id: string };
   DISCONNECT: { id: string };
   LOCATE: { id: string };

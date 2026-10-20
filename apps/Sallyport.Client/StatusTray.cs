@@ -71,9 +71,22 @@ internal sealed class StatusTray : IDisposable
     private void OnChanged()
     {
         if (_window.IsDisposed || !_window.IsHandleCreated) return;
-        try { _window.BeginInvoke(Refresh); }
+        try
+        {
+            _window.BeginInvoke(() =>
+            {
+                Refresh();
+                // A sign-in a connect waits for (D29) — from the tray's Connect, or a server that did not accept the last
+                // one while the window was away — is answered in the window: brought up, once for each.
+                var asking = _core.Snapshot().SignIn?.Token;
+                if (asking is not null && asking != _signInShown) ShowWindow();
+                _signInShown = asking;
+            });
+        }
         catch (InvalidOperationException) { /* the window is going away */ }
     }
+
+    private string? _signInShown;
 
     /// <summary>The window shows every notice; the tray repeats one only when the window is out of sight.</summary>
     private void OnNoticed(Notice notice)

@@ -272,6 +272,10 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       Measured on this one computer only: a second computer's paths were stood in for by a drive that does not exist
       (`Q:`). Not yet: an export taken to another machine and imported there.
    9. **Profiles as settings, an app's settings under its head — measured 2026-10-20 (D27).**
+   10. **Adding a profile and signing in with it — measured 2026-10-21 (D29):** the import page by a file, a link and
+       Explorer's Open with, the review, the sign-in at connect, Edit, through the installed client with stand-ins.
+       Not yet: a real server that asks for a username and password (the owner's account is the measurement), an
+       Access Server's `/rest/GetUserlogin`, and a drop by mouse.
    - **Done when:** Zenless Zone Zero is an app from its folder, routed by packets while a browser of the same profile
      uses its proxy, through one login; window and tray agree with the service's and the server's evidence.
 9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files in the
@@ -330,5 +334,9 @@ reader).
 - Kobo runs the library as a provider process (`Sallyport.Host.exe serve|stop`); in-process hosting waits for the release.
 
 ## 6. Release
+- **Made (D28):** `package.ps1` builds the one setup, its `.sha256` and its notes; `.github/workflows/release.yml` does
+  the same by hand from the Actions tab, then tags and drafts the GitHub release. Measured: the package, installed as an
+  upgrade over the owner's install, and used. **Not run:** the workflow — the repository has no GitHub remote yet; its
+  first dispatch should be a rehearsal (`dry_run`, the default), and its artifact installed before a real one.
 - **Needs:** a certificate others trust, for the setup and the binaries (until then SmartScreen and UAC show an unknown
   publisher, and peers are checked by install path, not by signature — `docs/design/product.md`, change 2).

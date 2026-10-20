@@ -6,6 +6,13 @@
   notes from this file, built by `apps/Sallyport.Setup/package.ps1` and by the Release workflow (started by hand,
   a rehearsal unless told otherwise; it tests, packages, then dates this section, tags and drafts the GitHub
   release). Every program says what it is in Windows: Sallyport, Sallyport Service, Sallyport Setup, its version.
+- Adding a profile and signing in (2026-10-21, D29). Import a VPN profile is a page: a file chosen or dropped on the
+  window, or a link (https only; a provider's server address, signed in to when it asks), then the profile looked at
+  before it is kept — its servers, its name, its sign-in. A profile may sign in with a username and password, with or
+  without a certificate of its own: the password remembered (sealed, like the profile) or asked when it connects, and
+  asked again when the server does not accept it. Each profile's row shows its server and username; Edit renames it,
+  changes its username and kept password, and holds its connection settings and removal. Not yet measured against a
+  server that asks for a username and password.
 - Moving to another computer (2026-10-20, D26). Settings exports VPN profiles, apps and connection settings to one
   `.sallyport` file, the profiles sealed with a password if the person gives one (AES-GCM, PBKDF2-SHA256 600,000);
   import adds and never overwrites. An imported app not where it was is looked for on the other drives, else says so
