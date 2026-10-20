@@ -200,7 +200,7 @@ sealed class Supervisor(Log log)
         lock (_lock) _run = run;
         _ = Task.Run(() => FollowAsync(run));
         log.Say($"run {id}: worker {worker.Id} for client pid {peer.ProcessId}, {programs.Length} program(s), loss {Losses(programs)}");
-        return new RunPrepared(id, RouterProtocol.RunPipe(id));
+        return new RunPrepared(id, RouterProtocol.RunPipe(id), worker.Id);
     }
 
     // The worker's lines after "ready": "beat" and the router's drains, "log ..." to be written here.

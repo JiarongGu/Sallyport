@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using Sallyport.Windows.PacketFilter;
+using System.Security.Principal;
 using Sallyport.Windows.Routing;
 using Sallyport.Windows.Service;
 
@@ -118,5 +120,63 @@ public sealed class ProtocolTests
     public void A_peer_runs_from_a_folder_only_directly_in_it(string image, string folder, bool expected)
     {
         Assert.Equal(expected, new PipePeer(1, 1, null, image).RunsFrom(folder));
+    }
+
+    private const string Folder = @"C:\Program Files\Sallyport";
+    private static readonly SecurityIdentifier LocalSystem = new(WellKnownSidType.LocalSystemSid, null);
+    private static readonly SecurityIdentifier Person = new("S-1-5-21-1-2-3-1001");
+    private static readonly RouterClient.ServiceRecord Service = new(ServiceState.Running, 40, "LocalSystem", Folder + @"\Sallyport.Service.exe");
+
+    [Fact]
+    public void A_service_the_person_cannot_open_is_believed_on_the_service_managers_word()
+    {
+        Assert.Null(RouterClient.Distrust(new PipePeer(40, 0, null, null), Folder, Service));
+    }
+
+    [Fact]
+    public void A_service_the_client_can_open_must_agree_with_the_manager()
+    {
+        Assert.Null(RouterClient.Distrust(new PipePeer(40, 0, LocalSystem, Folder + @"\Sallyport.Service.exe"), Folder, Service));
+        Assert.Contains("not running as the system", RouterClient.Distrust(new PipePeer(40, 0, Person, Folder + @"\Sallyport.Service.exe"), Folder, Service));
+        Assert.Contains("does not run from", RouterClient.Distrust(new PipePeer(40, 0, LocalSystem, @"C:\Temp\Sallyport.Service.exe"), Folder, Service));
+    }
+
+    [Fact]
+    public void What_answers_the_routers_pipe_is_refused_unless_the_manager_says_it_runs_the_service()
+    {
+        Assert.Contains("not the Sallyport service", RouterClient.Distrust(new PipePeer(41, 0, null, null), Folder, Service));
+        Assert.Contains("not the Sallyport service", RouterClient.Distrust(new PipePeer(40, 0, null, null), Folder, Service with { State = ServiceState.Stopping }));
+        Assert.Contains("not set to run as the system", RouterClient.Distrust(new PipePeer(40, 0, null, null), Folder, Service with { Account = @"NT AUTHORITY\LocalService" }));
+        Assert.Contains("not set to run as the system", RouterClient.Distrust(new PipePeer(40, 0, null, null), Folder, Service with { Account = null }));
+        Assert.Contains("does not run from", RouterClient.Distrust(new PipePeer(40, 0, null, null), Folder, Service with { Executable = @"C:\Temp\Sallyport.Service.exe" }));
+        Assert.Contains("does not run from", RouterClient.Distrust(new PipePeer(40, 0, null, null), Folder, Service with { Executable = null }));
+    }
+
+    [Fact]
+    public void A_runs_worker_is_the_process_the_service_named()
+    {
+        Assert.Null(RouterClient.Distrust(new PipePeer(77, 0, null, null), Folder, worker: 77));
+        Assert.Contains("not the router the service started", RouterClient.Distrust(new PipePeer(78, 0, null, null), Folder, worker: 77));
+        Assert.Contains("not running as the system", RouterClient.Distrust(new PipePeer(77, 0, Person, null), Folder, worker: 77));
+    }
+
+    [Theory]
+    [InlineData(@"""C:\Program Files\Sallyport\Sallyport.Service.exe""", @"C:\Program Files\Sallyport\Sallyport.Service.exe")]
+    [InlineData(@"""C:\Program Files\Sallyport\Sallyport.Service.exe"" --flag", @"C:\Program Files\Sallyport\Sallyport.Service.exe")]
+    [InlineData(@"C:\Windows\system32\svchost.exe -k LocalService -p", @"C:\Windows\system32\svchost.exe")]
+    [InlineData(@"C:\Tools\thing", @"C:\Tools\thing")]
+    public void A_services_executable_is_read_from_its_command_line(string line, string expected)
+    {
+        Assert.Equal(expected, ServiceControl.Executable(line));
+    }
+
+    [Fact]
+    public void The_service_managers_record_is_read_for_a_service_every_Windows_has()
+    {
+        var log = ServiceControl.Config("EventLog");
+        Assert.NotNull(log);
+        Assert.EndsWith("svchost.exe", log.Value.Executable, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("LocalService", log.Value.Account, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(ServiceControl.Config("Sallyport.NoSuchService"));
     }
 }

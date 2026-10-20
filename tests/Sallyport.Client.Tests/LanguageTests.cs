@@ -125,6 +125,37 @@ public sealed partial class LanguageTests
     }
 
     [Fact]
+    public void Every_reason_the_router_service_gives_is_listed_with_its_Chinese()
+    {
+        var sources = Directory.EnumerateFiles(Path.Combine(Repository(), "apps", "Sallyport.Service"), "*.cs")
+            .Append(Path.Combine(Repository(), "src", "Sallyport.Windows", "Service", "RouterClient.cs"));
+        var given = sources.SelectMany(f => ServiceReason().Matches(File.ReadAllText(f)))
+            .Select(m => RouterWords.Sentence(Interpolated().Replace(Regex.Unescape(m.Groups["r"].Value), "{0}")))
+            .Distinct().ToList();
+
+        var unlisted = given.Where(r => !RouterWords.Reasons.Contains(r)).ToList();
+        var untranslated = RouterWords.Reasons.Where(r => !Chinese.Words.ContainsKey(r)).ToList();
+
+        Assert.True(given.Count > 20, $"only {given.Count} reasons found: the scan is not reading the sources");
+        Assert.Empty(unlisted);
+        Assert.Empty(untranslated);
+    }
+
+    [Fact]
+    public void A_reason_from_the_router_service_is_shown_in_the_windows_language()
+    {
+        var before = L.Current;
+        try
+        {
+            L.Current = Language.Chinese;
+            Assert.Equal("应答的程序不是以系统身份运行的。", RouterWords.Say("what answered on the router's pipe is not running as the system"));
+            Assert.Equal("分流器已停止（退出代码 -1）。", RouterWords.Say("the router stopped (exit -1)"));
+            Assert.Equal("Something unforeseen.", RouterWords.Say("something unforeseen"));
+        }
+        finally { L.Current = before; }
+    }
+
+    [Fact]
     public void The_tray_menu_is_in_chinese_too()
     {
         var before = L.Current;
@@ -166,6 +197,15 @@ public sealed partial class LanguageTests
 
     [GeneratedRegex("""^\s*\["((?:[^"\\]|\\.)*)"\] =""", RegexOptions.Multiline)]
     private static partial Regex SetupTable();
+
+    // The ways the service and the router client give a reason: Rejected("…"), End("…"), RouterRefused("…"), a worker's
+    // "error …" line, a driver's (false, "…"), each maybe interpolated; and a line of the ternary of who may not ask
+    // (Refusal), which ends at its sentence.
+    [GeneratedRegex("""(?:\b(?:Rejected|End|RouterRefused)\(\$?"|Say\(\$?"error |\(false, \$?")(?<r>(?:[^"\\]|\\.)*[a-z](?:[^"\\]|\\.)*)"(?=[);])|(?<!\?)[?:][ \t]+"(?<r>[^"\\{}]*[a-z][^"\\{}]*)"[ \t]*\r?$""", RegexOptions.Multiline)]
+    private static partial Regex ServiceReason();
+
+    [GeneratedRegex("""\{[^{}]*(?:\([^()]*\))?[^{}]*\}""")]
+    private static partial Regex Interpolated();
 }
 
 [CollectionDefinition(nameof(OneLanguage), DisableParallelization = true)]

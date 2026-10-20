@@ -16,8 +16,9 @@ namespace Sallyport.Windows.Service;
 public static class RouterProtocol
 {
     // 2: a run's programs each with their own loss policy, and changed while it runs (D23). 3: lanes — each program
-    // into its profile's tunnel, a generation saying its lane in its top byte (D24).
-    public const int Version = 3;
+    // into its profile's tunnel, a generation saying its lane in its top byte (D24). 4: a run's worker named by its
+    // process, for a client that cannot open the system's processes to see who answered.
+    public const int Version = 4;
     public const string ServiceName = "Sallyport";
     public const string ControlPipe = "Sallyport.Router.v1";
     public static string RunPipe(string runId) => $"Sallyport.Router.v1.run.{runId}";
@@ -70,8 +71,9 @@ public sealed record Rejected(string Reason) : RouterMessage;
 /// <summary>Client → supervisor: route these programs (their full executable paths), each with its loss policy.</summary>
 public sealed record PrepareRun(ProgramRule[] Programs) : RouterMessage;
 
-/// <summary>Supervisor → client: the run's worker is ready behind its own pipe.</summary>
-public sealed record RunPrepared(string RunId, string Pipe) : RouterMessage;
+/// <summary>Supervisor → client: the run's worker is ready behind its own pipe; <paramref name="Worker"/> its process,
+/// which only the client's own check of that pipe is matched against.</summary>
+public sealed record RunPrepared(string RunId, string Pipe, int Worker) : RouterMessage;
 
 /// <summary>Client → supervisor, every second while a run lives: without it for <see cref="RouterProtocol.Lease"/>, the
 /// run ends and the game goes direct.</summary>

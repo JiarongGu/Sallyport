@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Routing an app works from a client that is not elevated (2026-10-21). The client checked the router service by
+  opening the service's own process, which Windows lets only the system and elevated administrators do; started
+  normally (by setup, by Windows at sign-in), it could not, and said the service was "not running as the system".
+  It now asks the service manager — the service's process, its account, its executable, which a person may read —
+  and takes the run's router to be the process the service names. A reason the service gives is now shown in the
+  window's language, and a router that stops before the client reaches it gives the service's own reason.
+
 ## 0.1.0 — 2026-10-20
 
 - The release (2026-10-20, D28). One setup, `Sallyport-<version>-win-x64-setup.exe`, with its SHA-256 beside it and

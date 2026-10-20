@@ -4,6 +4,32 @@ A finished item is deleted (git is the archive). Work goes top to bottom, one at
 says under **Done when** has been measured — against the real server where a server is involved (CLAUDE.md rule 3).
 **Needs** names what only the owner can give.
 
+## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
+1. **Edit a profile in one click:** Edit and Remove on the profile's own row; Edit opens the edit view straight away
+   (now the row opens a page where Edit is a second click).
+2. **The tray menu's alignment**, from a capture of the real screen at 200%: an entry's highlight 10 px from the
+   menu's left edge and 20 px from its right (the separators even); the submenu over the menu's edge by 11 px; the
+   submenu's entry 5 px below the row it opens from.
+   - **Done when:** a capture shows the highlight even, the submenu beside the menu, and its entry level with the row.
+3. **Setup forgets the folder when the language changes:** a folder typed or browsed goes back to the default.
+   - **Done when:** a folder chosen, the language switched there and back, the folder still the one chosen.
+4. **Sizes that follow the text and the screen, not fixed pixels:** the window, setup and the page (what Shenora
+   offers for it, checked first).
+   - **Done when:** each measured at two display scales.
+5. **The package is 176 MB:** each of the client (56 MB), the service (36) and setup (49.5) carries its own .NET
+   runtime, and the release's setup carries setup again; WebView2 is Windows' own and not in it.
+   - **Done when:** a smaller package is built, installed as an upgrade, and used.
+6. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Setup.exe
+   /uninstall`); the Start menu has Sallyport alone and the window has none. An "Uninstall Sallyport" beside it in the
+   Start menu, and one in Settings → About.
+   - **Done when:** each found and started where a person would look, and the removal measured from it.
+7. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
+   "应用程序的每个连接都经由 VPN。" and its check, which says nothing new; show what that app has sent and received through
+   the VPN, and its own latency (its connections' round trip through the tunnel, as the router sees them).
+   - **Done when:** an app in use shows its traffic and latency, measured against the tunnel's own figures.
+8. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
+9. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,
 matched to their process through the owner tables, NAT'd into the tunnel, replies put back. Our code MIT; the driver
@@ -317,6 +343,12 @@ Replaces `ndisrd.sys`; nothing above the seam changes.
 ## 4. What the client's measurement did not reach (2026-10-19)
 The file dialogs past opening and cancelling (this machine's dialog shows UI Automation no File name box; app shortcuts
 were seeded instead), Firefox and Electron launches, the dark theme of the new window, the tray driven by hand.
+- **A client that is not elevated, routing (2026-10-21):** the owner's machine has UAC off (`EnableLUA` 0), so every
+  program there runs elevated and the case cannot arise; the check it needs (the service manager's word where the
+  service's process is closed, the worker named by its process) is unit-tested with an unreadable peer, and routing
+  through jp measured with it on the owner's machine (Zenless's Use VPN up over a minute, the guard 196 rounds, 0
+  failed). Measure on a machine with UAC on. The owner's own "not running as the system" was not reproduced: it is
+  what a worker gone before the client reached it showed, which now gives the service's reason instead.
 - **Done when:** each is measured, or recorded as could-not-be-checked with the reason.
 
 ## 5. Phase 4 — the long run (the library)

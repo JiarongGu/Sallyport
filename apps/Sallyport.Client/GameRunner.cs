@@ -272,13 +272,13 @@ internal sealed class GameRunner(Connections connections) : IDisposable
         {
             try { client = await RouterClient.ConnectAsync(folder, "client", TimeSpan.FromSeconds(5), r.Stop.Token); }
             catch (TimeoutException) { End(r, L.T("The Sallyport service is not running. Reinstall Sallyport to put it back.")); return; }
-            catch (RouterRefused e) { End(r, e.Message); return; }
-            if (!client.Welcome.DriverReady) { End(r, client.Welcome.DriverProblem ?? L.T("The packet driver is not ready.")); return; }
-            client.RunEnded += ended => End(r, Sentence(ended.Reason));
+            catch (RouterRefused e) { End(r, RouterWords.Say(e.Message)); return; }
+            if (!client.Welcome.DriverReady) { End(r, client.Welcome.DriverProblem is { } problem ? RouterWords.Say(problem) : L.T("The packet driver is not ready.")); return; }
+            client.RunEnded += ended => End(r, RouterWords.Say(ended.Reason));
 
             RouterRun run;
             try { run = await client.PrepareAsync(programs, folder, r.Stop.Token); }
-            catch (RouterRefused e) { End(r, e.Message); return; }
+            catch (RouterRefused e) { End(r, RouterWords.Say(e.Message)); return; }
             await using (run)
             {
                 run.StateChanged += state => OnState(r, state);
@@ -339,7 +339,7 @@ internal sealed class GameRunner(Connections connections) : IDisposable
         try { session = connections.Acquire(lane.ProfileId, lane.Holder, open: false); }
         catch (Shenora.Core.Ipc.ShenoraException e)
         {
-            Drop(r, lane, Sentence(e.Message));
+            Drop(r, lane, RouterWords.Sentence(e.Message));
             return;
         }
         // Each generation's router side, attached to its dispatcher and let go with it — the one up already, when the
@@ -447,9 +447,6 @@ internal sealed class GameRunner(Connections connections) : IDisposable
         // Whatever is wanted now follows this run's end.
         _ = ConvergeAsync();
     }
-
-    private static string Sentence(string? text) =>
-        string.IsNullOrEmpty(text) ? "" : char.ToUpperInvariant(text[0]) + text[1..] + (text.EndsWith('.') ? "" : ".");
 
     /// <summary>Exiting ends the run first, so every app goes direct before anything else closes.</summary>
     public void Dispose() => Task.Run(StopAsync).Wait(TimeSpan.FromSeconds(10));

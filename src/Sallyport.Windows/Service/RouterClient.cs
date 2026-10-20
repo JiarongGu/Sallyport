@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO.Pipes;
 using System.Net;
 using System.Threading.Channels;
@@ -41,7 +42,17 @@ public sealed class RouterClient : IAsyncDisposable
         try
         {
             await pipe.ConnectAsync(timeout, ct);
-            Verify(PipePeer.ServerOf(pipe), folder, expectService: true);
+            ServiceState state;
+            int pid;
+            (string Account, string Executable)? config;
+            try
+            {
+                (state, pid) = ServiceControl.Status(RouterProtocol.ServiceName);
+                config = ServiceControl.Config(RouterProtocol.ServiceName);
+            }
+            catch (Win32Exception e) { throw new RouterRefused($"Windows did not say what runs the Sallyport service (error {e.NativeErrorCode})"); }
+            if (Distrust(PipePeer.ServerOf(pipe), folder, new ServiceRecord(state, pid, config?.Account, config?.Executable)) is { } why)
+                throw new RouterRefused(why);
             var frames = new FrameStream(pipe);
             await frames.SendAsync(new Hello(RouterProtocol.Version, build), ct);
             var first = await frames.ReadAsync(ct);
@@ -59,19 +70,33 @@ public sealed class RouterClient : IAsyncDisposable
         }
     }
 
-    // The server must be LocalSystem, from the expected folder, and — for the supervisor — the very process the service
-    // manager says runs the service, so a process that merely took the name first is not believed.
-    internal static void Verify(PipePeer server, string folder, bool expectService)
-    {
-        if (!server.IsSystem) throw new RouterRefused("what answered on the router's pipe is not running as the system");
-        if (!server.RunsFrom(folder)) throw new RouterRefused("what answered on the router's pipe does not run from Sallyport's folder");
-        if (expectService)
-        {
-            var (state, pid) = ServiceControl.Status(RouterProtocol.ServiceName);
-            if (state != ServiceState.Running || pid != server.ProcessId)
-                throw new RouterRefused("what answered on the router's pipe is not the Sallyport service");
-        }
-    }
+    /// <summary>What the service manager says of the router service: the process running it, and the account and
+    /// executable it runs it as.</summary>
+    internal sealed record ServiceRecord(ServiceState State, int ProcessId, string? Account, string? Executable);
+
+    // The supervisor must be the very process the service manager says runs the service, so a process that merely took the
+    // pipe's name first is not believed; and the service must be set to run as LocalSystem from the client's own folder.
+    // The manager's record says so to the person, who cannot open the service's process itself: its DACL lets in only the
+    // system and elevated administrators (read 2026-10-21), and the client runs as the person, not elevated.
+    internal static string? Distrust(PipePeer server, string folder, ServiceRecord service) =>
+        service.State != ServiceState.Running || service.ProcessId != server.ProcessId ? "what answered on the router's pipe is not the Sallyport service"
+        : !IsLocalSystem(service.Account) ? "the Sallyport service is not set to run as the system"
+        : service.Executable is null || !new PipePeer(0, 0, null, service.Executable).RunsFrom(folder) ? "the Sallyport service does not run from Sallyport's folder"
+        : Disagrees(server, folder);
+
+    // A run's worker must be the process the supervisor, believed already, says it started for this run.
+    internal static string? Distrust(PipePeer server, string folder, int worker) =>
+        server.ProcessId != worker ? "what answered on the run's pipe is not the router the service started" : Disagrees(server, folder);
+
+    // Where the client can read the process itself (run elevated), what Windows says of it must agree; where it cannot,
+    // that is not a refusal — the manager has answered for it.
+    private static string? Disagrees(PipePeer server, string folder) =>
+        server.User is not null && !server.IsSystem ? "what answered on the router's pipe is not running as the system"
+        : server.Image is not null && !server.RunsFrom(folder) ? "what answered on the router's pipe does not run from Sallyport's folder"
+        : null;
+
+    private static bool IsLocalSystem(string? account) =>
+        string.Equals(account, "LocalSystem", StringComparison.OrdinalIgnoreCase) || string.Equals(account, @"NT AUTHORITY\SYSTEM", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Asks for a run of these programs, all under one loss policy, and attaches to it.</summary>
     public Task<RouterRun> PrepareAsync(IReadOnlyList<string> executables, LossPolicy loss, string folder, CancellationToken ct = default) =>
@@ -85,8 +110,20 @@ public sealed class RouterClient : IAsyncDisposable
         if (reply is Rejected rejected) throw new RouterRefused(rejected.Reason);
         if (reply is not RunPrepared prepared) throw new RouterRefused("the service answered with something this client does not understand");
         _beating ??= BeatAsync();
-        return await RouterRun.AttachAsync(prepared, folder, ct);
+        try { return await RouterRun.AttachAsync(prepared, folder, ct); }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+            // The worker gone before it was attached: the supervisor says why on its own pipe, a moment later — the reason
+            // to give, not the broken pipe it left.
+            try { throw new RouterRefused((await Ending(prepared.RunId).Task.WaitAsync(TimeSpan.FromSeconds(2), ct)).Reason); }
+            catch (TimeoutException) { throw new RouterRefused("the router stopped before it could be reached"); }
+        }
     }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource<RunEnded>> _endings = new();
+
+    private TaskCompletionSource<RunEnded> Ending(string runId) =>
+        _endings.GetOrAdd(runId, _ => new TaskCompletionSource<RunEnded>(TaskCreationOptions.RunContinuationsAsynchronously));
 
     public ValueTask StopAsync(string runId) => _control.SendAsync(new StopRun(runId));
 
@@ -96,7 +133,11 @@ public sealed class RouterClient : IAsyncDisposable
         {
             while (await _control.ReadAsync(_stop.Token) is { } frame)
             {
-                if (frame.Message is RunEnded ended) RunEnded?.Invoke(ended);
+                if (frame.Message is RunEnded ended)
+                {
+                    Ending(ended.RunId).TrySetResult(ended);
+                    RunEnded?.Invoke(ended);
+                }
                 else if (frame.Message is { } message) _replies.Writer.TryWrite(message);
             }
         }
@@ -176,7 +217,7 @@ public sealed class RouterRun : IAsyncDisposable
         try
         {
             await pipe.ConnectAsync(TimeSpan.FromSeconds(10), ct);
-            RouterClient.Verify(PipePeer.ServerOf(pipe), folder, expectService: false);
+            if (RouterClient.Distrust(PipePeer.ServerOf(pipe), folder, prepared.Worker) is { } why) throw new RouterRefused(why);
             var frames = new FrameStream(pipe);
             await frames.SendAsync(new Attach(prepared.RunId), ct);
             return (await frames.ReadAsync(ct))?.Message switch
