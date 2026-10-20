@@ -53,7 +53,10 @@ internal sealed record DefaultsView(IReadOnlyList<Fact> Facts, UiAction Edit);
 internal sealed record LanguageView(string Setting, IReadOnlyList<EditorOption> Choices);
 
 internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About, DefaultsView Defaults,
-    LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null);
+    LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null, MoveView? Move = null);
+
+/// <summary>Settings' export and import of the profiles, the apps and the connection settings (D26): BEGIN_EXPORT, BEGIN_IMPORT.</summary>
+internal sealed record MoveView(UiAction Export, UiAction Import);
 
 /// <summary>Settings' connection choices, each applied the moment it is chosen: SET_PROTOCOL, SET_RETRY.</summary>
 internal sealed record ConnectionSettingsView(LanguageView Protocol, LanguageView Retry);
@@ -76,7 +79,7 @@ internal static class WindowViews
     {
         var channels = new List<ChannelView>();
         // What never changes is on the Profiles page; who routes through it is said by the apps the channel carries.
-        string[] notHere = [L.T("Transport"), L.T("Imported"), L.T("SOCKS5 port"), L.T("Connection settings"), L.T("Used by")];
+        string[] notHere = [L.T("SOCKS5 port"), L.T("Used by")];
         foreach (var p in profiles)
         {
             if (p.Phase is ProfilePhase.Idle or ProfilePhase.Unsupported or ProfilePhase.Removing) continue;
@@ -159,7 +162,8 @@ internal static class WindowViews
     }
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
-        AppDefaults defaults, StoredProfile? defaultProfile, bool editing, string? languageSetting = null, PolicyOverride? connection = null)
+        AppDefaults defaults, StoredProfile? defaultProfile, bool editing, string? languageSetting = null, PolicyOverride? connection = null,
+        string? dialogOpen = null, bool moving = false)
     {
         // The driver and the service are said once, under Packet routing.
         var about = new List<Fact> { new(L.T("Version"), Version) };
@@ -183,7 +187,11 @@ internal static class WindowViews
             // Never given "keep trying" stands until something else is chosen.
             new ConnectionSettingsView(new(connection?.Protocol ?? "", GameViews.ProtocolChoices()),
                 new((connection?.RoundsMax ?? 0).ToString(CultureInfo.InvariantCulture), GameViews.RetryChoices(connection?.RoundsMax ?? 0))),
-            places);
+            places,
+            // While Export or Import is open beneath them, its own buttons are what to press.
+            moving ? new MoveView(UiAction.Hidden, UiAction.Hidden) : new MoveView(
+                UiAction.Shown(L.T("Export…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first.")),
+                UiAction.Shown(L.T("Import…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first."))));
     }
 
     /// <summary>The language choice, each named in itself; until the person picks one, the one setup ran in, or Windows'.</summary>

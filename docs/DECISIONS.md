@@ -620,3 +620,96 @@ Measured 2026-10-20 against jp's server, with the guard outside (0 failed):
   stand-in at home every round after. The first section showed Zenless "VPN 已开启 · jp", the second the stand-in
   "等待 jp" with its switch still on, and the stand-in's page both profiles under 经由. Zenless off, jp disconnected:
   the run ended, "stopped by the client".
+
+## D25 — One shared data folder, and an install folder of single files (2026-10-20; measured; supersedes D19's per-user part)
+
+The owner: "since we have all the configuration shoud be built into the data folder we probably should also move the
+profile storage to here too"; asked how, **"One shared folder"** (`data\ logs\ setup.json profiles\ config\ library\
+apps\ cache\`), and yes to tidying the install folder itself.
+
+- **What Sallyport keeps is in `data`, in areas** (`InstallLayout.Areas`): `profiles`, `config`, `library`, `apps`,
+  `cache` — beside the machine's `logs` and setup's record, not under `data\users\<SID>`. Setup moves the installing
+  person's per-user folder into them (`MoveMineIn`; the window's cache and the driver download are dropped, both
+  rebuilt) and gives each area its rights (`ShareAreas`): SYSTEM and Administrators full, **Users modify**, inherited
+  by what is in it. The client uses the areas when they are there and it can write in `config` (a probe file); else an
+  earlier per-user folder; else, a development build, `%LOCALAPPDATA%\Sallyport`. An earlier per-user folder is not
+  moved by the client when the areas exist: a second move could empty `data`.
+- **A profile stays sealed to the Windows account that imported it** (DPAPI, D14): another account on the machine
+  sees the file and cannot open it ("The stored profile could not be opened."). No password at rest — the owner chose
+  Windows' sealing plus Export (D26) over one. Users modify means another account could delete or replace what is
+  there; on a machine its owner shares, that is the cost of one folder, and what is secret in it stays sealed.
+- **The driver's installer is held from its hash check through Windows Installer** (`PacketFilterSetup.Hold`: opened
+  for reading, others may only read): its download is now in `cache\drivers`, which users may modify, so it must not
+  change between being checked and being run.
+- **The install folder is four files and `data`**: `Sallyport.Client.exe`, `Sallyport.Service.exe`,
+  `Sallyport.Setup.exe` (removal), `WebView2Loader.dll`, each program one self-contained single file (`package.ps1`:
+  `PublishSingleFile`, compressed, no symbols or XML docs; the second copy of `runtimes\` dropped where the loader is
+  at the root). The cost: each file carries its own runtime — the setup is 175.4 MB, up from 104.7 MB.
+- **Removing keeps the areas that hold the person's things** (`Kept`: profiles, config, library, apps) unless asked.
+
+Measured 2026-10-20 on the owner's machine: `artifacts\Sallyport.Setup.exe /quiet --folder "D:\Program
+Files\Sallyport"` exited 0. The folder: `data` and the four files (plus `Sallyport.Driver.exe`, the development tool,
+put there by the development deploy). `data`: `apps`, `cache`, `config`, `games`, `library`, `logs`, `profiles`, `language`,
+`setup.json`; `data\users` gone. `profiles`' rights: Users modify, inherited. The client started on them: jp, Zenless,
+Chinese and the app's icon as before; the single-file service routed (generation 1 committed, then "stopped by the
+client"). Not run: removal with the new keep (it would take the driver out) and a driver install through the hold.
+
+## D26 — Export and import, by part, with or without a password; an app found where it is now (2026-10-20; measured)
+
+The owner: "we will need a export feature so the config can be reimported (and export import can be different area
+profile/app/connection)", "we also can allow export/import without password", and "for app import/export the path
+might be changed so app need to have a scan/relocate logic for this".
+
+- **Settings → Move to another computer → Export… / Import…** (they open there: the window used to leave for
+  Overview). One file, `.sallyport` (`Backup`: `sallyport-export`, version 1, JSON, at most 16 MB read), of the parts
+  the person ticks: **VPN profiles** (each one's own text, so the `.ovpn` is not needed), **apps** (their programs,
+  switches and sections; the games themselves are not copied) and **connection settings** (Settings' choices, each
+  profile's own changes, the defaults for new apps).
+- **A password is the person's choice.** Given (8 characters at least, twice), each profile's text is sealed with
+  AES-GCM (12-byte nonce, 16-byte tag) under a key PBKDF2-SHA256 makes from it (600,000 iterations, a 16-byte salt;
+  fewer than 100,000 is refused when read), its id and name bound in. None given, the text is in the file as it is, and
+  the notice says what that means: "anyone who has the file can use your VPN profiles. Keep it somewhere only you can
+  open." Import asks for a password only for a file that has one.
+- **Import adds, never overwrites:** a profile whose text this computer has already is that one; an app whose id it has
+  already is kept as it is; the summary names what came in and what was here already. Sections follow the profiles they
+  name, onto this computer's.
+- **An app is found where it is now** (`RoutedItemStore.IsHere`, `Seek`, `Relocate`): after an import, an app not where
+  it was is looked for at the same path on this computer's other fixed drives and moved there; the rest say "Not found on
+  this computer — it was in …" with **Locate…**, which takes its folder or one of its programs (a program picked in a
+  folder below its own puts the app's folder where that program sat). Every program keeps its id, choice and methods,
+  then the folder is scanned again.
+
+Measured 2026-10-20 through the installed client (UI Automation, the window in Chinese; every file in the scratchpad,
+deleted after, never read here):
+- *Sealed:* every part, a test password → a 12,976-byte file, its profile PBKDF2-SHA256 600,000, no profile text in
+  it in the clear. Imported with a wrong password: "该密码无法打开 test.sallyport 中的 VPN 配置。"; with the right one:
+  the profile found here already (still one), the app here already, the connection settings applied.
+- *Without a password:* every part, no password → a 12,211-byte file and the warning above. Imported: no password asked;
+  "已从 plain.sallyport 导入：连接设置。这台电脑上已有、因此保持不变：1 个 VPN 配置、1 个应用。"; one profile before and after.
+- *Moved apps:* a file of two stand-ins (copies of `whoami.exe`, off in jp): one naming `Q:` for a folder that is on
+  C: was found there by itself; the other, whose folder is on no drive, showed "在这台电脑上找不到" with 查找位置…. Given
+  `…\moved\Tool\bin\Tool.exe`, it moved to `…\moved\Tool` (not `bin`): "其中有它的 2 个程序", its left-out program still
+  left out. Both removed after.
+
+## D27 — Profiles is each profile's settings; connecting is Overview's (2026-10-20; measured)
+
+The owner: "we kind dont need the connect in profile page anymore", "currently still showing udp/1194, tcp/443", "you
+basiclly can remove the dropdown for this and display some detail in the row"; of an app's page, its settings "still
+at bottom of the page and still call 分流设置".
+
+- **A profile's row has no switch and nothing folded**: its name and state, its proxy for other programs while
+  connected, **Connection settings…** and **Remove profile** ("Disconnect it on Overview first." while it is connected
+  or carries an app); then **VPN protocol** and **If it cannot connect** in Settings' words, each "(as in Settings)" or
+  "(this profile only)", **More settings** when it has other changes of its own, and **Imported**; the exit-location
+  check while connected. Its servers' transports and ports are said nowhere: the owner read "udp/1194, tcp/443" as the
+  only traffic it carries. The tunnel's own facts stay in Overview's details.
+- **An app's page is head, App settings, Goes through, Programs** (Monitoring under the head while it is routed):
+  its settings were last, under the longest part, and called 分流设置 — routing settings — which they are not since
+  its VPNs became a section of their own (D24); now 应用设置. Edit app's icons are a row, not a list.
+
+Measured 2026-10-20 on the installed client: the Profiles page showed jp with 连接设置… and 移除配置 and "VPN 协议 自动（同
+"设置"）· 无法连接时 持续重试（同"设置"）· 导入时间", no 详情; 连接设置… opened "jp 的连接设置" and 取消 came back. jp connected
+from Overview with the guard outside (234 rounds, 0 failed): the row "已连接 · 已连接 20 秒", its proxy on
+127.0.0.1:<the port it was given> with copy, the location check; disconnected from Overview, confirming "断开 jp?
+ZenlessZoneZero Game 正在经由它…" (guard 78 rounds, 0 failed). Zenless's page: 应用设置 with 编辑 under its head, then 经由,
+then 程序; Edit's icons a row of three. The Remove reason's new sentence is the view tests', not seen connected.

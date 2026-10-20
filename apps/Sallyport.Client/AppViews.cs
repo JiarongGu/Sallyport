@@ -29,7 +29,9 @@ internal sealed record AppSectionView(
     string AppId, string ProfileId, string Name, string? IconUrl, bool Member, bool On, Tone Tone, string StatusText, string? DetailText, RunView? Run,
     UiAction Vpn, UiAction Launch, UiAction Remove);
 
-internal sealed record AppItemActions(UiAction Launch, UiAction Edit, UiAction Rescan, UiAction AddProgram, UiAction Remove);
+/// <summary><see cref="Locate"/>: Locate…, for an app not where it was added from (imported from another computer, its
+/// game moved): posts LOCATE_APP.</summary>
+internal sealed record AppItemActions(UiAction Launch, UiAction Edit, UiAction Rescan, UiAction AddProgram, UiAction Remove, UiAction? Locate = null);
 
 /// <summary>An app's card: the VPNs it goes through (<see cref="ThroughText"/>, and on its page <see cref="Vpns"/>, one row
 /// per profile with its own switch), its methods, what it is doing now (<see cref="StatusText"/>, its part of the route
@@ -40,7 +42,10 @@ internal sealed record AppItemView(
     string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions, string? ProfileId = null,
     IReadOnlyList<Fact>? Setup = null, string? DetailText = null, string? IconUrl = null, IReadOnlyList<AppSectionView>? Vpns = null);
 
-internal sealed record AppEditValues(string Name, LossMode Loss, string DirectAfterText, string? LaunchProgramId);
+internal sealed record AppEditValues(string Name, LossMode Loss, string DirectAfterText, string? LaunchProgramId, string? IconProgramId = null);
+
+/// <summary>An icon the app may take: one of its programs' own, by that program's id.</summary>
+internal sealed record IconChoice(string Id, string Label, string Url);
 
 internal sealed record ProgramEditValues(bool Packets, bool Proxy, AppKind Kind, string Arguments);
 
@@ -48,11 +53,12 @@ internal sealed record EditorOption(string Id, string Label, string? Help = null
 
 /// <summary>What the host knows of an app beyond the store, for <see cref="AppViews.Item"/>: every profile (its sections),
 /// the route (<see cref="Run"/>), which profiles the person connected (<see cref="Connected"/>), why a profile's lane
-/// ended on its own and waits for the person (<see cref="FailureOf"/>).</summary>
+/// ended on its own and waits for the person (<see cref="FailureOf"/>), whether it is where it was added from
+/// (<see cref="Here"/>, D26).</summary>
 internal sealed record ItemFacts(
     RoutedItem Item, IReadOnlyList<StoredProfile> Profiles, RunFacts? Run, Func<string, bool> Connected, Func<string, string?> FailureOf,
     bool DriverReady, bool Busy, AppPhase? Launching, Func<RoutedProgram, IReadOnlyList<string>> StartupSettings,
-    Func<string, ProgramActivity?>? Activity = null, string? IconUrl = null);
+    Func<string, ProgramActivity?>? Activity = null, string? IconUrl = null, bool Here = true);
 
 internal static class AppViews
 {
@@ -171,7 +177,10 @@ internal static class AppViews
             null;
 
         // What it is doing now, from the section that carries it, or the first whose switch is on.
+        var here = f.Here;
         var (tone, status, detail) =
+            !here ? (Tone.Trouble, L.T("Not found on this computer"),
+                L.T("It was in {0}. Choose Locate… and show Sallyport where it is now.", item.Folder ?? Path.GetDirectoryName(item.Programs.FirstOrDefault()?.Path ?? "") ?? "")) :
             f.Launching is AppPhase.Connecting ? (Tone.Busy, L.T("Connecting before launch…"), (string?)null) :
             f.Launching is AppPhase.Starting ? (Tone.Busy, L.T("Starting…"), null) :
             runView is { } r ? (r.Tone, r.StatusText, (string?)null) :
@@ -246,7 +255,8 @@ internal static class AppViews
                 Edit: UiAction.Shown(L.T("Edit"), !launching, L.T("Wait for the launch to finish.")),
                 Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown(L.T("Scan folder again"), !launching, L.T("Wait for the launch to finish.")),
                 AddProgram: UiAction.Shown(L.T("Add a program…"), !launching && !f.Busy, L.T("A file dialog is open.")),
-                Remove: UiAction.Shown(L.T("Remove app"), !launching, L.T("Wait for the launch to finish."))),
+                Remove: UiAction.Shown(L.T("Remove app"), !launching, L.T("Wait for the launch to finish.")),
+                Locate: here ? UiAction.Hidden : UiAction.Shown(L.T("Locate…"), !f.Busy, L.T("A file dialog is open."))),
             carrying?.Id ?? sections.FirstOrDefault()?.Id,
             // Its page's setup, label by label, where the card has one line of it; its VPNs are a section of their own.
             [

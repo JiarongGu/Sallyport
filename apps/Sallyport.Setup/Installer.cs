@@ -125,22 +125,24 @@ sealed class Installer
     private static bool IsSallyport(string folder) =>
         File.Exists(Path.Combine(folder, "Sallyport.Client.exe")) && File.Exists(Path.Combine(folder, "Sallyport.Service.exe"));
 
-    /// <summary>Whether <paramref name="folder"/> holds only what removing Sallyport kept — its users' profiles and
-    /// settings — which installing there again takes up.</summary>
+    /// <summary>Whether <paramref name="folder"/> holds only what removing Sallyport kept — the profiles, settings and
+    /// apps, or an earlier install's users' folders — which installing there again takes up.</summary>
     public static bool HoldsKeptData(string folder)
     {
-        static bool Only(string folder, string name)
+        try
         {
-            var entries = Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).ToList();
-            return entries.Count == 1 && string.Equals(entries[0], name, StringComparison.OrdinalIgnoreCase) && Directory.Exists(Path.Combine(folder, name));
+            if (!Directory.Exists(folder) || Directory.EnumerateFileSystemEntries(folder).Select(Path.GetFileName).ToList() is not ["data" or "Data"]) return false;
+            var kept = Directory.EnumerateFileSystemEntries(InstallLayout.Data(folder)).Select(Path.GetFileName).ToList();
+            return kept.Count > 0 && kept.All(name => InstallLayout.Kept.Append("users").Contains(name!, StringComparer.OrdinalIgnoreCase));
         }
-        try { return Directory.Exists(folder) && Only(folder, "data") && Only(InstallLayout.Data(folder), "users"); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
     public string Folder => _folder;
     private string Data => InstallLayout.Data(_folder);
     private string Users => InstallLayout.Users(_folder);
+    // What removing keeps unless the person says otherwise: the shared areas, and an earlier install's users' folders.
+    private IReadOnlyList<string> KeptData => [.. InstallLayout.Kept.Select(area => InstallLayout.Area(_folder, area)), Users];
     private string Record => Path.Combine(Data, "setup.json");
     private static string Shortcut => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs", "Sallyport.lnk");
     public string Client => Path.Combine(_folder, "Sallyport.Client.exe");
@@ -210,7 +212,9 @@ sealed class Installer
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("The old version's files could not all be removed from {0}.", previous)); }
 
         Directory.CreateDirectory(Data);
-        ProtectUsers();
+        // Moved first, then given the areas' rights: what moves keeps the rights its owner's client gave it until then.
+        MoveMineIn();
+        ShareAreas();
         // The language setup ran in is the client's until a person chooses one in it.
         File.WriteAllText(InstallLayout.Language(_folder), L.Code);
 
@@ -304,7 +308,7 @@ sealed class Installer
         say(L.T("Removing files…"), 0.80);
         // Only a folder that is still Sallyport's: whatever else someone put there since is not setup's to take. Its
         // users' profiles and settings stay unless the person said otherwise, where installing again finds them.
-        var keep = choices.RemoveData ? null : Users;
+        var keep = choices.RemoveData ? null : KeptData;
         if (IsSallyport(_folder))
         {
             // This uninstaller may run from the folder it removes: what is in use goes once it has exited.
@@ -369,22 +373,86 @@ sealed class Installer
         }
     }
 
-    // Each user's folder is made by that user's client (D19): users may make a folder here and nothing more — not list
-    // the others, not open them. What they make is theirs alone; the client gives it its rights.
-    private void ProtectUsers()
+    // The shared areas (D25): everyone who uses Sallyport on this computer reads and writes them — the owner's "One
+    // shared folder". Owned by Administrators, so whoever made one first keeps no right over its rights. Nothing in
+    // them is ever run: the programs stay in the folder only administrators can change (product design change 2).
+    private void ShareAreas()
     {
         var security = new DirectorySecurity();
         security.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
-            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null), FileSystemRights.FullControl,
+        foreach (var (sid, rights) in new[]
+                 {
+                     (WellKnownSidType.LocalSystemSid, FileSystemRights.FullControl),
+                     (WellKnownSidType.BuiltinAdministratorsSid, FileSystemRights.FullControl),
+                     (WellKnownSidType.BuiltinUsersSid, FileSystemRights.Modify),
+                 })
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null), rights,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
-            FileSystemRights.CreateDirectories | FileSystemRights.Traverse | FileSystemRights.ReadAttributes | FileSystemRights.ReadPermissions | FileSystemRights.Synchronize,
-            InheritanceFlags.None, PropagationFlags.None, AccessControlType.Allow));
-        var info = new DirectoryInfo(Users);
-        if (!info.Exists) info.Create(security);
-        info.SetAccessControl(security);
+        foreach (var area in InstallLayout.Areas)
+        {
+            var info = new DirectoryInfo(InstallLayout.Area(_folder, area));
+            if (!info.Exists) info.Create(security);
+            info.SetAccessControl(security);
+            // What was moved in, or made by an earlier client, takes the area's rights from here on.
+            foreach (var inside in info.EnumerateFileSystemInfos("*", SearchOption.AllDirectories)) Inherit(inside);
+        }
+    }
+
+    // The person running setup kept their part in a folder of their own (D19): it moves into the shared areas, area by
+    // area, into one still empty — two sets of settings are never merged. The window's cache is made again. Another
+    // person's folder stays where it is, as it was.
+    private void MoveMineIn()
+    {
+        if (System.Security.Principal.WindowsIdentity.GetCurrent().User is not { } me) return;
+        var mine = Path.Combine(Users, me.Value);
+        if (!Directory.Exists(mine)) return;
+        foreach (var entry in Directory.EnumerateFileSystemEntries(mine).ToList())
+        {
+            var name = Path.GetFileName(entry);
+            var into = Path.Combine(Data, name);
+            try
+            {
+                if (Directory.Exists(entry) && !InstallLayout.Areas.Contains(name, StringComparer.OrdinalIgnoreCase) && name is not "games")
+                    Directory.Delete(entry, recursive: true);
+                else if (Directory.Exists(entry) && (!Directory.Exists(into) || !Directory.EnumerateFileSystemEntries(into).Any()))
+                {
+                    if (Directory.Exists(into)) Directory.Delete(into);
+                    Directory.Move(entry, into);
+                    // An earlier client's games, not an area: read once, for its migration, with data's own rights.
+                    if (name is "games") foreach (var inside in new DirectoryInfo(into).EnumerateFileSystemInfos("*", SearchOption.AllDirectories).Prepend(new DirectoryInfo(into))) Inherit(inside);
+                }
+                else if (File.Exists(entry)) File.Delete(entry);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                leave(L.T("{0} could not be moved into {1} ({2}).", entry, Data, e.GetType().Name));
+            }
+        }
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(mine).Any()) Directory.Delete(mine);
+            if (!Directory.EnumerateFileSystemEntries(Users).Any()) Directory.Delete(Users);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static void Inherit(FileSystemInfo entry)
+    {
+        if (entry is DirectoryInfo directory)
+        {
+            var security = directory.GetAccessControl();
+            security.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier))) security.RemoveAccessRuleSpecific(rule);
+            directory.SetAccessControl(security);
+        }
+        else if (entry is FileInfo file)
+        {
+            var security = file.GetAccessControl();
+            security.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier))) security.RemoveAccessRuleSpecific(rule);
+            file.SetAccessControl(security);
+        }
     }
 
     // Written by the system and administrators only, read and run by users, inherited by everything inside, whatever the
@@ -448,12 +516,12 @@ sealed class Installer
     private void WriteRecord(SetupRecord record) => File.WriteAllBytes(Record, JsonSerializer.SerializeToUtf8Bytes(record));
 
     // Everything in the folder but what is kept: a folder inside it, and the folders that lead to it.
-    private static IEnumerable<string> Removable(string folder, string? keep)
+    private static IEnumerable<string> Removable(string folder, IReadOnlyList<string>? keep)
     {
         foreach (var entry in Directory.EnumerateFileSystemEntries(folder))
         {
-            if (keep is null || !Leads(entry, keep)) yield return entry;
-            else if (!Same(entry, keep))
+            if (keep is null || !keep.Any(k => Leads(entry, k))) yield return entry;
+            else if (!keep.Any(k => Same(entry, k)))
                 foreach (var inner in Removable(entry, keep)) yield return inner;
         }
     }
@@ -464,9 +532,10 @@ sealed class Installer
     private static bool Leads(string entry, string keep) =>
         (Path.TrimEndingDirectorySeparator(keep) + Path.DirectorySeparatorChar).StartsWith(Path.TrimEndingDirectorySeparator(entry) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
-    private void RemoveFolder(string folder, string? keep)
+    private void RemoveFolder(string folder, IReadOnlyList<string>? keep)
     {
-        if (keep is null || !Directory.Exists(keep))
+        keep = keep?.Where(Directory.Exists).ToList();
+        if (keep is null || keep.Count == 0)
         {
             DeleteFolder(folder);
             return;
@@ -480,9 +549,9 @@ sealed class Installer
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("{0} could not be removed ({1}).", entry, e.GetType().Name)); }
     }
 
-    private static void RemoveAfterExit(string folder, string? keep)
+    private static void RemoveAfterExit(string folder, IReadOnlyList<string>? keep)
     {
-        if (keep is not null && !Directory.Exists(keep)) keep = null;
+        keep = keep?.Where(Directory.Exists).ToList() is { Count: > 0 } kept ? kept : null;
         var removable = Removable(folder, keep).ToList();
         foreach (var file in removable.Where(File.Exists).Concat(removable.Where(Directory.Exists).SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))))
             try { File.Delete(file); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }

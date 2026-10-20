@@ -54,7 +54,7 @@ public class ClientViewTests
         Assert.Equal("127.0.0.1:52114", view.EndpointText);
         Assert.True(view.Actions.Copy is { Visible: true, Enabled: true });
         Assert.Contains(new Fact("SOCKS5 port", "52114"), view.Facts);
-        Assert.True(view.Actions.Remove is { Enabled: false, Reason: "Disconnect before removing it." });
+        Assert.True(view.Actions.Remove is { Enabled: false, Reason: "Disconnect it on Overview first." });
         Assert.True(view.Actions.Locate is { Visible: true, Label: "Check location" });
         Assert.Contains(new Fact("Downloaded", "5.0 MB"), view.Facts);
         Assert.Contains(new Fact("Tunnel address", "10.8.0.2"), view.Facts);

@@ -76,8 +76,10 @@ export interface ProfileView {
   endpointText: string;
   /** The port its proxy listens on, chosen when it connects; null while it does not. */
   port: number | null;
-  /** The details section: Transport, Imported, SOCKS5 port, Tunnel address, Open connections, Downloaded, Uploaded. */
+  /** Overview's details while it is connected: SOCKS5 port, Connected over, Tunnel address, Open connections, Downloaded, Uploaded, Used by. */
   facts: Fact[];
+  /** Its row on Profiles: VPN protocol, If it cannot connect, More settings (each Settings' or its own), Imported. */
+  details: Fact[] | null;
   location: LocationView;
   actions: Record<'connect' | 'disconnect' | 'copy' | 'locate' | 'remove' | 'settings', Action>;
   /** ISO time the next round of attempts starts, while the connection waits for it: the page counts down to it. */
@@ -222,6 +224,8 @@ export interface SettingsView {
     protocol: { setting: string; choices: { id: string; label: string; help: string | null }[] };
     retry: { setting: string; choices: { id: string; label: string; help: string | null }[] };
   };
+  /** Export posts BEGIN_EXPORT, Import BEGIN_IMPORT (D26). */
+  move: { export: Action; import: Action } | null;
 }
 
 /** What a new app starts with: a profile (null: the first that can connect) and its loss policy. */
@@ -277,7 +281,8 @@ export interface AppItemView {
   /** "3 programs included of 7."; empty for a lone program. */
   programsText: string;
   programs: ProgramView[];
-  actions: Record<'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
+  /** locate: Locate…, for an app not where it was added from — posts LOCATE_APP. */
+  actions: Record<'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action> & { locate: Action | null };
   /** Its VPNs on its page: every profile, those it is in first, each with its own switch (D24). */
   vpns: AppSectionView[] | null;
   /** What to do for it to go through the VPN, when it is on and does not yet: "Connect jp and it goes through the VPN." */
@@ -292,6 +297,8 @@ export interface AppItemView {
 
 export interface AppEditValues {
   name: string;
+  /** The program whose icon is the app's: one of the editor's `icons`. */
+  iconProgramId: string | null;
   loss: LossMode;
   /** Under 'hold': seconds before the traffic goes direct after all, or empty to hold until the VPN is back. */
   directAfterText: string;
@@ -336,7 +343,19 @@ export interface NewAppValues {
 }
 
 export type EditorField = 'form' | 'path' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
-  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol';
+  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol' | 'password' | 'confirm';
+
+/** Export and Import (D26): which parts, and the password the profiles are sealed with. The host never sends a typed
+ *  password back: what the page holds is what was typed. */
+export interface MoveValues {
+  profiles: boolean;
+  apps: boolean;
+  connection: boolean;
+  password: string;
+  confirm: string;
+  /** Whether a password is asked: always offered on export (and may be left empty), on import only for a sealed file. */
+  sealed: boolean;
+}
 
 /** An edit the host opened. Its values seed the fields once (keep what the person types across later STATEs with the
  *  same token); its errors are the host's verdict on the last save. */
@@ -354,8 +373,11 @@ export type Editor = {
   /** The app editor's choices for what Launch starts; the policy editor's VPN protocols, null when the profile has
    *  servers of one only. */
   options: { id: string; label: string; help: string | null }[] | null;
+  /** For an app: the icons it may take, each a program's own (a data URL), one per look. */
+  icons: { id: string; label: string; url: string }[] | null;
 } & ({ kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
-  | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues });
+  | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues }
+  | { kind: 'export'; values: MoveValues } | { kind: 'import'; values: MoveValues });
 
 export interface Confirmation {
   token: string;
@@ -412,6 +434,10 @@ export interface Commands {
   LOCATE: { id: string };
   CHECK_LATENCY: { id: string };
   BEGIN_DEFAULTS_EDIT: Record<string, never>;
+  BEGIN_EXPORT: Record<string, never>;
+  SAVE_EXPORT: { token: string; values: MoveValues };
+  BEGIN_IMPORT: Record<string, never>;
+  SAVE_IMPORT: { token: string; values: MoveValues };
   SAVE_DEFAULTS: { token: string; values: DefaultsValues };
   COPY_ENDPOINT: { id: string };
   /** Opens "Add an app" (a new-app editor); its place is chosen there. */
@@ -433,6 +459,7 @@ export interface Commands {
   ADD_APP_TO_PROFILE: { id: string; profileId: string };
   REMOVE_APP_FROM_PROFILE: { id: string; profileId: string };
   SET_APP_ICON: { id: string; programId: string };
+  LOCATE_APP: { id: string };
   CANCEL_EDIT: { token: string };
   /** Without a programId: what the app's Launch starts. */
   LAUNCH_APP: { id: string; programId?: string; profileId?: string };

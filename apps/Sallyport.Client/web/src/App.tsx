@@ -79,7 +79,7 @@ export function App() {
   useEffect(() => {
     const editor = state?.editor;
     if (editor && editor.token !== editorToken.current) {
-      setPage(editor.kind === 'policy' ? 'profiles' : editor.kind === 'defaults' ? 'settings' : 'apps');
+      setPage(editor.kind === 'policy' ? 'profiles' : editor.kind === 'defaults' || editor.kind === 'export' || editor.kind === 'import' ? 'settings' : 'apps');
       // An app's editors open on its page.
       if (editor.kind === 'app' || editor.kind === 'program') setAppPage(editor.subjectId.split('/')[0]);
     }
@@ -156,8 +156,9 @@ export function App() {
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'network' ? <Network state={state} now={now} go={setPage} /> :
           policyEditor ? <ProfileSettings name={policyName} editorForm={editorForm} /> :
-          shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle} /> :
-          <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null} />}
+          shown === 'profiles' ? <Profiles state={state} now={now} /> :
+          <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null}
+            moveForm={state.editor?.kind === 'export' || state.editor?.kind === 'import' ? editorForm : null} />}
       </main>
     </div>
     <div className="sr-only" ref={polite} role="status" aria-live="polite" aria-atomic="true" />

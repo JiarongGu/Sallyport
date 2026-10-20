@@ -267,6 +267,11 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
         took it while Zenless kept its own "held"; set back to hold after. Start with Windows was step 1.
       Could not be checked through UI Automation: adding a program through the file dialog from this elevated shell
       (the dialog's controls offered no patterns); the folder path took the same defaults.
+   8. **Moving to another computer — measured 2026-10-20 (D26):** Export by part, sealed with a password or not, and
+      Import, which adds and never overwrites; an imported app found on another drive by itself, or with Locate….
+      Measured on this one computer only: a second computer's paths were stood in for by a drive that does not exist
+      (`Q:`). Not yet: an export taken to another machine and imported there.
+   9. **Profiles as settings, an app's settings under its head — measured 2026-10-20 (D27).**
    - **Done when:** Zenless Zone Zero is an app from its folder, routed by packets while a browser of the same profile
      uses its proxy, through one login; window and tray agree with the service's and the server's evidence.
 9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files in the
@@ -285,7 +290,10 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
      reinstall where Sallyport is. Then everything else off C: (D19, measured there): each user's part in
      `data\users\<SID>`, moved from `%LOCALAPPDATA%` on the first installed start; setup's log in `data\logs`; the
      driver's own files in `D:\Program Files\Windows Packet Filter`. Removal keeps `data\users` unless asked.
-     Not yet: an upgrade across versions, an interrupted install, removal, a clean machine.
+     Then one shared data folder and single files (D25, measured there): `data\profiles`, `config`, `library`, `apps`,
+     `cache` for everyone who uses Sallyport on the machine, the installing person's moved in; the install folder four
+     files and `data`; a 175.4 MB setup. Not yet: removal with D25's keep, a driver install through the installer's
+     hold, an upgrade across versions, an interrupted install, a clean machine.
    - **Done when:** install, upgrade, an interrupted install and removal are each measured on a clean machine, the
      network usable throughout. **Needs:** a clean Windows machine or VM.
 10. **The long run:** hours on the real server with outages, and the peer-to-peer harness → bounded memory and

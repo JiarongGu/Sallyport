@@ -5,8 +5,8 @@ import { t } from './i18n';
 import { ActionButton, Disclosure, Facts, StatusPill } from './ui/shared';
 
 /** How Sallyport is set up on this computer, and how to use it. */
-export function Settings({ state, expanded, toggle, editorForm }: {
-  state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
+export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
+  state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode; moveForm: ReactNode;
 }) {
   const settings = state.settings;
   const generalId = useId();
@@ -86,6 +86,21 @@ export function Settings({ state, expanded, toggle, editorForm }: {
       </div>
     </section>
 
+    {settings.move && <section className="settings-group" aria-label={t('Move to another computer')}>
+      <h2>{t('Move to another computer')}</h2>
+      <p className="secondary">{t('Export your VPN profiles, apps and connection settings to one file, and import them here or on another computer.')}</p>
+      <div className="card">
+        <div className="row-head move-row">
+          <span className="secondary">{t('Give the file a password and its VPN profiles open only with it.')}</span>
+          {(settings.move.export.visible || settings.move.import.visible) && <div className="actions">
+            <ActionButton action={settings.move.export} focusKey="export" onClick={() => post('BEGIN_EXPORT', {})} />
+            <ActionButton action={settings.move.import} focusKey="import" onClick={() => post('BEGIN_IMPORT', {})} />
+          </div>}
+        </div>
+        {moveForm}
+      </div>
+    </section>}
+
     <section className="settings-group" aria-label={t('How to use')}>
       <h2>{t('How to use')}</h2>
       <Guide guide={settings.guide} manualOpen={expanded.has('manual')} toggleManual={() => toggle('manual')} />
@@ -133,7 +148,7 @@ function Guide({ guide, manualOpen, toggleManual }: {
     <ol className="steps">
       <li><h3>{t('Import your VPN profile.')}</h3><p>{t('The .ovpn file you were given: Profiles, then Import profile.')}</p></li>
       <li><h3>{t('Add your game or program.')}</h3><p>{t('Apps, then Add an app: choose its folder or its .exe.')}</p></li>
-      <li><h3>{t('Turn it on.')}</h3><p>{t('Flip its switch, then start it as you always do. Only it goes through your VPN; the Overview shows what does.')}</p></li>
+      <li><h3>{t('Put it in a VPN and connect.')}</h3><p>{t('On the Overview, add it to a VPN, turn on Use VPN, and connect. Start it as you always do: only what is switched on goes through your VPN.')}</p></li>
     </ol>
     <div className="manual-setup">
       <Disclosure open={manualOpen} controls={manualId} onClick={toggleManual}>{t('For experts')}</Disclosure>
@@ -147,7 +162,7 @@ function Guide({ guide, manualOpen, toggleManual }: {
       </div>
     </div>
     <aside className="guide-notes">
-      <p>{t('Closing this window keeps Sallyport running beside the clock, and your apps on the VPN. To stop everything, right-click its icon there and choose Exit Sallyport.')}</p>
+      <p>{t('Closing this window keeps Sallyport running beside the clock, and what is connected stays connected. To stop everything, right-click its icon there and choose Exit Sallyport.')}</p>
     </aside>
   </div>;
 }

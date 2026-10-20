@@ -143,4 +143,55 @@ public sealed class RoutedItemStoreTests : IDisposable
     [InlineData("..\\..\\x", false)]
     [InlineData("0123456789ABCDEF", false)]
     public void Only_store_ids_are_ids(string id, bool valid) => Assert.Equal(valid, RoutedItemStore.IsId(id));
+
+    [Fact]
+    public void An_app_moved_elsewhere_is_found_by_its_folder_its_programs_keeping_their_choices()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sallyport-relocate-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var before = Path.Combine(root, "old", "Game");
+            Directory.CreateDirectory(Path.Combine(before, "Tools"));
+            File.WriteAllText(Path.Combine(before, "Game.exe"), "");
+            File.WriteAllText(Path.Combine(before, "Tools", "Helper.exe"), "");
+            var store = new RoutedItemStore(Path.Combine(root, "data"), () => ([], 0, new Dictionary<string, GameChoice>(), []));
+            var app = store.CreateFromFolder("Game", before, "ad50a53b0da826ad");
+            var helper = app.Programs.Single(p => p.Path.EndsWith("Helper.exe", StringComparison.Ordinal));
+            app = store.Choose(app.Id, helper.Path, included: false);
+
+            // The game moved, as on another computer: not here, until it is shown where it is.
+            var after = Path.Combine(root, "new", "Game");
+            Directory.CreateDirectory(Path.GetDirectoryName(after)!);
+            Directory.Move(before, after);
+            Assert.False(RoutedItemStore.IsHere(store.Find(app.Id)!));
+
+            // Picked by one of its programs in a folder below its own: the app's folder is still the game's.
+            var moved = store.Relocate(app.Id, Path.Combine(after, "Tools", "Helper.exe"));
+
+            Assert.Equal(after, moved.Folder);
+            Assert.True(RoutedItemStore.IsHere(moved));
+            var movedHelper = Assert.Single(moved.Programs, p => p.Id == helper.Id);
+            Assert.Equal((Path.Combine(after, "Tools", "Helper.exe"), false), (movedHelper.Path, movedHelper.Included));
+            Assert.Equal(2, moved.Programs.Count);
+            Assert.Equal(app.Sections, moved.Sections);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void An_app_on_another_drive_letter_is_sought_by_its_folder_there()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sallyport-seek-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // Two stand-in "drives": the app was under the first, it is under the second.
+            var game = Path.Combine(root, "second", "Games", "ZZZ");
+            Directory.CreateDirectory(game);
+            var item = new RoutedItem("0123456789abcdef", "Zenless", @"Q:\Games\ZZZ", DateTimeOffset.UtcNow, null, LossMode.Hold, null, []);
+
+            Assert.Equal(game, RoutedItemStore.Seek(item, [Path.Combine(root, "first") + Path.DirectorySeparatorChar, Path.Combine(root, "second") + Path.DirectorySeparatorChar]));
+            Assert.Null(RoutedItemStore.Seek(item, [Path.Combine(root, "first") + Path.DirectorySeparatorChar]));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+    }
 }

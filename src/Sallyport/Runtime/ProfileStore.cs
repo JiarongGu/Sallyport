@@ -80,11 +80,15 @@ public sealed class ProfileStore
     }
 
     /// <summary>The profile, opened. Throws <see cref="FileNotFoundException"/> for an id the store does not hold.</summary>
-    public OvpnProfile Load(string id)
+    public OvpnProfile Load(string id) => OvpnProfile.Parse(Text(id));
+
+    /// <summary>The profile's own text, opened — for an export to seal again, never to show or log (rule 2). Throws
+    /// <see cref="FileNotFoundException"/> for an id the store does not hold.</summary>
+    public string Text(string id)
     {
         byte[] sealedBytes;
         lock (_gate) sealedBytes = File.ReadAllBytes(FileOf(id, ".profile"));
-        return OvpnProfile.Parse(Encoding.UTF8.GetString(_protector.Unprotect(sealedBytes)));
+        return Encoding.UTF8.GetString(_protector.Unprotect(sealedBytes));
     }
 
     public bool Remove(string id)

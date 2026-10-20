@@ -90,7 +90,8 @@ internal sealed class ClientCore
         _paths = paths;
         _events = events;
         _dialogs = dialogs;
-        _driverSetup = new PacketFilterSetup(paths.DataArea("drivers"));
+        // The pinned installer, fetched again when absent: a cache (D25), held unchangeable while it runs.
+        _driverSetup = new PacketFilterSetup(paths.DataArea(Path.Combine("cache", "drivers")));
         _connections.Changed += Publish;
         // What is routed follows what the person connected and which apps are on (D23): looked at again whenever either
         // changes.
@@ -639,6 +640,39 @@ internal sealed class ClientCore
             L.T("{0}: {1}, {2} gone. Your choices for the rest stand.", after.Name, L.Count(added, "1 new program", "{0} new programs"), gone), new("app", id));
     }
 
+    /// <summary>Locate…: where an app that is not here is now, asked — its folder, or one of its programs — and the app
+    /// moved there (D26).</summary>
+    public async Task LocateAppAsync(string id)
+    {
+        var item = Item(id);
+        var picked = await WithDialogAsync("locate", () => _dialogs.OpenFolderAsync(new OpenFolderOptions
+        {
+            Title = L.T("Where is {0} now? Choose its folder, or its program", item.Name),
+            AllowFileSelection = true,
+            Filters = [new FileDialogFilter { Name = L.T("Programs"), Extensions = ["exe"] }],
+            RememberPathKey = "add-app",
+        }));
+        if (picked is not { Success: true, FilePath: { } path }) return;
+        RoutedItem moved;
+        try { moved = _items.Relocate(id, path); }
+        catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException)
+        { throw new ShenoraException("APP_LOCATE", "id", id, L.T("{0} is not there: choose its folder, or its program.", item.Name)); }
+        Replan();
+        Notify(NoticeKind.Info, L.T("{0} is in {1} now: {2} of its programs are there.", moved.Name, moved.Folder ?? Path.GetDirectoryName(path)!,
+            moved.Programs.Count(p => File.Exists(p.Path))), new("app", id));
+    }
+
+    // After an import: each app that is not here looked for on this computer's other drives, and moved where it is found.
+    private int SeekImported(IEnumerable<string> ids)
+    {
+        var found = 0;
+        foreach (var item in ids.Select(_items.Find).OfType<RoutedItem>().Where(i => !RoutedItemStore.IsHere(i)))
+            if (RoutedItemStore.Seek(item) is { } there)
+                try { _items.Relocate(item.Id, there); found++; }
+                catch (Exception e) when (e is ArgumentException or IOException or UnauthorizedAccessException) { }
+        return found;
+    }
+
     /// <summary>Includes or leaves out one of an app's programs, by its id: a path from the page is never trusted.</summary>
     public void SetAppProgram(string id, string programId, bool included)
     {
@@ -752,7 +786,8 @@ internal sealed class ClientCore
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, L.T("Wait for the launch to finish."));
         lock (_gate)
             _editor = new OpenEditor(NewToken(), "app", id, new AppEditValues(item.Name,
-                item.Loss, item.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? "", AppViews.LaunchTarget(item)?.Id), Empty);
+                item.Loss, item.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? "", AppViews.LaunchTarget(item)?.Id,
+                AppViews.IconProgram(item)?.Id), Empty);
         Publish();
     }
 
@@ -773,13 +808,15 @@ internal sealed class ClientCore
         }
         if (values.LaunchProgramId is { } launch && !item.Programs.Any(p => p.Id == launch && p.Included))
             errors["launchProgramId"] = L.T("Choose one of its included programs.");
+        if (values.IconProgramId is { } icon && !item.Programs.Any(p => p.Id == icon)) errors["form"] = L.T("That program is not one of this app's.");
         lock (_gate)
         {
             if (_editor?.Token != token) return;
             if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
             else
             {
-                _items.Put(item with { Name = name, Loss = values.Loss, DirectAfterSeconds = directAfter, LaunchProgramId = values.LaunchProgramId });
+                _items.Put(item with { Name = name, Loss = values.Loss, DirectAfterSeconds = directAfter, LaunchProgramId = values.LaunchProgramId,
+                    IconProgramId = values.IconProgramId ?? item.IconProgramId });
                 _editor = null;
             }
         }
@@ -839,6 +876,7 @@ internal sealed class ClientCore
         {
             if (_editor?.Token != token) return;
             _editor = null;
+            _importing = null;
         }
         Publish();
     }
@@ -990,6 +1028,197 @@ internal sealed class ClientCore
         { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, L.T("The stored profile could not be opened.")); }
     }
 
+    // ---- moving to another computer (D26): the profiles, the apps and the connection settings, any of them
+
+    // What the open Import read, for its token: the editor shows what is in it, the save takes what was chosen.
+    private (string Token, BackupFile File, string Name)? _importing;
+    private const int ShortestPassword = 8;
+
+    /// <summary>Opens Export with every part that has anything in it chosen.</summary>
+    public void BeginExport()
+    {
+        lock (_gate)
+        {
+            _importing = null;
+            _editor = new OpenEditor(NewToken(), "export", "", new MoveValues(_store.List().Count > 0, _items.List().Count > 0, true, "", "", Sealed: true), Empty);
+        }
+        Publish();
+    }
+
+    /// <summary>Export: checked, then where to save asked, then written whole — the profiles sealed with the password.</summary>
+    public async Task SaveExportAsync(string token, MoveValues values)
+    {
+        if (EditorFor(token, "export") is null) return;
+        var errors = new Dictionary<string, string>();
+        if (!values.Profiles && !values.Apps && !values.Connection) errors["form"] = L.T("Choose at least one thing to export.");
+        if (values.Profiles && _store.List().Count == 0) errors["form"] = L.T("There is no VPN profile to export.");
+        // A password is the person's choice (the owner: "we also can allow export/import without password"); one given
+        // is long enough to mean something.
+        var password = values.Password ?? "";
+        if (values.Profiles && password.Length is > 0 and < ShortestPassword)
+            errors["password"] = L.T("Use at least {0} characters, or leave it empty to export without a password.", ShortestPassword);
+        else if (values.Profiles && (values.Confirm ?? "") != password) errors["confirm"] = L.T("The two passwords are not the same.");
+        if (errors.Count > 0)
+        {
+            Refuse(token, values, errors);
+            return;
+        }
+        var picked = await WithDialogAsync("export", () => _dialogs.SaveFileAsync(new SaveFileOptions
+        {
+            Title = L.T("Export Sallyport's settings"),
+            FileName = $"Sallyport {DateTime.Now:yyyy-MM-dd}.{Backup.Extension}",
+            DefaultExtension = Backup.Extension,
+            Filters = [new FileDialogFilter { Name = L.T("Sallyport exports"), Extensions = [Backup.Extension] }],
+            OverwritePrompt = true,
+            RememberPathKey = "export",
+        }));
+        if (picked is not { Success: true, FilePath: { } path }) return;
+        try
+        {
+            var profiles = values.Profiles ? Backup.Seal(_store.List().Select(p => (p, _store.Text(p.Id))), password.Length > 0 ? password : null) : null;
+            var bytes = Backup.Write(profiles, values.Apps ? _items.List() : null,
+                values.Connection ? new ConnectionPart(_settings.Connection, _settings.Policies, _settings.Defaults) : null);
+            var temporary = path + ".tmp";
+            File.WriteAllBytes(temporary, bytes);
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            Refuse(token, values, new Dictionary<string, string> { ["form"] = L.T("The export was not written: {0}.", e.GetType().Name) });
+            return;
+        }
+        lock (_gate) if (_editor?.Token == token) _editor = null;
+        Notify(values.Profiles && password.Length == 0 ? NoticeKind.Warning : NoticeKind.Info,
+            !values.Profiles ? L.T("Exported to {0}.", Path.GetFileName(path))
+            : password.Length > 0 ? L.T("Exported to {0}. Keep its password: the VPN profiles in it open only with it.", Path.GetFileName(path))
+            : L.T("Exported to {0}, without a password: anyone who has the file can use your VPN profiles. Keep it somewhere only you can open.", Path.GetFileName(path)));
+    }
+
+    /// <summary>Import: a file asked for and read, then what is in it shown to choose from.</summary>
+    public async Task BeginImportAsync()
+    {
+        var picked = await WithDialogAsync("import-file", () => _dialogs.OpenFileAsync(new OpenFileOptions
+        {
+            Title = L.T("Import Sallyport's settings"),
+            Filters = [new FileDialogFilter { Name = L.T("Sallyport exports"), Extensions = [Backup.Extension] }],
+            RememberPathKey = "export",
+        }));
+        if (picked is not { Success: true, FilePath: { } path }) return;
+        var name = Path.GetFileName(path);
+        BackupFile file;
+        try
+        {
+            if (new FileInfo(path).Length > Backup.Largest) throw new InvalidDataException("it is far larger than any export");
+            file = Backup.Read(await File.ReadAllBytesAsync(path));
+        }
+        catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException or FormatException)
+        { throw new ShenoraException("IMPORT_INVALID", "file", name, L.T("{0} was not imported: {1}.", name, e is InvalidDataException ? e.Message : e.GetType().Name)); }
+        lock (_gate)
+        {
+            _editor = new OpenEditor(NewToken(), "import", "", new MoveValues(file.Profiles is { Items.Count: > 0 }, file.Apps is { Count: > 0 }, file.Connection is not null, "", "",
+                Sealed: file.Profiles is { Sealed: true }), Empty);
+            _importing = (_editor.Token, file, name);
+        }
+        Publish();
+    }
+
+    /// <summary>Import: the profiles opened with the password and kept — one this computer holds already, the same text,
+    /// is not kept twice — then the apps not here yet, their sections on the profiles kept here, then the connection
+    /// settings over this computer's.</summary>
+    public void SaveImport(string token, MoveValues values)
+    {
+        if (EditorFor(token, "import") is null) return;
+        (string Token, BackupFile File, string Name)? importing;
+        lock (_gate) importing = _importing is { } open && open.Token == token ? open : null;
+        if (importing is not { File: var file, Name: var name }) return;
+        var errors = new Dictionary<string, string>();
+        var profiles = values.Profiles && file.Profiles is { } sealedProfiles ? Backup.Open(sealedProfiles, values.Password ?? "") : [];
+        if (values.Profiles && profiles is null) errors["password"] = L.T("That password does not open the VPN profiles in {0}.", name);
+        if (!values.Profiles && !values.Apps && !values.Connection) errors["form"] = L.T("Choose at least one thing to import.");
+        if (errors.Count > 0)
+        {
+            Refuse(token, values, errors);
+            return;
+        }
+
+        // The file's profile ids to this computer's: kept, found here already, or (when its profiles are not imported) its own.
+        var mapped = _store.List().ToDictionary(p => p.Id, p => p.Id);
+        int added = 0, known = 0;
+        var here = _store.List().Select(p => (p.Id, Text: TryText(p.Id))).Where(p => p.Text is not null).ToList();
+        foreach (var (entry, text) in profiles!)
+        {
+            if (here.FirstOrDefault(p => p.Text == text) is { Id: { } same })
+            {
+                mapped[entry.Id] = same;
+                known++;
+                continue;
+            }
+            try { mapped[entry.Id] = _store.Import(entry.Name, text).Id; added++; }
+            catch (Exception e) when (e is InvalidDataException or ArgumentException) { Notify(NoticeKind.Warning, L.T("{0} was not imported: {1}.", entry.Name, e.Message)); }
+        }
+        int apps = 0, appsHere = 0;
+        var imported = new List<string>();
+        if (values.Apps)
+            foreach (var app in file.Apps ?? [])
+            {
+                if (!RoutedItemStore.IsId(app.Id)) continue;
+                if (_items.Find(app.Id) is not null) { appsHere++; continue; }
+                // Sections only on profiles this computer has; an earlier client's one profile read as one.
+                _items.Put(app with
+                {
+                    ProfileId = null, UseVpn = false,
+                    Uses = [.. app.Sections.Where(u => mapped.ContainsKey(u.ProfileId)).Select(u => u with { ProfileId = mapped[u.ProfileId] })],
+                });
+                imported.Add(app.Id);
+                apps++;
+            }
+        // The games may sit elsewhere on this computer (the owner: "the path might be changed"): found where they can be
+        // before the route is planned, and the rest said, each with its Locate….
+        var relocated = SeekImported(imported);
+        var lost = imported.Select(_items.Find).OfType<RoutedItem>().Count(i => !RoutedItemStore.IsHere(i));
+        if (values.Connection && file.Connection is { } connection)
+        {
+            _settings.Connection = connection.Connection;
+            _settings.Defaults = connection.Defaults with { ProfileId = connection.Defaults.ProfileId is { } chosen && mapped.TryGetValue(chosen, out var to) ? to : null };
+            foreach (var (profile, policy) in connection.Policies)
+                if (mapped.TryGetValue(profile, out var target)) _settings.PutPolicy(target, policy);
+        }
+        lock (_gate)
+        {
+            if (_editor?.Token == token) _editor = null;
+            _importing = null;
+        }
+        Replan();
+        // What came in, and apart from it what this computer had already: never "0 profiles".
+        var parts = new List<string>();
+        if (added > 0) parts.Add(L.Count(added, "1 VPN profile", "{0} VPN profiles"));
+        if (apps > 0) parts.Add(L.Count(apps, "1 app", "{0} apps"));
+        if (values.Connection) parts.Add(L.T("the connection settings"));
+        var already = new List<string>();
+        if (known > 0) already.Add(L.Count(known, "1 VPN profile", "{0} VPN profiles"));
+        if (appsHere > 0) already.Add(L.Count(appsHere, "1 app", "{0} apps"));
+        Notify(NoticeKind.Info, L.Join(
+            parts.Count > 0 ? L.T("Imported from {0}: {1}.", name, L.List(parts)) : L.T("Nothing new in {0}.", name),
+            already.Count > 0 ? L.T("Already on this computer, so kept as they are: {0}.", L.List(already)) : null));
+        if (relocated > 0) Notify(NoticeKind.Info, L.Count(relocated, "1 app was found on another drive of this computer and moved there.", "{0} apps were found on another drive of this computer and moved there."));
+        if (lost > 0)
+            Notify(NoticeKind.Warning, L.Count(lost, "1 app is not where it was on the other computer: open it on Apps and choose Locate….",
+                "{0} apps are not where they were on the other computer: open each on Apps and choose Locate…."));
+    }
+
+    private string? TryText(string id)
+    {
+        try { return _store.Text(id); }
+        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FileNotFoundException or IOException) { return null; }
+    }
+
+    // A save refused: what was typed stands, the reason beside its field.
+    private void Refuse(string token, MoveValues values, Dictionary<string, string> errors)
+    {
+        lock (_gate) if (_editor?.Token == token) _editor = _editor with { Values = values, Errors = errors };
+        Publish();
+    }
+
     // ---- the packet driver
 
     public void RequestDriverInstall() =>
@@ -1061,8 +1290,7 @@ internal sealed class ClientCore
                 p, _connections.ProxyPortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
                 live?.LaneFor(p.Id) is { } lane ? L.List(lane.Apps.Keys.Select(a => items.FirstOrDefault(g => g.Id == a)?.Name).OfType<string>()) : null,
-                !_settings.PolicyOf(p.Id).IsEmpty, _connections.NextAttemptOf(p.Id),
-                _settings.ProtocolFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)))))
+                _connections.NextAttemptOf(p.Id), _settings.ChoicesFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)))))
             .ToList();
         var driver = GameViews.Driver(Driver());
         var dialog = Volatile.Read(ref _dialog);
@@ -1076,7 +1304,7 @@ internal sealed class ClientCore
                     : AppLauncher.Describe(new RoutedApp(i.Id, i.Name, p.Path, proxy.Kind, through.Id, p.LaunchArguments), _connections.ProxyPortOf(through.Id),
                         Path.Combine(_paths.DataDir, "apps", proxy.DataKey)),
                 i.Id == _watchedApp ? _programs.Of : null,
-                _icons.Of(AppViews.IconProgram(i)?.Path));
+                _icons.Of(AppViews.IconProgram(i)?.Path), RoutedItemStore.IsHere(i));
         });
         var apps = items.Select(i => AppViews.Item(facts[i.Id])).ToList();
         // Each profile's section: the apps in it, and those that could join it (D24).
@@ -1091,9 +1319,11 @@ internal sealed class ClientCore
         List<Notice> notices;
         NavigationView? navigation;
         (string Token, SetupPreview Preview)? setup;
+        (string Token, BackupFile File, string Name)? importing;
         lock (_gate)
         {
             editor = _editor;
+            importing = _importing is { } reading && reading.Token == editor?.Token ? reading : null;
             // What "Add an app" found, only for the token it was found for.
             setup = _setup is { } open && open.Token == editor?.Token ? open : null;
             confirmation = _confirmation;
@@ -1117,7 +1347,8 @@ internal sealed class ClientCore
             WindowViews.Network(profiles, apps, live, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id)),
                 stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id)), stored.ToDictionary(p => p.Id, p => _connections.TrafficOf(p.Id)), sections),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(), _settings.Defaults,
-                stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null, _settings.Language, _settings.Connection),
+                stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null, _settings.Language, _settings.Connection,
+                dialog is null ? null : L.T("A file dialog is open."), editor?.Kind is "export" or "import"),
             // Where a first look is useful: with nothing to route through yet, the page that imports one; else the Overview,
             // where the switch is.
             stored.Count == 0 ? Page.Profiles : Page.Network,
@@ -1128,11 +1359,20 @@ internal sealed class ClientCore
             editor is null ? null : new EditorView(editor.Token, editor.SubjectId, "editing", editor.Errors,
                 // The guidance until a save is refused; then the refusal, which says it, alone. "Add an app" says what it
                 // found at the place chosen, and adds nothing until it has found something.
-                editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary : null,
-                editor.Kind == "new-app" ? UiAction.Shown(L.T("Add app"), setup is not null, L.T("Choose where it is first.")) : UiAction.Shown(L.T("Save")),
+                editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary
+                    : editor.Kind == "import" && importing is { } read ? L.T("{0}, exported {1}.", read.Name, L.Date(read.File.Exported))
+                    : editor.Kind == "export" ? L.T("Choose what goes in the file. With a password, the profiles in it open only with that password; without one, anyone who has the file can use them.") : null,
+                editor.Kind switch
+                {
+                    "new-app" => UiAction.Shown(L.T("Add app"), setup is not null, L.T("Choose where it is first.")),
+                    "export" => UiAction.Shown(L.T("Export…"), dialog is null, L.T("A file dialog is open."), busy: dialog == "export"),
+                    "import" => UiAction.Shown(L.T("Import")),
+                    _ => UiAction.Shown(L.T("Save")),
+                },
                 UiAction.Shown(L.T("Cancel")),
                 editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown(L.T("Follow Settings")) : UiAction.Hidden,
-                editor.Kind, editor.Values,
+                // A password the person typed is never sent back to the page: the page keeps what it was given.
+                editor.Kind, editor.Values is MoveValues move ? move with { Password = "", Confirm = "" } : editor.Values,
                 // What Launch may start: the app's included programs. The connection types the profile has servers for.
                 // Only an app Sallyport starts has a choice of what it starts: one of its programs told of the proxy.
                 editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited && edited.PacketPrograms.Count == 0
@@ -1140,17 +1380,33 @@ internal sealed class ClientCore
                     ? [.. edited.Programs.Where(p => p.Included && p.Proxy is not null).Select(p => new EditorOption(p.Id, Path.GetFileName(p.Path)))]
                     : editor.Kind == "policy" && stored.FirstOrDefault(p => p.Id == editor.SubjectId) is { } profile
                         ? GameViews.ProtocolChoices(profile.Remotes)
+                    // What can go in an export, or what this file holds, each part with how much of it there is.
+                    : editor.Kind == "export" ? MoveParts(stored.Count, items.Count, true)
+                    : editor.Kind == "import" && importing is { File: var held }
+                        ? MoveParts(held.Profiles?.Items.Count ?? 0, held.Apps?.Count ?? 0, held.Connection is not null)
                         // A folder's programs, each to turn on or off before the app is made; where it sits, if not at the top.
                         : setup is { Preview: { Kind: SetupKind.Folder, Programs.Count: > 1 } found }
                             ? [.. found.Programs.Select(p => new EditorOption(p.Path, Path.GetFileName(p.Path), p.Reason is { } reason ? L.T(reason)
                                 : Path.GetRelativePath(Directory.Exists(found.Path) ? found.Path : Path.GetDirectoryName(found.Path)!, Path.GetDirectoryName(p.Path)!)
                                     is var where && where != "." ? where : null))]
-                            : null),
+                            : null,
+                // The icons it may take, one per look: a game's programs often carry the same one.
+                editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } iconed
+                    ? [.. iconed.Programs.Select(p => (Program: p, Url: _icons.Of(p.Path))).Where(c => c.Url is not null).DistinctBy(c => c.Url)
+                        .Select(c => new IconChoice(c.Program.Id, Path.GetFileName(c.Program.Path), c.Url!))]
+                    : null),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),
             notices,
             L.Code);
     }
+
+    private static IReadOnlyList<EditorOption> MoveParts(int profiles, int apps, bool connection) =>
+    [
+        .. profiles > 0 ? [new EditorOption("profiles", L.Count(profiles, "1 VPN profile", "{0} VPN profiles"), L.T("Their keys included; the .ovpn files themselves are not needed."))] : Array.Empty<EditorOption>(),
+        .. apps > 0 ? [new EditorOption("apps", L.Count(apps, "1 app", "{0} apps"), L.T("Their programs, switches and the VPNs they go through. The games themselves are not copied."))] : Array.Empty<EditorOption>(),
+        .. connection ? [new EditorOption("connection", L.T("Connection settings"), L.T("VPN protocol, retries, each profile's own changes, and the defaults for new apps."))] : Array.Empty<EditorOption>(),
+    ];
 
     private string? PolicyHint(string id)
     {

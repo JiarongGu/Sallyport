@@ -104,5 +104,6 @@ internal static class Chinese
         ["Install"] = "安装",
         ["Update"] = "更新",
         ["Reinstall"] = "重新安装",
+        ["{0} could not be moved into {1} ({2})."] = "无法把 {0} 移入 {1}（{2}）。",
     };
 }

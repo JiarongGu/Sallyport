@@ -40,11 +40,13 @@ internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiA
 
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    string EndpointText, int? Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null);
+    string EndpointText, int? Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null,
+    IReadOnlyList<Fact>? Details = null);
 
 internal sealed record EditorView(
     string Token, string SubjectId, string Phase, IReadOnlyDictionary<string, string> Errors, string? Hint, UiAction Save,
-    UiAction Cancel, UiAction Reset, string Kind, object Values, IReadOnlyList<EditorOption>? Options = null);
+    UiAction Cancel, UiAction Reset, string Kind, object Values, IReadOnlyList<EditorOption>? Options = null,
+    IReadOnlyList<IconChoice>? Icons = null);
 
 internal sealed record ConfirmationView(string Token, string Title, string Text, UiAction Confirm, UiAction Cancel);
 
@@ -81,11 +83,12 @@ internal sealed record ClientState(
 }
 
 /// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>. <see cref="Port"/>: the one its
-/// proxy listens on now, none while it does not. <see cref="UsedBy"/>: the app being routed through it.</summary>
+/// proxy listens on now, none while it does not. <see cref="UsedBy"/>: the app being routed through it. <see cref="Choices"/>:
+/// how it connects, Settings' and its own (none: Settings' as they are by default).</summary>
 internal sealed record ProfileFacts(
     StoredProfile Stored, int? Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
-    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false, DateTimeOffset? NextAttemptAt = null,
-    string? Protocol = null);
+    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, DateTimeOffset? NextAttemptAt = null,
+    ProfileChoices? Choices = null);
 
 internal static class ClientView
 {
@@ -130,12 +133,8 @@ internal static class ClientView
         };
 
         var busy = f.Removing || f.Disconnecting;
-        var facts = new List<Fact>
-        {
-            new(L.T("Transport"), string.Join(", ", f.Stored.Remotes)),
-            new(L.T("Imported"), L.Date(f.Stored.Imported.ToLocalTime())),
-        };
-        if (GameViews.ProtocolText(f.Protocol) is { } held) facts.Add(new(L.T("VPN protocol"), held));
+        // Overview's details while it is connected; its row on Profiles says how it connects (Details).
+        var facts = new List<Fact>();
         if (f.Port is { } listening) facts.Add(new(L.T("SOCKS5 port"), listening.ToString(English)));
         if (up && status is not null)
         {
@@ -147,7 +146,6 @@ internal static class ClientView
         }
 
         if (f.UsedBy is { } game) facts.Add(new(L.T("Used by"), game));
-        if (f.PolicyChanged) facts.Add(new(L.T("Connection settings"), L.T("Changed for this profile")));
 
         var location = Located(f, up);
         var actions = new ProfileActions(
@@ -164,14 +162,35 @@ internal static class ClientView
                     busy: f.Locating)
                 : UiAction.Hidden,
             Remove: UiAction.Shown(L.T("Remove profile"), !running && !busy && f.UsedBy is null,
-                f.UsedBy is not null ? L.T("Turn off the VPN of the app that uses it first.") : running ? L.T("Disconnect before removing it.") : null),
+                // Disconnecting ends both, an app's route through it as well: one thing to do, where it is done.
+                running || f.UsedBy is not null ? L.T("Disconnect it on Overview first.") : null),
             Settings: UiAction.Shown(L.T("Connection settings…"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")));
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.
         var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;
         return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null,
             f.Port is { } port ? Endpoint(port) : L.T("a free port when it connects"), f.Port,
-            facts, location, actions, next);
+            facts, location, actions, next,
+            Details(f.Choices ?? new([.. f.Stored.Remotes.Select(r => r.Split('/')[0]).Distinct()], null, false, 0, false, false), f.Stored.Imported));
+    }
+
+    /// <summary>Its row on Profiles: how it connects, in Settings' words, each said to follow Settings or to be its own,
+    /// then when it was imported. Not its servers' "udp/1194, tcp/443": they read as the only traffic it carries (the
+    /// owner: "currently still showing udp/1194, tcp/443"), and are the server's business, not the person's.</summary>
+    private static IReadOnlyList<Fact> Details(ProfileChoices c, DateTimeOffset imported)
+    {
+        string From(string value, bool own) => own ? L.T("{0} (this profile only)", value) : L.T("{0} (as in Settings)", value);
+        var protocol = c.Protocols.Count == 1
+            ? L.T("{0} only", GameViews.ProtocolText(c.Protocols.First()) ?? c.Protocols.First().ToUpperInvariant())
+            : From(GameViews.ProtocolText(c.Protocol) ?? L.T("Automatic"), c.ProtocolOwn);
+        var retry = From(c.RoundsMax == 0 ? L.T("Keep trying") : L.Count(c.RoundsMax, "Stop after 1 failed round", "Stop after {0} failed rounds"), c.RoundsOwn);
+        return
+        [
+            new(L.T("VPN protocol"), protocol),
+            new(L.T("If it cannot connect"), retry),
+            .. c.OtherOwn ? [new Fact(L.T("More settings"), L.T("Changed for this profile"))] : Array.Empty<Fact>(),
+            new(L.T("Imported"), L.Date(imported.ToLocalTime())),
+        ];
     }
 
     /// <summary>Failure first, then work under way, then connected: one healthy tunnel must not hide another's

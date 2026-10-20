@@ -11,11 +11,18 @@ if (Test-Path $payload) { Remove-Item -Recurse -Force $payload }
 if (Test-Path $zip) { Remove-Item -Force $zip }
 New-Item -ItemType Directory -Force $artifacts | Out-Null
 
-# The setup too, without a payload: the light uninstaller in the install folder, on the runtime beside the client.
+# Each program one file (the owner: the install folder's root tidied to its programs), the runtime inside it; only
+# WebView2's native loader stays beside the client, rather than being unpacked into %TEMP% on the system drive when it
+# starts. The setup too, without a payload: the uninstaller in the install folder.
+$single = '-p:PublishSingleFile=true', '-p:EnableCompressionInSingleFile=true', '-p:DebugType=none',
+    '-p:PublishDocumentationFile=false', '-p:PublishReferencesDocumentationFiles=false'
 foreach ($app in 'Sallyport.Client', 'Sallyport.Service', 'Sallyport.Setup') {
-    dotnet publish "$root\apps\$app" -c Release -r win-x64 --self-contained -nologo -v q -o $payload
+    dotnet publish "$root\apps\$app" -c Release -r win-x64 --self-contained -nologo -v q -o $payload @single
     if ($LASTEXITCODE -ne 0) { throw "publishing $app failed" }
 }
+# The publish also leaves WebView2's loader under runtimes\, a second copy of the one beside the client, which WebView2
+# finds first.
+if (Test-Path (Join-Path $payload 'WebView2Loader.dll')) { Remove-Item -Recurse -Force (Join-Path $payload 'runtimes') -ErrorAction SilentlyContinue }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($payload, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 

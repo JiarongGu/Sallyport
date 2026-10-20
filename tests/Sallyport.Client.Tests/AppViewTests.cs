@@ -70,6 +70,18 @@ public class AppViewTests
     }
 
     [Fact]
+    public void An_app_not_where_it_was_added_from_says_where_it_was_and_offers_Locate()
+    {
+        var view = AppViews.Item(F(Zenless(on: true)) with { Here = false });
+        var here = View(Zenless(on: true));
+
+        Assert.Equal(("Not found on this computer", "Trouble"), (view.StatusText, view.Tone.ToString()));
+        Assert.Equal(@"It was in E:\Games\ZZZ. Choose Locate… and show Sallyport where it is now.", view.DetailText);
+        Assert.Equal("Locate…", view.Actions.Locate!.Label);
+        Assert.Same(UiAction.Hidden, here.Actions.Locate);
+    }
+
+    [Fact]
     public void An_app_in_no_vpn_says_where_to_put_it()
     {
         var view = View(Zenless() with { Uses = [] });
@@ -319,7 +331,7 @@ public class AppViewTests
 
         Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Reason: null });
         Assert.False(view.Actions.Remove.Enabled);
-        Assert.Equal("Turn off the VPN of the app that uses it first.", view.Actions.Remove.Reason);
+        Assert.Equal("Disconnect it on Overview first.", view.Actions.Remove.Reason);
         Assert.Contains(view.Facts, f => f.Label == "Used by" && f.Value == "Zenless Zone Zero");
     }
 
@@ -352,13 +364,39 @@ public class AppViewTests
     }
 
     [Fact]
-    public void A_profile_held_to_one_protocol_says_so_among_its_details()
+    public void A_profiles_row_says_how_it_connects_and_whether_that_is_Settings_or_its_own_never_its_servers_ports()
     {
-        var held = ClientView.Profile(new ProfileFacts(Jp, null, null, null, false, false, null, false, false, Protocol: "tcp"));
-        var free = ClientView.Profile(new ProfileFacts(Jp, null, null, null, false, false, null, false, false));
+        ProfileView With(ProfileChoices choices) => ClientView.Profile(new ProfileFacts(Jp, null, null, null, false, false, null, false, false, Choices: choices));
+        var settings = With(new(["udp", "tcp"], null, false, 0, false, false));
+        var own = With(new(["udp", "tcp"], "tcp", true, 5, true, true));
+        var udpOnly = With(new(["udp"], null, false, 3, false, false));
 
-        Assert.Contains(new Fact("VPN protocol", "TCP"), held.Facts);
-        Assert.DoesNotContain(free.Facts, f => f.Label == "VPN protocol");
+        Assert.Equal([new Fact("VPN protocol", "Automatic (as in Settings)"), new Fact("If it cannot connect", "Keep trying (as in Settings)"),
+            new Fact("Imported", L.Date(At.ToLocalTime()))], settings.Details);
+        Assert.Equal([new Fact("VPN protocol", "TCP (this profile only)"), new Fact("If it cannot connect", "Stop after 5 failed rounds (this profile only)"),
+            new Fact("More settings", "Changed for this profile")], own.Details!.SkipLast(1));
+        Assert.Equal(new Fact("VPN protocol", "UDP only"), udpOnly.Details![0]);
+        Assert.All(new[] { settings, own, udpOnly }, v => Assert.DoesNotContain(v.Facts.Concat(v.Details!), f => f.Value.Contains("1194") || f.Value.Contains("443")));
+    }
+
+    [Fact]
+    public void A_profiles_choices_are_its_own_where_it_changed_them_and_Settings_elsewhere()
+    {
+        // Its own folder: the shared one is removed by another class when it is empty, and refuses new ones meanwhile.
+        var file = Path.Combine(Path.GetTempPath(), "sallyport-choices-" + Guid.NewGuid().ToString("N"), "settings.json");
+        try
+        {
+            var settings = new ClientSettings(file) { Connection = new PolicyOverride(RoundsMax: 5, Protocol: "tcp") };
+            settings.PutPolicy("a", new PolicyOverride(Protocol: PolicyOverride.Any, PingRestartSeconds: 20));
+
+            Assert.Equal((null, true, 5, false, true), Of(settings.ChoicesFor("a", ["udp", "tcp"])));
+            Assert.Equal(("tcp", false, 5, false, false), Of(settings.ChoicesFor("b", ["udp", "tcp"])));
+            // Settings' TCP is no choice for a profile with no TCP server: its servers as they are.
+            Assert.Equal((null, false, 5, false, false), Of(settings.ChoicesFor("b", ["udp"])));
+        }
+        finally { if (Directory.Exists(Path.GetDirectoryName(file))) Directory.Delete(Path.GetDirectoryName(file)!, recursive: true); }
+
+        static (string?, bool, int, bool, bool) Of(ProfileChoices c) => (c.Protocol, c.ProtocolOwn, c.RoundsMax, c.RoundsOwn, c.OtherOwn);
     }
 
     [Fact]

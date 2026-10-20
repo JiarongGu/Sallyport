@@ -36,6 +36,7 @@ function AppHead({ app, now, headingId, children }: { app: AppItemView; now: num
       {app.detailText && <p className="metadata secondary app-detail">{app.detailText}</p>}
     </div>
     <div className="actions row-primary">
+      {app.actions.locate && <ActionButton action={app.actions.locate} primary onClick={() => post('LOCATE_APP', { id: app.id })} />}
       <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
     </div>
     {children}
@@ -53,7 +54,7 @@ function AppCard({ app, now, open }: { app: AppItemView; now: number; open: () =
   </article>;
 }
 
-/** One app's page: what it is doing now, how it is set up, and each of its programs with what that program is doing —
+/** One app's page: what it is doing now, its settings, the VPNs it goes through, and each of its programs with what that program is doing —
  *  the setup and monitoring a card has no room for. Its editors open here, beside what they change. */
 export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
   app: AppItemView; state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
@@ -88,6 +89,19 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
       </div>
     </section> : null}
 
+    {/* Its own settings under its head, where the person looks first; its programs, the longest part, last. */}
+    <section className="settings-group" aria-labelledby={setupId}>
+      <div className="group-head">
+        <h2 id={setupId}>{t('App settings')}</h2>
+        <div className="actions"><ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} /></div>
+      </div>
+      <div className="card">
+        <Facts facts={app.setup} />
+        {app.folder && <div className="wide-fact"><span className="secondary metadata">{t('Folder')}</span><span className="program-path">{app.folder}</span></div>}
+        {appEditor}
+      </div>
+    </section>
+
     {/* The VPNs it goes through, one switch each (D24): the same as its row in each profile's section on Overview. */}
     {app.vpns && app.vpns.length > 0 && <section className="settings-group" aria-labelledby={vpnsId}>
       <h2 id={vpnsId}>{t('Goes through')}</h2>
@@ -121,18 +135,6 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
           <Disclosure open={othersOpen} controls={othersId} onClick={() => toggle(`others:${app.id}`)}>{t('Other programs ({0})', others.length)}</Disclosure>
           <ul id={othersId} hidden={!othersOpen} className="program-list">{others.map(row)}</ul>
         </div>}
-      </div>
-    </section>
-
-    <section className="settings-group" aria-labelledby={setupId}>
-      <div className="group-head">
-        <h2 id={setupId}>{t('Setup')}</h2>
-        <div className="actions"><ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} /></div>
-      </div>
-      <div className="card">
-        <Facts facts={app.setup} />
-        {app.folder && <div className="wide-fact"><span className="secondary metadata">{t('Folder')}</span><span className="program-path">{app.folder}</span></div>}
-        {appEditor}
       </div>
     </section>
 

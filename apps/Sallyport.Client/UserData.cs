@@ -5,10 +5,11 @@ using Sallyport.Windows;
 namespace Sallyport.Client;
 
 /// <summary>
-/// Where this person's Sallyport keeps its part — sealed profiles, settings, apps, the window's cache (D19). An installed
-/// client keeps it in its own folder, <c>data\users\&lt;the person's SID&gt;</c>, which only the person, the system and
-/// administrators can open; a development build keeps it in %LOCALAPPDATA%\Sallyport as before. What an earlier client
-/// kept in %LOCALAPPDATA% is moved over once, the first time.
+/// Where Sallyport keeps the people's part — sealed profiles, settings, apps, the window's cache (D19, D25). An installed
+/// client keeps it in its own folder's <c>data</c>, in the areas setup shares with everyone on this computer
+/// (<see cref="InstallLayout.Areas"/>); one setup has not laid out so yet keeps it in <c>data\users\&lt;the person's SID&gt;</c>
+/// as D19 had it, and a development build in %LOCALAPPDATA%\Sallyport. What an earlier client kept in %LOCALAPPDATA%
+/// is moved over once, the first time.
 /// </summary>
 internal static class UserData
 {
@@ -24,6 +25,9 @@ internal static class UserData
     public static string Folder()
     {
         if (InstallLayout.InstalledHere() is not { } installed) return Legacy;
+        // Setup moved the person's own folder in, %LOCALAPPDATA%'s earlier move with it: nothing more is moved here, and
+        // nothing of data\ — the machine's part beside the areas — is ever the client's to empty.
+        if (InstallLayout.Shared(installed) && Writable(InstallLayout.Area(installed, "config"))) return InstallLayout.Data(installed);
         var me = WindowsIdentity.GetCurrent().User!;
         var mine = Path.Combine(InstallLayout.Users(installed), me.Value);
         try
@@ -31,7 +35,7 @@ internal static class UserData
             if (!Directory.Exists(mine)) Create(mine, me);
             // Any user may make folders here; one named for this person but made by someone else is not theirs to use.
             else if (!Trusted(mine, me)) return Legacy;
-            MoveLegacy(mine);
+            MoveLegacy(mine, empty: !Directory.EnumerateFileSystemEntries(mine).Any());
             return mine;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -59,13 +63,26 @@ internal static class UserData
         return owner is not null && (owner == me || owner.IsWellKnown(WellKnownSidType.LocalSystemSid) || owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid));
     }
 
-    private static void MoveLegacy(string mine)
+    // Setup gave the areas a right to change them to every user; a folder this person cannot write is not one to use.
+    private static bool Writable(string folder)
+    {
+        var probe = Path.Combine(folder, $".probe-{Environment.ProcessId}");
+        try
+        {
+            File.WriteAllBytes(probe, []);
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    private static void MoveLegacy(string mine, bool empty)
     {
         var legacy = Legacy;
         if (!Directory.Exists(legacy)) return;
         var marker = Path.Combine(mine, Moved);
         // Only into a folder that holds nothing yet: two sets of settings are never merged.
-        if (File.Exists(marker) || Directory.EnumerateFileSystemEntries(mine).Any()) return;
+        if (File.Exists(marker) || !empty) return;
         try
         {
             Copy(legacy, mine, top: true);

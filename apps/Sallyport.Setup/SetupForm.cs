@@ -432,7 +432,7 @@ sealed class SetupForm : Form
                 ? _option.Checked
                     ? L.T("Its service, Start menu entry, files, profiles and settings are gone.")
                     : L.T("Its service, Start menu entry and files are gone. The VPN profiles and settings stay in {0}: install Sallyport in the same folder again and it finds them.",
-                        InstallLayout.Users(_installer!.Folder))
+                        InstallLayout.Data(_installer!.Folder))
                 : L.T("It is in {0}. Find it in the Start menu, or open a .ovpn file with it.", _installer!.Folder);
             _finishText.Text = partly ? $"{done}\n\n{string.Join("\n", left!)}" : done;
             _primary.Text = L.T("Finish");

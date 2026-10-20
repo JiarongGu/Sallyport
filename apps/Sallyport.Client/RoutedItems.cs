@@ -228,6 +228,62 @@ internal sealed class RoutedItemStore
         return updated;
     }
 
+    /// <summary>Whether the app is where it was added from: its folder, or for an app of programs alone, any of them.
+    /// An app imported from another computer may not be (D26).</summary>
+    public static bool IsHere(RoutedItem item) =>
+        item.Folder is { } folder ? Directory.Exists(folder) : item.Programs.Count == 0 || item.Programs.Any(p => File.Exists(p.Path));
+
+    /// <summary>The app where it is now (D26): <paramref name="place"/> its new folder, or one of its programs there. Each
+    /// program keeps its id, choice and methods, moved by where it sat in the old folder; the new folder is then scanned
+    /// as Scan folder again does. A program given for an app of programs alone takes the place of the one of its name,
+    /// else of its first.</summary>
+    public RoutedItem Relocate(string id, string place)
+    {
+        var item = Find(id) ?? throw new FileNotFoundException("no such app");
+        var full = Path.GetFullPath(place);
+        if (item.Folder is { } old)
+        {
+            var folder = Directory.Exists(full) ? full : Path.GetDirectoryName(full)!;
+            // A program picked inside the folder: the folder is where that program sat in the old one, above it.
+            if (File.Exists(full) && item.Programs.FirstOrDefault(p => string.Equals(Path.GetFileName(p.Path), Path.GetFileName(full), StringComparison.OrdinalIgnoreCase)
+                    && IsUnder(p.Path, old)) is { } same)
+            {
+                var depth = Path.GetRelativePath(old, Path.GetDirectoryName(same.Path)!);
+                if (depth != "." && folder.EndsWith(Path.DirectorySeparatorChar + depth, StringComparison.OrdinalIgnoreCase))
+                    folder = folder[..^(depth.Length + 1)];
+            }
+            var moved = item with
+            {
+                Folder = folder,
+                Programs = [.. item.Programs.Select(p => IsUnder(p.Path, old) ? p with { Path = Path.Combine(folder, Path.GetRelativePath(old, p.Path)) } : p)],
+            };
+            Put(moved);
+            return Rescan(id);
+        }
+        if (!File.Exists(full) || !full.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("not a program", nameof(place));
+        var target = item.Programs.FirstOrDefault(p => string.Equals(Path.GetFileName(p.Path), Path.GetFileName(full), StringComparison.OrdinalIgnoreCase))
+            ?? item.Programs.FirstOrDefault();
+        var relocated = item with { Programs = [.. item.Programs.Select(p => p == target ? p with { Path = full } : p)] };
+        Put(relocated);
+        return relocated;
+    }
+
+    /// <summary>Where an app that is not here may be: the same folder on another of this computer's drives — a library
+    /// on D: there and E: here is the usual move. Null when none holds it.</summary>
+    public static string? Seek(RoutedItem item, IEnumerable<string>? roots = null)
+    {
+        var where = item.Folder ?? item.Programs.FirstOrDefault()?.Path;
+        if (where is null || Path.GetPathRoot(where) is not { Length: > 0 } root) return null;
+        var rest = where[root.Length..];
+        foreach (var drive in roots ?? DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady).Select(d => d.RootDirectory.FullName))
+        {
+            if (string.Equals(drive, root, StringComparison.OrdinalIgnoreCase)) continue;
+            var candidate = Path.Combine(drive, rest);
+            if (item.Folder is not null ? Directory.Exists(candidate) : File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
     /// <summary>Scans an app's folder again: the person's choice stands for every program still there, a new one takes
     /// the scan's suggestion, and one that is gone is dropped — it could not be routed by path.</summary>
     public RoutedItem Rescan(string id)

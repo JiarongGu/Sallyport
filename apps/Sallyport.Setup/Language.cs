@@ -53,7 +53,9 @@ internal static class L
     private static string? Chosen(string? installedIn)
     {
         if (installedIn is null || WindowsIdentity.GetCurrent().User is not { } me) return null;
-        var settings = Path.Combine(InstallLayout.Users(installedIn), me.Value, "config", "client.json");
+        // The shared settings (D25), else an earlier install's own folder for this person.
+        var settings = Path.Combine(InstallLayout.Area(installedIn, "config"), "client.json");
+        if (!File.Exists(settings)) settings = Path.Combine(InstallLayout.Users(installedIn), me.Value, "config", "client.json");
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllBytes(settings));

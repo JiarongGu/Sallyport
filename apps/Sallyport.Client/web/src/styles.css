@@ -340,6 +340,18 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .hero-apps li .run .supporting { margin: 0; }
 .remove-from-section { margin-left: -4px; }
 .add-to-section { width: auto; max-width: 50%; min-height: 32px; }
+/* Settings' export and import: the words at the start, the two buttons at the end, on one line. */
+.move-row { justify-content: space-between; align-items: center; }
+.move-row > .actions { margin-left: auto; flex-wrap: nowrap; }
+/* The app's icon, chosen from its programs' own. */
+/* A row of its icons, wrapping: .field, later and as specific, would stack them full width. */
+.field.icon-choices { flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.icon-choices legend { width: 100%; margin-bottom: 4px; }
+.icon-choice { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid var(--stroke-control); border-radius: var(--radius-control); cursor: pointer; }
+.icon-choice:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.icon-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.icon-choice input { position: absolute; opacity: 0; pointer-events: none; }
+.icon-choice img { width: 32px; height: 32px; }
 /* A way on from a sentence, read as part of it. */
 button.link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
 button.link:hover:not(:disabled) { background: none; color: var(--accent-hover); }
@@ -381,6 +393,8 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 .endpoint code { overflow-wrap: anywhere; }
 .endpoint button.icon { width: 28px; min-height: 28px; margin: -4px 0; }
 .row-details { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--divider); }
+.profile-details { margin-top: 12px; }
+.profile-details .facts { margin: 0; }
 .details-footer { margin-top: 16px; }
 
 /* facts: a caption label over its value, as many columns as the width allows; a figure large */

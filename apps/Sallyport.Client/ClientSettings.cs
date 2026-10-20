@@ -29,6 +29,10 @@ internal sealed record AppDefaults(string? ProfileId = null, LossMode Loss = Los
 /// directives, read from it: <see cref="ConnectionPolicy"/>). <see cref="RoundsMax"/> 0 is "never give up";
 /// <see cref="Protocol"/> "udp" or "tcp" holds it to those servers, and <see cref="Any"/> lets a profile use all of its
 /// own where Settings holds the others to one.</summary>
+/// <summary>A profile's choices as <see cref="ClientSettings.ChoicesFor"/> finds them: <see cref="Protocol"/> the one it
+/// is held to, null for its servers in order; <see cref="RoundsMax"/> 0 to keep trying.</summary>
+internal sealed record ProfileChoices(IReadOnlyCollection<string> Protocols, string? Protocol, bool ProtocolOwn, int RoundsMax, bool RoundsOwn, bool OtherOwn);
+
 internal sealed record PolicyOverride(
     int? RetryWaitSeconds = null, int? RetryWaitMaxSeconds = null, int? RoundsMax = null, bool? RandomOrder = null,
     int? AttemptTimeoutSeconds = null, bool? RetryAfterAuthFailure = null, int? PingRestartSeconds = null, string? Protocol = null)
@@ -134,6 +138,12 @@ internal sealed class ClientSettings
         get { lock (_gate) return new Dictionary<string, GameChoice>(_saved.Games); }
     }
 
+    /// <summary>Every profile's own changes, by profile.</summary>
+    public IReadOnlyDictionary<string, PolicyOverride> Policies
+    {
+        get { lock (_gate) return new Dictionary<string, PolicyOverride>(_saved.Policies); }
+    }
+
     public PolicyOverride PolicyOf(string profileId)
     {
         lock (_gate) return _saved.Policies.GetValueOrDefault(profileId) ?? new PolicyOverride();
@@ -174,6 +184,15 @@ internal sealed class ClientSettings
         { } only => only,
         null => Connection.Protocol is { } all && protocols.Contains(all) ? all : null,
     };
+
+    /// <summary>What a profile connects with, as its row says it: the VPN protocol and the rounds before it stops, each
+    /// Settings' or changed for it, and whether it has other changes of its own (its connection settings view).</summary>
+    public ProfileChoices ChoicesFor(string profileId, IReadOnlyCollection<string> protocols)
+    {
+        var own = PolicyOf(profileId);
+        return new(protocols, ProtocolFor(profileId, protocols), own.Protocol is not null, own.RoundsMax ?? Connection.RoundsMax ?? 0,
+            own.RoundsMax is not null, !(own with { Protocol = null, RoundsMax = null }).IsEmpty);
+    }
 
     /// <summary>The transports of a stored profile's remotes, which it says as "udp/1194".</summary>
     public static IReadOnlyCollection<string> ProtocolsOf(IEnumerable<string> remotes) => [.. remotes.Select(r => r.Split('/')[0]).Distinct()];

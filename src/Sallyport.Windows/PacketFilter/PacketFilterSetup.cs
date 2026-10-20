@@ -93,8 +93,11 @@ public sealed class PacketFilterSetup(string folder)
 
     private async Task<SetupOutcome> RunInstallerAsync(string verb, string action, string properties, CancellationToken ct)
     {
-        if (!File.Exists(InstallerPath) || !await MatchesAsync(InstallerPath, ct))
-            throw new InvalidOperationException("the pinned installer is not here; fetch it first");
+        if (!File.Exists(InstallerPath)) throw new InvalidOperationException("the pinned installer is not here; fetch it first");
+        // Held open from its check until Windows Installer is done with it, letting others read and nothing else: in a
+        // folder every user may write (D25), no one can put other bytes in its place between the two.
+        await using var held = Hold(InstallerPath);
+        if (!await MatchesAsync(held, ct)) throw new InvalidOperationException("the pinned installer is not here; fetch it first");
         var log = Path.Combine(_folder, $"{action}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
         var start = new ProcessStartInfo("msiexec.exe", $"{verb} \"{InstallerPath}\" /qn /norestart /l*v \"{log}\"{properties}")
         {
@@ -122,8 +125,18 @@ public sealed class PacketFilterSetup(string folder)
     internal static async Task<bool> MatchesAsync(string path, CancellationToken ct, string expected = PacketFilterRelease.InstallerSha256)
     {
         await using var file = File.OpenRead(path);
+        return await MatchesAsync(file, ct, expected);
+    }
+
+    internal static async Task<bool> MatchesAsync(FileStream file, CancellationToken ct, string expected = PacketFilterRelease.InstallerSha256)
+    {
+        file.Position = 0;
         return Convert.ToHexString(await SHA256.HashDataAsync(file, ct)) == expected;
     }
+
+    /// <summary>The file open to read, shared with readers only: while it is held, it can be neither written, renamed nor
+    /// deleted.</summary>
+    internal static FileStream Hold(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 
     private static ServiceState QueryService()
     {

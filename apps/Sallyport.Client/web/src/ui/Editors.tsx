@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, NewAppValues, PolicyValues, ProgramEditValues } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, MoveValues, NewAppValues, PolicyValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
 import { ActionButton, Disclosure, Icon } from './shared';
@@ -10,7 +10,8 @@ export type Draft =
   | { token: string; kind: 'program'; values: ProgramEditValues }
   | { token: string; kind: 'defaults'; values: DefaultsValues }
   | { token: string; kind: 'policy'; values: PolicyValues }
-  | { token: string; kind: 'new-app'; values: NewAppValues };
+  | { token: string; kind: 'new-app'; values: NewAppValues }
+  | { token: string; kind: 'export' | 'import'; values: MoveValues };
 
 export function seedDraft(editor: Editor): Draft {
   switch (editor.kind) {
@@ -19,6 +20,7 @@ export function seedDraft(editor: Editor): Draft {
     case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
     case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
     case 'new-app': return { token: editor.token, kind: 'new-app', values: { ...editor.values, included: [...editor.values.included] } };
+    case 'export': case 'import': return { token: editor.token, kind: editor.kind, values: { ...editor.values } };
   }
 }
 
@@ -75,7 +77,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
 
   return <form ref={form} className="editor" tabIndex={-1}
     aria-label={t(editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
-      : editor.kind === 'defaults' ? 'Defaults for new apps' : 'Edit app')}
+      : editor.kind === 'defaults' ? 'Defaults for new apps' : editor.kind === 'export' ? 'Export' : editor.kind === 'import' ? 'Import' : 'Edit app')}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
       event.preventDefault();
@@ -85,8 +87,12 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         case 'program': post('SAVE_PROGRAM', { token: editor.token, values: draft.values }); break;
         case 'defaults': post('SAVE_DEFAULTS', { token: editor.token, values: draft.values }); break;
         case 'policy': post('SAVE_POLICY', { token: editor.token, values: draft.values }); break;
+        case 'export': post('SAVE_EXPORT', { token: editor.token, values: draft.values }); break;
+        case 'import': post('SAVE_IMPORT', { token: editor.token, values: draft.values }); break;
       }
     }}>
+    {(draft.kind === 'export' || draft.kind === 'import') && <MoveFields editor={editor} draft={draft} onChange={onChange} prefix={prefix}
+      saving={saving} error={error} description={description} />}
     {draft.kind === 'app' ? <div className="editor-fields">
       <div className="field">
         <label htmlFor={`${prefix}-name`}>{t('Name')}</label>
@@ -95,6 +101,17 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, name: event.target.value } })} />
         {error('name')}
       </div>
+      {/* Its icon, picked by sight from its programs' own (the owner: "set app icon from app exe"). */}
+      {editor.icons && editor.icons.length > 0 && <fieldset className="field full-field icon-choices">
+        <legend>{t('Icon')}</legend>
+        {editor.icons.map((icon) => <label key={icon.id} className="icon-choice" title={icon.label}>
+          <input type="radio" name={`${prefix}-icon`} value={icon.id} disabled={saving}
+            checked={draft.values.iconProgramId === icon.id || (!editor.icons!.some((i) => i.id === draft.values.iconProgramId) && icon === editor.icons![0])}
+            onChange={() => onChange({ ...draft, values: { ...draft.values, iconProgramId: icon.id } })} />
+          <img src={icon.url} alt="" aria-hidden="true" draggable={false} />
+          <span>{icon.label}</span>
+        </label>)}
+      </fieldset>}
       {editor.options && editor.options.length > 0 && <div className="field">
         <label htmlFor={`${prefix}-launch`}>{t('Launch starts')}</label>
         <select id={`${prefix}-launch`} value={draft.values.launchProgramId ?? ''} disabled={saving}
@@ -241,6 +258,44 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
 /** "Add an app", a page of its own: first where it is — typed, pasted or browsed to, a folder or a program — and what
  *  was found there; then its name, VPN profile and what its traffic does when the VPN drops; then, for a folder, which
  *  of its programs go through the VPN. Nothing is kept until Add app. */
+/** Export's and Import's fields: each part the file can hold, with how much of it, and the password the profiles are
+ *  sealed with — twice for an export. */
+function MoveFields({ editor, draft, onChange, prefix, saving, error, description }: {
+  editor: Editor; draft: Extract<Draft, { kind: 'export' | 'import' }>; onChange: (draft: Draft) => void; prefix: string; saving: boolean;
+  error: (field: EditorField) => React.ReactNode; description: (field: EditorField) => string | undefined;
+}) {
+  const set = (values: Partial<MoveValues>) => onChange({ ...draft, values: { ...draft.values, ...values } });
+  const part = (id: 'profiles' | 'apps' | 'connection') => editor.options?.find((option) => option.id === id);
+  return <div className="editor-fields">
+    <fieldset className="field full-field">
+      <legend>{t(draft.kind === 'export' ? 'What goes in the file' : 'What to take from the file')}</legend>
+      {/* The parts the host offers, in its order: what this computer has, or what the file holds. */}
+      {(editor.options ?? []).map((option) => {
+        const id = option.id as 'profiles' | 'apps' | 'connection';
+        return <label key={id} className="check-field">
+          <input type="checkbox" checked={draft.values[id]} disabled={saving} onChange={(event) => set({ [id]: event.target.checked })} />
+          <span><span>{option.label}</span>{option.help && <span className="secondary metadata">{option.help}</span>}</span>
+        </label>;
+      })}
+    </fieldset>
+    {draft.values.profiles && part('profiles') && draft.values.sealed && <>
+      <div className="field">
+        <label htmlFor={`${prefix}-password`}>{t(draft.kind === 'export' ? 'Password for the profiles (optional)' : 'The file\'s password')}</label>
+        <input id={`${prefix}-password`} type="password" autoComplete={draft.kind === 'export' ? 'new-password' : 'current-password'}
+          value={draft.values.password} disabled={saving} aria-invalid={!!editor.errors.password} aria-describedby={description('password')}
+          onChange={(event) => set({ password: event.target.value })} />
+        {error('password')}
+      </div>
+      {draft.kind === 'export' && <div className="field">
+        <label htmlFor={`${prefix}-confirm`}>{t('The password again')}</label>
+        <input id={`${prefix}-confirm`} type="password" autoComplete="new-password" value={draft.values.confirm} disabled={saving}
+          aria-invalid={!!editor.errors.confirm} aria-describedby={description('confirm')} onChange={(event) => set({ confirm: event.target.value })} />
+        {error('confirm')}
+      </div>}
+    </>}
+  </div>;
+}
+
 export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoices }: {
   editor: Editor;
   draft: Draft;

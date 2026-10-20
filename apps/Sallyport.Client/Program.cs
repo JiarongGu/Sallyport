@@ -24,7 +24,7 @@ internal static class Program
         {
             Args = args,
             ApplicationName = "Sallyport",
-            // Per user: in the installed folder's own place for this person (D19), or %LOCALAPPDATA% for a development build.
+            // In the installed folder's data, shared by everyone on this computer (D25), or %LOCALAPPDATA% for a development build.
             Paths = new ShenoraPathsOptions { DataDirectory = UserData.Folder() },
         });
 
@@ -51,7 +51,8 @@ internal static class Program
 
         builder.Services.AddSingleton(sp => new WebViewEnvironmentOptions
         {
-            UserDataFolder = sp.GetRequiredService<ShenoraPaths>().DataArea("webview2"),
+            // What can be made again goes in the cache: the window's own, made anew when absent.
+            UserDataFolder = sp.GetRequiredService<ShenoraPaths>().DataArea(Path.Combine("cache", "webview2")),
             IsDevelopment = sp.GetRequiredService<ShenoraEnvironment>().IsDevelopment,
         });
         builder.Services.AddSingleton<IWebViewResourceProvider>(sp =>
