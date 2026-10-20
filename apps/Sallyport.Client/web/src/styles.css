@@ -19,6 +19,7 @@
   --busy: #f2b84b;
   --up: #3ccf8e;
   --trouble: #f06a6a;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23a9b1bf' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 @media (prefers-color-scheme: light) {
@@ -36,6 +37,7 @@
     --busy: #865900;
     --up: #137347;
     --trouble: #b42332;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%23526071' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   }
 }
 
@@ -78,10 +80,19 @@ input, select, textarea {
   border-radius: 6px;
   background: var(--background);
 }
-input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { background: var(--hover); }
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) { background-color: var(--hover); }
 input:disabled, select:disabled, textarea:disabled { color: var(--secondary); }
 input[aria-invalid='true'], select[aria-invalid='true'], textarea[aria-invalid='true'] { border-color: var(--trouble); }
 textarea { resize: vertical; }
+/* The system's arrow sits against the frame: ours, with room on both sides of it. */
+select {
+  appearance: none;
+  padding-right: 36px;
+  background-image: var(--chevron);
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
 h1, h2, p, dl, pre { margin: 0; }
 h1 { font-size: 1.571429rem; line-height: 1.272727; font-weight: 600; }
 h2 { font-size: 1.142857rem; line-height: 1.375; font-weight: 600; }
@@ -114,6 +125,8 @@ pre { white-space: pre-wrap; min-width: 0; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-head > div { min-width: 0; }
 .page-head > .action { flex: 0 1 auto; max-width: 40%; }
+/* A header's buttons side by side, never stacked: they wrap below the title only when the window is narrow. */
+.page-head > .actions { flex: none; flex-wrap: nowrap; }
 .page-head p { margin-top: 4px; }
 .page-note { margin: -12px 0 16px; }
 .rows { display: grid; gap: 12px; }
@@ -230,6 +243,7 @@ legend { padding: 0; margin-bottom: 4px; }
   .navigation { padding: 0 4px; gap: 0; }
   .nav-item { padding: 0 12px; }
   .page-head, .row-head { flex-wrap: wrap; }
+  .page-head > .actions { flex-wrap: wrap; }
   .page-head > .action, .row-primary, .row-foot > .action { max-width: 100%; }
   .facts { grid-template-columns: minmax(0, 1fr); }
   .empty { padding: 24px; }
@@ -263,4 +277,4 @@ h4 { font-size: 1rem; line-height: 1.428571; font-weight: 600; margin: 0; overfl
 .latency-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .countdown { font-variant-numeric: tabular-nums; }
 .settings-group .card .row-head .facts { margin: 0; flex: 1; }
-.language-choice { justify-self: start; min-width: 12rem; }
+.language-choice { justify-self: start; width: auto; min-width: 14rem; }

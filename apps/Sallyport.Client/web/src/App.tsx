@@ -1,4 +1,4 @@
-import { getBridge, useShenoraEvent } from '@shenora/react';
+import { getBridge, isShenoraAvailable, useShenoraEvent, WindowCommands } from '@shenora/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClientState, Notice, Page } from './contract';
 import { setLanguage, t } from './i18n';
@@ -41,6 +41,16 @@ export function App() {
   useEffect(() => {
     getBridge().notifyReady().catch(() => console.error('Sallyport ready handshake failed.'));
   }, []);
+
+  // The host's splash stays until the first state has been painted: lifted sooner, it would give way to a bare page.
+  const splashLifted = useRef(false);
+  useEffect(() => {
+    if (!state || splashLifted.current || !isShenoraAvailable()) return;
+    splashLifted.current = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      void new WindowCommands().closeSplash().catch(() => console.error('Sallyport splash could not be lifted.'));
+    }));
+  }, [state]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);

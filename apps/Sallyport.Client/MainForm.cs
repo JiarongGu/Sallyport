@@ -22,7 +22,7 @@ internal sealed class MainForm : OptimizedForm
     private const double TitleBarHeight = 40, CaptionButtonWidth = 46;
 
     private readonly WebViewHost _host;
-    private readonly SplashPanel _splash;
+    private readonly Splash _splash;
     private readonly WebView2Control _webView;
     private readonly WebViewIpcBridge _bridge;
     private readonly StatusTray _tray;
@@ -60,7 +60,7 @@ internal sealed class MainForm : OptimizedForm
 
         _webView = new WebView2Control { Dock = DockStyle.Fill };
         Controls.Add(_webView);
-        _splash = new SplashPanel(new SplashPanelOptions { BackColor = theme.Background });
+        _splash = new Splash(theme, ToggleMaximize);
         Controls.Add(_splash);
         _splash.BringToFront();
         Resize += (_, _) => PaintCaptionButtonsUntilThePageDoes();
@@ -73,6 +73,9 @@ internal sealed class MainForm : OptimizedForm
             IsMaximized = () => AppPlacement == WindowPlacement.Maximized,
             CoordinateSpace = _webView,
             SetCaptionButtons = SetCaptionButtons,
+            // The page says when its first screen has its state: lifted at navigation, the splash would leave a frame of
+            // bare background (the page's script not yet run) — the title bar empty but for the caption buttons.
+            CloseSplash = () => BeginInvoke(LiftSplash),
         }));
 
         // Made before the WebView2 initialises: events raised before the page is ready are held for it, not lost.
@@ -108,7 +111,7 @@ internal sealed class MainForm : OptimizedForm
             _theme = theme;
             ApplyChromeTheme(theme.Background, theme.Background, theme.Dark);
             CaptionButtonColors = theme.Caption;
-            if (!_splash.IsDisposed) _splash.BackColor = theme.Background;
+            if (!_splash.IsDisposed) _splash.Apply(theme);
         });
     }
 
@@ -154,11 +157,20 @@ internal sealed class MainForm : OptimizedForm
             _bridge.Attach();
             _webView.CoreWebView2.NavigationCompleted += (_, args) =>
             {
-                if (_splash.IsDisposed) return;
-                Controls.Remove(_splash);
-                _splash.Dispose();
                 if (!args.IsSuccess)
+                {
+                    LiftSplash();
                     MessageBox.Show(L.T("The window's page did not load ({0}).", args.WebErrorStatus), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                // A page that loaded but never says it is ready (a script error) is still shown, rather than the splash for good.
+                var fallback = new System.Windows.Forms.Timer { Interval = 5000 };
+                fallback.Tick += (_, _) =>
+                {
+                    fallback.Dispose();
+                    LiftSplash();
+                };
+                fallback.Start();
             };
             _host.Navigate();
             Receive(_start.Arguments, atStart: true);
@@ -170,6 +182,13 @@ internal sealed class MainForm : OptimizedForm
             MessageBox.Show(ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             _tray.Exit();
         }
+    }
+
+    private void LiftSplash()
+    {
+        if (_splash.IsDisposed) return;
+        Controls.Remove(_splash);
+        _splash.Dispose();
     }
 
     /// <summary>Until the page reports its buttons, the splash still needs a way to close the window: the same three,
