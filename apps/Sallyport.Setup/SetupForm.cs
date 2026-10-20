@@ -66,11 +66,15 @@ sealed class SetupForm : Form
     /// <summary>The language the person picked in the window, which closes for setup to open it again in that language.</summary>
     public string? SwitchTo { get; private set; }
 
-    /// <summary>The folder and the choices as the person left them, for the window opened again.</summary>
-    public string Folder => _where.Box.Text.Trim();
+    /// <summary>The folder and the choice as the person left them when they picked another language, for the window opened
+    /// again: taken as it closes, since a closed window is disposed and its fields read back empty (the folder typed was
+    /// lost so, and the window opened again on the default).</summary>
+    public string? FolderLeft { get; private set; }
 
-    public SetupChoices Choices(SetupChoices before) =>
-        _uninstall ? before with { RemoveData = _option.Checked } : before with { Driver = _option.Checked || !_option.Enabled };
+    private bool? _optionLeft;
+
+    public SetupChoices Choices(SetupChoices before) => _optionLeft is not { } chosen ? before
+        : _uninstall ? before with { RemoveData = chosen } : before with { Driver = chosen };
 
     public SetupForm(bool uninstall, SetupChoices choices, Func<Stream?> payload, string version, string folder, bool installed)
     {
@@ -137,6 +141,8 @@ sealed class SetupForm : Form
         {
             if (_busy || L.Choices[_language.Selected].Code == L.Code) return;
             SwitchTo = L.Choices[_language.Selected].Code;
+            FolderLeft = _where.Box.Text.Trim();
+            _optionLeft = _uninstall ? _option.Checked : _option.Checked || !_option.Enabled;
             Close();
         };
         // At the foot's left, where installers keep theirs: the header's line of words keeps its whole width.

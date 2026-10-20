@@ -56,7 +56,7 @@ static class Program
             if (form.SwitchTo is not { } language) return 0;
             // Another language: the same window again in it, where it was, with what the person had set.
             L.Use(language);
-            folder = existing ?? form.Folder;
+            folder = existing ?? form.FolderLeft ?? folder;
             choices = form.Choices(choices);
             at = form.Location;
         }

@@ -13,6 +13,8 @@
   shown only because the server sets none is no longer kept as the profile's own when it is saved unchanged.
 - The tray menu (2026-10-21): room above the first entry and below the last as at its sides, the highlight as far
   from the right edge as from the left, and a submenu beside the menu with its entry level with the row it opens from.
+- Setup keeps the install folder chosen when its language is changed (2026-10-21); before, the window opened again in
+  the other language on the default folder.
 
 ## 0.1.0 — 2026-10-20
 
