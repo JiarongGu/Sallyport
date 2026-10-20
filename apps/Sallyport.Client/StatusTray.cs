@@ -142,6 +142,40 @@ internal sealed class StatusTray : IDisposable
         var window = widest + menu.Padding.Horizontal + 2;
         menu.MinimumSize = new Size(window, 0);
         menu.MaximumSize = new Size(window, 0);
+
+        // Room above the first entry's highlight and below the last's as at its sides (MenuRenderer.Edge): the menu's own
+        // top and bottom padding is not laid out (the first entry 2 px from the top at 200%), an entry's margin is. The
+        // highlight is drawn 1 px inside its entry.
+        var entries = menu.Items.Cast<ToolStripItem>().ToList();
+        if (entries.Count > 0)
+        {
+            var display = menu.DisplayRectangle;
+            entries[0].Margin = entries[0].Margin with { Top = Math.Max(0, renderer.Edge - display.Top - 1) };
+            entries[^1].Margin = entries[^1].Margin with { Bottom = Math.Max(0, renderer.Edge - (menu.ClientSize.Height - display.Bottom) - 1) };
+        }
+        // An entry is laid out to a width of the layout's own measure (to 360 of 371 at 200%, from x 0, a separator from
+        // 2 to 369); its highlight is drawn within it, so it must reach as far as the highlight does.
+        menu.PerformLayout();
+        foreach (var entry in menu.Items.OfType<ToolStripMenuItem>())
+        {
+            var shortBy = menu.ClientSize.Width - renderer.Edge - entry.Bounds.Right;
+            if (shortBy > 0) entry.Padding = entry.Padding with { Right = entry.Padding.Right + shortBy };
+        }
+        menu.PerformLayout();
+    }
+
+    /// <summary>A submenu beside its menu, its first entry level with the row it opens from — WinForms puts it over the
+    /// menu's edge and a few pixels low. To the left where the screen has no room on the right.</summary>
+    private static void Place(ToolStripMenuItem owner)
+    {
+        if (owner.Owner is not ToolStripDropDown menu || owner.DropDown is not { } submenu || submenu.Items.Count == 0) return;
+        var row = menu.PointToScreen(owner.Bounds.Location);
+        var area = Screen.FromPoint(row).WorkingArea;
+        var x = menu.Bounds.Right + submenu.Width <= area.Right ? menu.Bounds.Right : menu.Bounds.Left - submenu.Width;
+        var y = Math.Clamp(row.Y - submenu.Items[0].Bounds.Top, area.Top, Math.Max(area.Top, area.Bottom - submenu.Height));
+        // WinForms keeps an open drop-down where it put it (setting Location changed nothing, measured); Windows moves it.
+        if (submenu.Location != new Point(x, y))
+            SetWindowPos(submenu.Handle, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     private ToolStripItem Item(TrayEntry entry, MenuRenderer renderer)
@@ -155,6 +189,7 @@ internal sealed class StatusTray : IDisposable
             Style((ToolStripDropDownMenu)item.DropDown, renderer.Theme);
             foreach (var child in items) item.DropDownItems.Add(Item(child, renderer));
             Fit((ToolStripDropDownMenu)item.DropDown, submenu: true);
+            item.DropDown.Opened += (_, _) => Place(item);
         }
         return item;
     }
@@ -229,6 +264,10 @@ internal sealed class StatusTray : IDisposable
     }
 
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUNDSMALL = 3;
+    private const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
@@ -260,6 +299,9 @@ internal sealed class StatusTray : IDisposable
 
         public int SeparatorHeight { get; } = (int)Math.Round(9 * scale);
 
+        /// <summary>From the window's edge to a highlight or a separator, on every side: the border, then 4.</summary>
+        public int Edge { get; } = (int)Math.Round(4 * scale) + 1;
+
         /// <summary>The page's --hover on a card: the text's colour at 6% over the surface.</summary>
         private Color Hover => Color.FromArgb(
             Theme.Surface.R + (Theme.Text.R - Theme.Surface.R) * 6 / 100,
@@ -282,8 +324,8 @@ internal sealed class StatusTray : IDisposable
         protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
         {
             if (!e.Item.Selected || !e.Item.Enabled) return;
-            var inset = (int)(4 * scale);
-            var bounds = new Rectangle(inset, 1, VisibleWidth(e.Item) - 2 * inset, e.Item.Height - 2);
+            var (left, right) = Row(e.Item);
+            var bounds = new Rectangle(left, 1, right - left, e.Item.Height - 2);
             using var path = Rounded(bounds, 4 * scale);
             using var hover = new SolidBrush(Hover);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -295,18 +337,19 @@ internal sealed class StatusTray : IDisposable
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             e.TextColor = e.Item.Enabled ? Theme.Text : Theme.Secondary;
-            // From the menu's edges: the entry starts a pixel or two in, and may run past the window's right edge.
+            // From the menu's edges: the entry may start in from the window's edge, and run past its right one.
             var left = TextLeft - e.Item.Bounds.Left;
-            e.TextRectangle = new Rectangle(left, 0, Math.Max(0, VisibleWidth(e.Item) - left - (int)(40 * scale)), e.Item.Height);
+            e.TextRectangle = new Rectangle(left, 0, Math.Max(0, Row(e.Item).Right - left - (int)(32 * scale)), e.Item.Height);
             e.TextFormat = (e.TextFormat & ~(TextFormatFlags.Top | TextFormatFlags.Bottom)) | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
             base.OnRenderItemText(e);
         }
 
-        /// <summary>A chevron, as Windows 11's menus draw it: on the entry's middle, as its text now is, 16 from the edge.</summary>
+        /// <summary>A chevron, as Windows 11's menus draw it: on the entry's middle, as its text now is, 14 in from the
+        /// highlight's right.</summary>
         protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
         {
             var half = 3.5f * scale;
-            var x = (e.Item is { } item ? VisibleWidth(item) : e.ArrowRectangle.Right) - 16 * scale;
+            var x = (e.Item is { } item ? Row(item).Right : e.ArrowRectangle.Right) - 14 * scale;
             var y = (e.Item?.Height ?? e.ArrowRectangle.Bottom) / 2f;
             using var pen = new Pen(e.Item?.Enabled == false ? Theme.Secondary : Theme.Text, Math.Max(1, scale));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -315,15 +358,20 @@ internal sealed class StatusTray : IDisposable
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
-            var inset = (int)(4 * scale);
+            var (left, right) = Row(e.Item);
             var y = e.Item.Height / 2;
             using var line = new Pen(Theme.Rule);
-            e.Graphics.DrawLine(line, inset, y, VisibleWidth(e.Item) - inset, y);
+            e.Graphics.DrawLine(line, left, y, right - 1, y);
         }
 
-        /// <summary>The entry's width, within the menu's window (Fit makes the two one).</summary>
-        private static int VisibleWidth(ToolStripItem item) =>
-            item.Owner is { } menu ? Math.Min(item.Width, menu.ClientSize.Width - item.Bounds.Left) : item.Width;
+        /// <summary>Where a highlight or a separator runs in an entry's own coordinates: <see cref="Edge"/> in from the
+        /// window's edges, so every row lines up whatever x and width the layout gave the entry (an entry from 0, a
+        /// separator from 2, at 200%).</summary>
+        private (int Left, int Right) Row(ToolStripItem item)
+        {
+            var window = item.Owner?.ClientSize.Width ?? item.Width;
+            return (Edge - item.Bounds.Left, window - Edge - item.Bounds.Left);
+        }
 
         private static GraphicsPath Rounded(Rectangle r, float radius)
         {
