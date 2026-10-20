@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-10-20
 
 - The release (2026-10-20, D28). One setup, `Sallyport-<version>-win-x64-setup.exe`, with its SHA-256 beside it and
   notes from this file, built by `apps/Sallyport.Setup/package.ps1` and by the Release workflow (started by hand,
