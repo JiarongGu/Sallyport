@@ -25,6 +25,18 @@ public sealed class FlowDecision(Verdict verdict, int pid, BlockReason reason = 
     public long Packets { get; internal set; }
     /// <summary>Environment.TickCount64 of its last packet.</summary>
     public long LastSeen { get; internal set; } = Environment.TickCount64;
+    // Where its routed packets are counted, and for which process: a UDP port that changes hands is counted anew.
+    internal ProcessRouted? Tally;
+    internal int TallyPid;
+}
+
+/// <summary>What one process has had routed: the flows that went to the tunnel and the packets it sent into them.
+/// Written by the routing thread alone, read by any.</summary>
+public sealed class ProcessRouted
+{
+    internal long _flows, _packets;
+    public long Flows => Interlocked.Read(ref _flows);
+    public long Packets => Interlocked.Read(ref _packets);
 }
 
 /// <summary>
@@ -191,6 +203,11 @@ public sealed class Router : IDisposable
         Enum.GetValues<BlockReason>().Where(r => Volatile.Read(ref _blocked[(int)r]) > 0).ToDictionary(r => r, r => Volatile.Read(ref _blocked[(int)r]));
 
     public IReadOnlyDictionary<Flow, FlowDecision> Flows => _flows;
+
+    /// <summary>Routed flows and packets by process, from the start of the route: what a window says per program. Safe to
+    /// read while routing, unlike <see cref="Flows"/>.</summary>
+    public IReadOnlyDictionary<int, ProcessRouted> ByProcess => _byProcess;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, ProcessRouted> _byProcess = new();
     public IReadOnlyDictionary<Flow6, FlowDecision> Flows6 => _flows6;
 
     /// <summary>Drains and decides until <paramref name="ct"/> is cancelled, then gives the adapter back.</summary>
@@ -424,7 +441,21 @@ public sealed class Router : IDisposable
         }
         decision.Packets++;
         decision.LastSeen = Environment.TickCount64;
+        if (decision.Verdict == Verdict.Routed) Count(decision);
         return decision;
+    }
+
+    // A routed packet against its process; a flow the first time it is routed for that process.
+    private void Count(FlowDecision decision)
+    {
+        if (decision.Tally is not { } tally || decision.TallyPid != decision.Pid)
+        {
+            tally = _byProcess.GetOrAdd(decision.Pid, static _ => new ProcessRouted());
+            decision.Tally = tally;
+            decision.TallyPid = decision.Pid;
+            Interlocked.Increment(ref tally._flows);
+        }
+        Interlocked.Increment(ref tally._packets);
     }
 
     // A routed packet with no tunnel to take it: true, dropped (held); false, passed on direct; null, there is a tunnel.

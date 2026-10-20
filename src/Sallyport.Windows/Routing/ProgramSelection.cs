@@ -1,6 +1,3 @@
-using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
-
 namespace Sallyport.Windows.Routing;
 
 /// <summary>
@@ -8,14 +5,12 @@ namespace Sallyport.Windows.Routing;
 /// packet names its PID, so a program is selected from its first packet however it was started (a launcher, a mod
 /// loader, by hand). A PID is remembered with its creation time: a recycled PID is another process (game-routing §1).
 /// </summary>
-public sealed partial class ProgramSelection
+public sealed class ProgramSelection
 {
-    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-    private const int ERROR_INSUFFICIENT_BUFFER = 122;
-
     private readonly HashSet<string> _paths;
     private readonly Dictionary<int, (long Created, bool Selected)> _known = [];
     private readonly HashSet<int> _unreadable = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _pathOf = new();
 
     public ProgramSelection(IEnumerable<string> executables) =>
         _paths = new(executables.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
@@ -33,46 +28,26 @@ public sealed partial class ProgramSelection
     {
         // The idle process (0) and System (4) run no program's executable.
         if (pid <= 4) return false;
-        using var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
-        if (process.IsInvalid || !GetProcessTimes(process, out var created, out _, out _, out _))
+        if (!ProcessImage.TryCreated(pid, out var created))
         {
             _unreadable.Add(pid);
             return false;
         }
         if (_known.TryGetValue(pid, out var known) && known.Created == created) return known.Selected;
-        if (ImagePath(process) is not { } path)
+        if (!ProcessImage.TryRead(pid, out created, out var path) || path is null)
         {
             _unreadable.Add(pid);
             return false;
         }
-        var selected = _paths.Contains(path);
+        var selected = _paths.TryGetValue(path, out var chosen);
         _known[pid] = (created, selected);
+        if (selected) _pathOf[pid] = chosen!;
+        else _pathOf.TryRemove(pid, out _);
         _unreadable.Remove(pid);
         return selected;
     }
 
-    private static unsafe string? ImagePath(SafeProcessHandle process)
-    {
-        var capacity = 512;
-        while (true)
-        {
-            var buffer = new char[capacity];
-            var size = (uint)capacity;
-            fixed (char* p = buffer)
-                if (QueryFullProcessImageName(process, 0, p, ref size)) return Path.GetFullPath(new string(buffer, 0, (int)size));
-            if (Marshal.GetLastPInvokeError() != ERROR_INSUFFICIENT_BUFFER || capacity >= 32768) return null;
-            capacity = 32768;
-        }
-    }
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial SafeProcessHandle OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int pid);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetProcessTimes(SafeProcessHandle process, out long creation, out long exit, out long kernel, out long user);
-
-    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static unsafe partial bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, char* path, ref uint size);
+    /// <summary>The selected executable a process was found running — as the selection names it — for counting what is
+    /// routed by program; null for a process not selected. Read from any thread.</summary>
+    public string? PathOf(int pid) => _pathOf.GetValueOrDefault(pid);
 }

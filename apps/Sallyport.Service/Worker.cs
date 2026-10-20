@@ -153,7 +153,15 @@ static class Worker
     private static RouteState State(GameRoute route, ProgramSelection selection)
     {
         var r = route.Router;
+        // By program, as the window shows each: the router counts by process, the selection knows each one's executable.
+        var programs = r.ByProcess
+            .Select(p => (Path: selection.PathOf(p.Key), Routed: p.Value))
+            .Where(p => p.Path is not null)
+            .GroupBy(p => p.Path!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ProgramRouted(g.Key, g.Count(), g.Sum(p => p.Routed.Flows), g.Sum(p => p.Routed.Packets)))
+            .ToList();
         return new RouteState(route.Phase, route.Generation, r.RoutedPackets, r.HandedUp, r.DirectPackets, r.UnownedPackets, r.HeldWhileDown,
-            r.DirectWhileDown, r.LateFlows, r.Blocked.Values.Sum(), route.Stale, r.RoutedFlows, selection.Selected.Count(), selection.Unreadable.Count());
+            r.DirectWhileDown, r.LateFlows, r.Blocked.Values.Sum(), route.Stale, r.RoutedFlows, selection.Selected.Count(), selection.Unreadable.Count(),
+            programs);
     }
 }

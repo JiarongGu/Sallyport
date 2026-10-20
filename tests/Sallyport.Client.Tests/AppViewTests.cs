@@ -46,14 +46,16 @@ public class AppViewTests
         Assert.Equal("Not routing", view.StatusText);
         Assert.Equal("Through jp", view.ThroughText);
         Assert.Equal("All traffic of 1 program", view.MethodText);
-        Assert.Equal("1 program included of 2.", view.ProgramsText);
+        Assert.Equal("Through the VPN: 1 program of 2.", view.ProgramsText);
         Assert.True(view.Actions.Route is { Visible: true, Enabled: true, Label: "Route" });
         Assert.False(view.Actions.Stop.Visible);
         Assert.Equal("Left out — installs or removes software", view.Programs[1].StatusText);
         Assert.Equal("All traffic", view.Programs[0].StatusText);
-        // The folder's program named most like the folder is what Launch starts, until the person chooses.
-        Assert.True(view.Programs[0].LaunchTarget);
-        Assert.Equal("Launch starts ZenlessZoneZero.exe", view.LaunchText);
+        // A game is started as the person always starts it: Sallyport offers no Launch for what it routes by packets.
+        Assert.False(view.Actions.Launch.Visible);
+        Assert.False(view.Programs[0].LaunchTarget);
+        Assert.Null(view.LaunchText);
+        Assert.DoesNotContain(view.Setup!, f => f.Label == "Launch starts");
     }
 
     [Theory]
@@ -153,7 +155,9 @@ public class AppViewTests
         Assert.Equal("All traffic of 1 program · 1 launched with proxy settings", view.MethodText);
         Assert.Equal("All traffic · launched with proxy settings (Proxy environment)", view.Programs[0].StatusText);
         Assert.Equal("Routing it before launch…", view.StatusText);
-        Assert.True(view.Actions.Launch.Busy);
+        // Its own Launch, on its row: the app routes its packets, so the app has none of its own.
+        Assert.False(view.Actions.Launch.Visible);
+        Assert.True(view.Programs[0].Actions.Launch is { Visible: true, Enabled: false });
         Assert.False(view.Actions.Edit.Enabled);
     }
 

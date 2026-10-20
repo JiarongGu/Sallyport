@@ -88,7 +88,12 @@ public sealed record RetireGeneration(int Generation) : RouterMessage;
 
 /// <summary>Worker → client, every second: where the route stands, and its counts so far.</summary>
 public sealed record RouteState(RoutePhase Phase, int Generation, long Routed, long HandedUp, long Direct, long Unowned, long HeldWhileDown,
-    long DirectWhileDown, long LateFlows, long Blocked, long Stale, long RoutedFlows, int Selected, int Unreadable) : RouterMessage;
+    long DirectWhileDown, long LateFlows, long Blocked, long Stale, long RoutedFlows, int Selected, int Unreadable,
+    IReadOnlyList<ProgramRouted>? Programs = null) : RouterMessage;
+
+/// <summary>What one selected executable has had routed since the route began: the processes seen running it, the flows
+/// that went to the tunnel and the packets it sent into them. A path, never what was sent.</summary>
+public sealed record ProgramRouted(string Path, int Processes, long Flows, long Packets);
 
 /// <summary>One frame read: its kind, and its payload (a control message's JSON, or a packet's generation and bytes).</summary>
 public readonly record struct Frame(byte Kind, byte[] Payload)

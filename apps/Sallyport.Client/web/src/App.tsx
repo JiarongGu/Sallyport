@@ -7,7 +7,7 @@ import { AppPage, Apps } from './Apps';
 import { Network } from './Network';
 import { ProfileSettings, Profiles } from './Profiles';
 import { Settings } from './Settings';
-import { EditorForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
+import { EditorForm, NewAppForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
 import { MainHeader, pages, Sidebar } from './ui/Chrome';
 import { ActionButton } from './ui/shared';
@@ -73,6 +73,8 @@ export function App() {
     } else if (request !== navigationRequest.current && state.navigation) {
       navigationRequest.current = request;
       setPage(state.navigation.page);
+      // A new app opens on its own page: what to turn on, and what it is doing, are there.
+      setAppPage(state.navigation.app);
     }
   }, [state]);
 
@@ -108,24 +110,36 @@ export function App() {
   // A profile's own connection settings take the Profiles page while they are open; back is Cancel.
   const policyEditor = shown === 'profiles' && state?.editor?.kind === 'policy' ? state.editor : null;
   const policyName = policyEditor ? state?.profiles.find((profile) => profile.id === policyEditor.subjectId)?.name ?? '' : '';
-  const openApp = shown === 'apps' && appPage ? state?.apps.find((app) => app.id === appPage) ?? null : null;
+  const newApp = shown === 'apps' && state?.editor?.kind === 'new-app' ? state.editor : null;
+  const openApp = shown === 'apps' && !newApp && appPage ? state?.apps.find((app) => app.id === appPage) ?? null : null;
   // Leaving a view inside a page leaves what was being edited there.
   const leaveViews = () => {
     const editor = state?.editor;
-    if (editor && (editor.kind === 'policy' || ((editor.kind === 'app' || editor.kind === 'program') && appPage))) post('CANCEL_EDIT', { token: editor.token });
+    if (editor && (editor.kind === 'policy' || editor.kind === 'new-app' || ((editor.kind === 'app' || editor.kind === 'program') && appPage)))
+      post('CANCEL_EDIT', { token: editor.token });
     setAppPage(null);
   };
   const go = (next: Page) => { leaveViews(); setPage(next); };
+  // The host looks at the open app's programs while its page is shown, and stops when it is not.
+  const watched = useRef<string | null>(null);
+  const watching = openApp?.id ?? null;
+  useEffect(() => {
+    if (!state || watched.current === watching) return;
+    watched.current = watching;
+    post('WATCH_APP', { id: watching });
+  }, [watching, state]);
   // Before anything renders: the page's own words follow the host's language from the same state.
   setLanguage(state?.language ?? 'en');
 
   return <div className="shell">
     <Sidebar state={state} shown={shown} go={go} />
     <div className="main">
-      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : openApp ? openApp.name : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
+      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : newApp ? t('Add an app') : openApp ? openApp.name
+          : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
         back={policyEditor ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: policyEditor.token }) }
+          : newApp ? { label: t('Back to Apps'), onClick: () => post('CANCEL_EDIT', { token: newApp.token }) }
           : openApp ? { label: t('Back to Apps'), onClick: leaveViews } : undefined}>
-        {state && shown === 'apps' && !openApp && <>
+        {state && shown === 'apps' && !openApp && !newApp && <>
           <ActionButton action={state.actions.addApp} glyph="plus" focusKey="add-app" onClick={() => post('ADD_APP', {})} />
         </>}
         {state && shown === 'profiles' && !policyEditor && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
@@ -133,7 +147,12 @@ export function App() {
       <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
       <main className="content" id="main-content">
         {!state ? <div className="loading" role="status"><span className="spinner" aria-hidden="true" />{t('Loading…')}</div> :
-          openApp ? <AppPage app={openApp} state={state} now={now}
+          newApp && currentDraft ? <section className="page" aria-label={t('Add an app')}>
+            <p className="page-intro secondary">{t('Pick a game or a program. While it is routed, its traffic goes through your VPN; everything else keeps your own connection.')}</p>
+            <NewAppForm key={newApp.token} editor={newApp} draft={currentDraft} onChange={setDraft}
+              profileChoices={state.profileChoices} lossChoices={state.lossChoices} />
+          </section> :
+          openApp ? <AppPage app={openApp} state={state} now={now} expanded={expanded} toggle={toggle}
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'apps' ? <Apps state={state} now={now} open={setAppPage}
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :

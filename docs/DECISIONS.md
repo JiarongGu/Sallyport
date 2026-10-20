@@ -475,3 +475,45 @@ proxy: 200, `loc=JP`. Held to UDP: over udp/1194, one UDP socket and no TCP to 4
 nothing of jp's own: tcp/443, its card "VPN protocol: TCP"; 200, `loc=JP`. jp's own Automatic over Settings' TCP:
 udp/1194, one UDP socket, "Changed for this profile". Stop after 0 rounds was refused ("Use 1 to 1000 rounds.");
 Follow Settings, then Settings back to Automatic, left jp as it was.
+
+## D22 — Apps are set up on a page of their own, watched program by program, and never launched for their packets (2026-10-20; measured)
+
+The owner, for a person who is not technical: "we dont really need start the game because this is not only for game,
+also for the detail config for each exe monitoring"; of adding: "can we have the selection to be for both?", then "or
+we have a proper setup page, so user can define its from begining"; and "keep in mind this is for a non-tech user to
+use so the ui/ux is important".
+
+**Adding.** "Add an app…" opens **Add an app**, a view of its own. First *Where is it?* — a path typed or pasted, or
+Browse…, one dialog that takes a program or a folder (Shenora's `OpenFolderAsync` with `AllowFileSelection`: Windows'
+own dialog offers one or the other, so its title says how to choose a folder). What is there is said before anything
+is kept (`AppSetup.Preview`): a folder and how many of its programs go through the VPN, a program on its own, or a
+browser launched with proxy settings; a program in a folder of its own brings its folder, as before. Then its name,
+VPN profile and what happens when the VPN drops; then, for a folder, each program with a switch. Add app makes it and
+opens its page. Nothing is written until then.
+
+**Launching.** Sallyport starts a program only where it must: one told of the proxy as it starts (a browser). A game,
+or anything routed by its packets, is started as the person always starts it; its traffic is routed from its first
+packet whoever starts it. So an app that routes packets has no Launch — on its card, its page, the Overview or the
+tray — and a program with proxy settings keeps its own Launch on its row.
+
+**Each program.** An app's page lists its programs with a switch each (through the VPN or not), what each is doing, and
+folded under it, how it is routed, its connections now and what went through the VPN. Two sources, each saying only
+what it can see:
+- *The window*, while that app's page is open and only then (`ProgramWatch`, every 2 s): its processes found by the
+  executable each runs (`RunningPrograms`, limited query access, unelevated) and their sockets from Windows' owner
+  tables (`OwnerTable.SocketsByProcess`: TCP rows with a far end, UDP sockets). "Not running" means no process the
+  client can read runs it; a process that refuses even limited access (a protected one) is not counted either way.
+- *The router*, in the service, counting by process on its own thread (`Router.ByProcess`: a flow the first time it is
+  routed for a process, every packet it sends into the tunnel), summed by executable through the selection that found
+  each process (`ProgramSelection.PathOf`) and sent in `RouteState.Programs`. The flow table itself is the routing
+  thread's alone; it is never read from the state timer.
+
+Measured 2026-10-20 on the installed client and service against jp (udp/1194), with a copy of the driver tool as a
+stand-in app (`childbin`, its `mixed-to` workload: STUN over UDP and HTTPS over TCP every few seconds): added through
+Add an app by typing its folder — "A folder with 3 programs. All of them go through your VPN while it is routed." —
+named "childbin", jp chosen; Add app opened its page. Route on: "Routed through jp". The stand-in started: its row
+"Running · through jp", Connections now "1 TCP · 1 UDP", Through the VPN "3 connections · 89 packets sent"; after its
+40 s, "Not running" and "5 connections · 184 packets sent". The stand-in's own record, every round: "udp 4 of 4
+answered, tcp 2 ok, 0 failed, the far end saw VPN". Stopped and removed after. Browse opened the dialog titled for
+both choices and was cancelled; a physical click on it could not be checked from this session (the window could not
+be brought forward), and UI Automation cannot see into the dialog from an elevated shell.

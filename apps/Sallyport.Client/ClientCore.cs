@@ -63,6 +63,9 @@ internal sealed class ClientCore
     private long _noticeIds;
     private NavigationView? _navigation;
     private long _navigations;
+    // The app whose page is open, whose programs are looked at while it is (ProgramWatch).
+    private volatile string? _watchedApp;
+    private readonly ProgramWatch _programs;
 
     private sealed record OpenEditor(string Token, string Kind, string SubjectId, object Values, IReadOnlyDictionary<string, string> Errors);
 
@@ -89,6 +92,7 @@ internal sealed class ClientCore
         _driverSetup = new PacketFilterSetup(paths.DataArea("drivers"));
         _connections.Changed += Publish;
         _runner.Changed += Publish;
+        _programs = new ProgramWatch(() => _watchedApp is { } watched && _items.Find(watched) is { } item ? [.. item.Programs.Select(p => p.Path)] : [], Publish);
         // Said once, where the person will see it: the window shows warnings until they are dismissed.
         if (items.Unreadable is { } why)
             Notify(NoticeKind.Warning, L.T("Your apps could not be read: {0}. Sallyport starts without them and keeps the file as it is until you change an app.", why));
@@ -130,9 +134,9 @@ internal sealed class ClientCore
 
     /// <summary>Asks the window to show a page (the tray's Open Network): once, by a new request number, so a later state
     /// does not pull the person back from where they went.</summary>
-    public void Navigate(Page page)
+    public void Navigate(Page page, string? app = null)
     {
-        lock (_gate) _navigation = new NavigationView(page, Interlocked.Increment(ref _navigations));
+        lock (_gate) _navigation = new NavigationView(page, Interlocked.Increment(ref _navigations), app);
         Publish();
     }
 
@@ -158,6 +162,15 @@ internal sealed class ClientCore
     {
         if (rounds is < 0 or > 1000) throw new ShenoraException("RETRY", "rounds", rounds.ToString(CultureInfo.InvariantCulture), L.T("Use 0 (keep trying) to 1000 rounds."));
         _settings.Connection = _settings.Connection with { RoundsMax = rounds };
+        Publish();
+    }
+
+    /// <summary>The app whose page the window shows, or none: its programs are looked at while it is open.</summary>
+    public void WatchApp(string? id)
+    {
+        if (id is not null && !RoutedItemStore.IsId(id)) throw new ShenoraException("APP_GONE", "id", id, L.T("That app is no longer listed."));
+        _watchedApp = id;
+        _programs.Poke();
         Publish();
     }
 
@@ -365,34 +378,133 @@ internal sealed class ClientCore
     /// program there sending all its traffic through the packet driver, the utilities left out, the one picked what
     /// Launch starts — unless its folder is one many programs share (Windows', Program Files itself, Downloads), where it
     /// is the program alone.</summary>
-    public async Task AddAppFromDialogAsync()
+    // ---- "Add an app": a page of its own, the place first, then what is found there
+
+    // What the open "Add an app" found, for its token: the page shows it, the save makes the app from it.
+    private (string Token, SetupPreview Preview)? _setup;
+
+    /// <summary>Opens "Add an app" with nothing chosen yet: the person's defaults for a new app.</summary>
+    public void BeginAddApp()
     {
-        var path = await PickProgramAsync("add-app", L.T("Choose the app's program"));
-        if (path is null) return;
-        var info = FileVersionInfo.GetVersionInfo(path);
-        var name = new[] { info.ProductName, info.FileDescription, Path.GetFileNameWithoutExtension(path) }
-            .First(n => !string.IsNullOrWhiteSpace(n))!.Trim();
-        if (name.Length > LongestName) name = name[..LongestName];
-        var kind = AppLauncher.Guess(path);
-        if (kind is AppKind.Chromium or AppKind.Firefox)
+        var defaults = _settings.Defaults;
+        lock (_gate)
         {
-            var browser = WithDefaults(_items.CreateFromProgram(name, path, kind, DefaultProfile()?.Id, packets: false, proxy: true));
-            Notify(NoticeKind.Info, L.T("Added {0}: it is launched with proxy settings, in a browser profile of its own.", browser.Name), new("app", browser.Id));
-            return;
+            _setup = null;
+            _editor = new OpenEditor(NewToken(), "new-app", "", new NewAppValues("", "", DefaultProfile()?.Id, defaults.Loss,
+                defaults.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? "", []), Empty);
         }
-        RoutedItem item;
-        try
+        Publish();
+    }
+
+    /// <summary>Browse…: one dialog for a folder or a program (Windows' own offers one or the other; this one, both).</summary>
+    public async Task BrowseNewAppAsync(string token, NewAppValues values)
+    {
+        lock (_gate) if (_editor is not { Kind: "new-app" }) return;
+        var picked = await WithDialogAsync("add-app", () => _dialogs.OpenFolderAsync(new OpenFolderOptions
         {
-            item = WithDefaults(OwnFolder(Path.GetDirectoryName(path)!)
-                ? _items.CreateFromProgramFolder(name, path, DefaultProfile()?.Id)
-                : _items.CreateFromProgram(name, path, kind, DefaultProfile()?.Id, packets: true, proxy: false));
+            // The dialog's own words say a file; the folder half has to be said, or no one finds it.
+            Title = L.T("Choose the program, or open the game's folder and press Open"),
+            AllowFileSelection = true,
+            Filters = [new FileDialogFilter { Name = L.T("Programs"), Extensions = ["exe"] }],
+            RememberPathKey = "add-app",
+        }));
+        if (picked is not { Success: true, FilePath: { } path }) return;
+        // Browse pressed as the path field was left: looking at the place typed renewed the form meanwhile, and this is
+        // still its Browse — what the person typed since stands, but the place is the one picked.
+        OpenEditor? open;
+        lock (_gate) open = _editor;
+        if (open is not { Kind: "new-app" }) return;
+        SetNewAppLocation(open.Token, (open.Token == token ? values : (NewAppValues)open.Values) with { Path = path });
+    }
+
+    /// <summary>The place typed, pasted or browsed to: what is there, said before anything is kept. A new token, so the
+    /// page takes the found name and programs; a name the person typed stays.</summary>
+    public void SetNewAppLocation(string token, NewAppValues values)
+    {
+        if (EditorFor(token, "new-app") is not { } editor) return;
+        var preview = AppSetup.Preview(values.Path ?? "", OwnFolder, out var why);
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            if (preview is null)
+            {
+                _setup = null;
+                _editor = _editor with { Values = values with { Included = [] }, Errors = new Dictionary<string, string> { ["path"] = why! } };
+            }
+            else
+            {
+                var previous = _setup?.Preview.SuggestedName;
+                var name = string.IsNullOrWhiteSpace(values.Name) || values.Name.Trim() == previous ? preview.SuggestedName : values.Name;
+                var next = new OpenEditor(NewToken(), "new-app", "", values with
+                {
+                    Path = preview.Path, Name = name, Included = [.. preview.Programs.Where(p => p.Included).Select(p => p.Path)],
+                }, Empty);
+                _editor = next;
+                _setup = (next.Token, preview);
+            }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        { throw new ShenoraException("APP_FOLDER", "path", path, L.T("{0} could not be read: {1}.", name, e.GetType().Name)); }
-        var included = item.Programs.Count(p => p.Included);
-        Notify(NoticeKind.Info, item.Programs.Count > 1
-            ? L.T("Added {0}: {1} of its {2} programs will send all their traffic through the VPN.", item.Name, included, item.Programs.Count)
-            : L.T("Added {0}: all its traffic goes through the VPN while it is routed.", item.Name), new("app", item.Id));
+        Publish();
+    }
+
+    /// <summary>Add app: made from what was found at the place (looked at again — the page's word is not taken for it),
+    /// with the person's name, profile, loss policy and choice of programs. Its page opens.</summary>
+    public void SaveNewApp(string token, NewAppValues values)
+    {
+        if (EditorFor(token, "new-app") is null) return;
+        var errors = new Dictionary<string, string>();
+        var preview = AppSetup.Preview(values.Path ?? "", OwnFolder, out var why);
+        if (preview is null) errors["path"] = why!;
+        var name = values.Name?.Trim() ?? "";
+        if (name.Length is 0 or > LongestName) errors["name"] = L.T("Use 1 to {0} characters.", LongestName);
+        if (values.ProfileId is not null && _store.Find(values.ProfileId) is null) errors["profileId"] = L.T("Choose a VPN profile.");
+        if (!Enum.IsDefined(values.Loss)) errors["loss"] = L.T("Choose what happens when the VPN drops.");
+        int? directAfter = null;
+        var directAfterText = values.DirectAfterText?.Trim() ?? "";
+        if (values.Loss == LossMode.Hold && directAfterText.Length > 0)
+        {
+            if (int.TryParse(directAfterText, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) && seconds is >= 5 and <= 3600) directAfter = seconds;
+            else errors["directAfterText"] = L.T("Use 5 to 3600 seconds, or leave it empty to hold until the VPN is back.");
+        }
+        var included = new HashSet<string>(values.Included ?? [], StringComparer.OrdinalIgnoreCase);
+        if (preview is { Kind: SetupKind.Folder } && !preview.Programs.Any(p => included.Contains(p.Path)))
+            errors["form"] = L.T("Turn on at least one program to go through the VPN.");
+
+        RoutedItem? made = null;
+        lock (_gate)
+        {
+            if (_editor is not { } open || open.Token != token) return;
+            if (errors.Count > 0) _editor = open with { Values = values, Errors = errors };
+            else
+            {
+                try
+                {
+                    made = preview!.Kind switch
+                    {
+                        SetupKind.Browser => _items.CreateFromProgram(name, preview.Path, preview.ProgramKind, values.ProfileId, packets: false, proxy: true),
+                        SetupKind.Program => _items.CreateFromProgram(name, preview.Path, preview.ProgramKind, values.ProfileId, packets: true, proxy: false),
+                        _ when Directory.Exists(preview.Path) => _items.CreateFromFolder(name, preview.Path, values.ProfileId),
+                        _ => _items.CreateFromProgramFolder(name, preview.Path, values.ProfileId),
+                    };
+                    // The person's choice of programs over the scan's, each marked as theirs where it differs.
+                    foreach (var program in made.Programs.Where(p => p.Included != included.Contains(p.Path)).ToList())
+                        if (preview.Kind == SetupKind.Folder) made = _items.Choose(made.Id, program.Path, included.Contains(program.Path));
+                    made = made with { Loss = values.Loss, DirectAfterSeconds = directAfter };
+                    _items.Put(made);
+                    _editor = null;
+                    _setup = null;
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    _editor = open with { Values = values, Errors = new Dictionary<string, string> { ["form"] = L.T("{0} could not be read: {1}.", name, e.GetType().Name) } };
+                }
+            }
+        }
+        if (made is not null)
+        {
+            Notify(NoticeKind.Info, L.T("Added {0}. Turn it on to send its traffic through your VPN.", made.Name), new("app", made.Id));
+            Navigate(Page.Apps, made.Id);
+        }
+        else Publish();
     }
 
     /// <summary>Whether a program's folder is its own (a game's, an installed program's) rather than one many share, whose
@@ -883,7 +995,8 @@ internal sealed class ClientCore
                     dialog is not null, _launching.TryGetValue(i.Id, out var phase) ? phase : null,
                     p => profile is null || p.Proxy is not { } proxy ? []
                         : AppLauncher.Describe(new RoutedApp(i.Id, i.Name, p.Path, proxy.Kind, profile.Id, p.LaunchArguments), _connections.ProxyPortOf(profile.Id),
-                            Path.Combine(_paths.DataDir, "apps", proxy.DataKey))));
+                            Path.Combine(_paths.DataDir, "apps", proxy.DataKey)),
+                    i.Id == _watchedApp ? _programs.Of : null));
             })
             .ToList();
 
@@ -893,9 +1006,12 @@ internal sealed class ClientCore
         OpenConfirmation? confirmation;
         List<Notice> notices;
         NavigationView? navigation;
+        (string Token, SetupPreview Preview)? setup;
         lock (_gate)
         {
             editor = _editor;
+            // What "Add an app" found, only for the token it was found for.
+            setup = _setup is { } open && open.Token == editor?.Token ? open : null;
             confirmation = _confirmation;
             notices = [.. _notices];
             navigation = _navigation;
@@ -926,17 +1042,26 @@ internal sealed class ClientCore
             [.. Enum.GetValues<AppKind>().Select(k => new ClientState.KindChoice(k, ClientView.KindLabel(k), ClientView.KindHelp(k)))],
             GameViews.LossChoices,
             editor is null ? null : new EditorView(editor.Token, editor.SubjectId, "editing", editor.Errors,
-                // The guidance until a save is refused; then the refusal, which says it, alone.
-                editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : null,
-                UiAction.Shown(L.T("Save")), UiAction.Shown(L.T("Cancel")),
+                // The guidance until a save is refused; then the refusal, which says it, alone. "Add an app" says what it
+                // found at the place chosen, and adds nothing until it has found something.
+                editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary : null,
+                editor.Kind == "new-app" ? UiAction.Shown(L.T("Add app"), setup is not null, L.T("Choose where it is first.")) : UiAction.Shown(L.T("Save")),
+                UiAction.Shown(L.T("Cancel")),
                 editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown(L.T("Follow Settings")) : UiAction.Hidden,
                 editor.Kind, editor.Values,
                 // What Launch may start: the app's included programs. The connection types the profile has servers for.
-                editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited
-                    ? [.. edited.Programs.Where(p => p.Included).Select(p => new EditorOption(p.Id, Path.GetFileName(p.Path)))]
+                // Only an app Sallyport starts has a choice of what it starts: one of its programs told of the proxy.
+                editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited && edited.PacketPrograms.Count == 0
+                    && edited.Programs.Count(p => p.Included && p.Proxy is not null) > 1
+                    ? [.. edited.Programs.Where(p => p.Included && p.Proxy is not null).Select(p => new EditorOption(p.Id, Path.GetFileName(p.Path)))]
                     : editor.Kind == "policy" && stored.FirstOrDefault(p => p.Id == editor.SubjectId) is { } profile
                         ? GameViews.ProtocolChoices(profile.Remotes)
-                        : null),
+                        // A folder's programs, each to turn on or off before the app is made; where it sits, if not at the top.
+                        : setup is { Preview: { Kind: SetupKind.Folder, Programs.Count: > 1 } found }
+                            ? [.. found.Programs.Select(p => new EditorOption(p.Path, Path.GetFileName(p.Path), p.Reason is { } reason ? L.T(reason)
+                                : Path.GetRelativePath(Directory.Exists(found.Path) ? found.Path : Path.GetDirectoryName(found.Path)!, Path.GetDirectoryName(p.Path)!)
+                                    is var where && where != "." ? where : null))]
+                            : null),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),
             notices,

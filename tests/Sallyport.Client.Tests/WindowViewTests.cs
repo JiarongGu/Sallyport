@@ -222,6 +222,7 @@ public class WindowViewTests
     {
         var json = JsonSerializer.Serialize(new NavigationView(Page.Network, 3), ClientView.Json);
 
-        Assert.Equal("""{"page":"network","request":3}""", json);
+        // No app's page asked for: said as null, not left out (contract.ts).
+        Assert.Equal("""{"page":"network","request":3,"app":null}""", json);
     }
 }

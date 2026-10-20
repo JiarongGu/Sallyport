@@ -14,7 +14,8 @@ internal enum Page { Apps, Network, Profiles, Settings }
 
 /// <summary>The page the host asks the window to show: a new <see cref="Request"/> moves it there once (the tray's Open
 /// Network); otherwise the person's own choice of page stands.</summary>
-internal sealed record NavigationView(Page Page, long Request);
+/// <summary>A page to show, once per request; <see cref="App"/>, an app's own page on Apps.</summary>
+internal sealed record NavigationView(Page Page, long Request, string? App = null);
 
 /// <summary>An app's routing as the channel it uses shows it.</summary>
 internal sealed record SelectionView(string Id, string Name, RunView Run, UiAction Stop);

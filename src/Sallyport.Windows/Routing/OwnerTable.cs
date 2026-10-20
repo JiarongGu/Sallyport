@@ -4,6 +4,9 @@ using System.Runtime.InteropServices;
 
 namespace Sallyport.Windows.Routing;
 
+/// <summary>A process's TCP connections and UDP sockets, as the owner tables list them.</summary>
+public readonly record struct ProcessSockets(int Tcp, int Udp);
+
 /// <summary>What the owner tables say of a flow: one process owns it, none does, or more than one could.</summary>
 public enum Ownership { Owned, Unowned, Ambiguous }
 
@@ -92,6 +95,22 @@ public sealed partial class OwnerTable
         var wildcard = _udp.TryGetValue((0u, flow.LocalPort), out var wildcardPid);
         if (specific && wildcard && specificPid != wildcardPid) { pid = 0; return Ownership.Ambiguous; }
         return specific ? Answer(true, specificPid, out pid) : Answer(wildcard, wildcardPid, out pid);
+    }
+
+    /// <summary>Each process's sockets in the snapshot: its TCP connections (rows with a far end; a listening socket has
+    /// none) and its UDP sockets, IPv4 and IPv6 together.</summary>
+    public IReadOnlyDictionary<int, ProcessSockets> SocketsByProcess() => CountByProcess(_tcp.Keys.Select(k => (k.Item3 != 0, _tcp[k])),
+        _tcp6.Keys.Select(k => (k.Item3 != UInt128.Zero, _tcp6[k])), _udp.Values.Concat(_udp6.Values));
+
+    internal static Dictionary<int, ProcessSockets> CountByProcess(IEnumerable<(bool Connected, int Pid)> tcp, IEnumerable<(bool Connected, int Pid)> tcp6,
+        IEnumerable<int> udp)
+    {
+        var counts = new Dictionary<int, ProcessSockets>();
+        foreach (var (connected, pid) in tcp.Concat(tcp6))
+            if (connected && pid > 0) counts[pid] = counts.GetValueOrDefault(pid) with { Tcp = counts.GetValueOrDefault(pid).Tcp + 1 };
+        foreach (var pid in udp)
+            if (pid > 0) counts[pid] = counts.GetValueOrDefault(pid) with { Udp = counts.GetValueOrDefault(pid).Udp + 1 };
+        return counts;
     }
 
     /// <summary>Every TCP row on a local port, for saying why a flow was not found: its ends and its process.</summary>

@@ -221,6 +221,10 @@ export interface ProgramView {
   startupSettings: string[];
   /** toggle posts SET_APP_PROGRAM with the opposite of `included`; edit posts BEGIN_PROGRAM_EDIT; launch posts LAUNCH_APP with its id. */
   actions: Record<'toggle' | 'edit' | 'launch', Action>;
+  /** What it is doing now — "Running · through jp", "Not running" — while its app's page is open (WATCH_APP); else null. */
+  activity: { tone: Tone; text: string } | null;
+  /** Its details: how it is routed, its connections now, what went through the VPN, its file. */
+  facts: Fact[] | null;
 }
 
 /** An app — a program, or a folder of them — and its routing (docs/design/window.md). */
@@ -285,7 +289,18 @@ export interface PolicyValues {
   keepTrying: boolean;
 }
 
-export type EditorField = 'form' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
+/** "Add an app": where it is, then its name, profile, loss policy and which of its programs go through the VPN. */
+export interface NewAppValues {
+  path: string;
+  name: string;
+  profileId: string | null;
+  loss: LossMode;
+  directAfterText: string;
+  /** Paths of the programs (from the editor's options) that go through the VPN. */
+  included: string[];
+}
+
+export type EditorField = 'form' | 'path' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
   | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol';
 
 /** An edit the host opened. Its values seed the fields once (keep what the person types across later STATEs with the
@@ -305,7 +320,7 @@ export type Editor = {
    *  servers of one only. */
   options: { id: string; label: string; help: string | null }[] | null;
 } & ({ kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
-  | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues });
+  | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues });
 
 export interface Confirmation {
   token: string;
@@ -340,7 +355,8 @@ export interface ClientState {
   /** The tab a first look opens on: Profiles while there is nothing to route through, Apps after. */
   initialPage: Page;
   /** A request from the host (the tray's Open Network) to show a page: followed once per new `request`. */
-  navigation: { page: Page; request: number } | null;
+  /** `app`: the app whose own page Apps opens on (a new app, just added). */
+  navigation: { page: Page; request: number; app: string | null } | null;
   profileChoices: { id: string; label: string; enabled: boolean }[];
   /** `help` says what choosing that kind does, for the editor to show beside the choice being made. */
   kindChoices: { value: AppKind; label: string; help: string }[];
@@ -363,8 +379,13 @@ export interface Commands {
   BEGIN_DEFAULTS_EDIT: Record<string, never>;
   SAVE_DEFAULTS: { token: string; values: DefaultsValues };
   COPY_ENDPOINT: { id: string };
-  /** One way in: the app's program, a game's folder made of it (ClientCore.AddAppFromDialogAsync). */
+  /** Opens "Add an app" (a new-app editor); its place is chosen there. */
   ADD_APP: Record<string, never>;
+  /** One dialog for a folder or a program; what it picks goes to NEW_APP_LOCATION. */
+  NEW_APP_BROWSE: { token: string; values: NewAppValues };
+  /** The place typed or pasted: the host looks at what is there and answers with a new token. */
+  NEW_APP_LOCATION: { token: string; values: NewAppValues };
+  SAVE_NEW_APP: { token: string; values: NewAppValues };
   ADD_APP_PROGRAM: { id: string };
   RESCAN_APP: { id: string };
   SET_APP_PROGRAM: { id: string; programId: string; included: boolean };
@@ -391,6 +412,8 @@ export interface Commands {
   SET_START_WITH_WINDOWS: { enabled: boolean };
   SET_LANGUAGE: { language: string };
   SET_PROTOCOL: { protocol: string };
+  /** The app whose page is open (its programs are looked at while it is), or null when none is. */
+  WATCH_APP: { id: string | null };
   SET_RETRY: { rounds: number };
   DISMISS_NOTICE: { id: string };
 }

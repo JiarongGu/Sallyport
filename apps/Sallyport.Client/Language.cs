@@ -33,6 +33,8 @@ internal static class L
     /// <summary>One or many: English says "1 attempt" and "3 attempts"; a language without plurals translates both.</summary>
     public static string Count(int n, string one, string many) => n == 1 ? T(one) : T(many, n.ToString("N0", Invariant));
 
+    public static string Count(long n, string one, string many) => n == 1 ? T(one) : T(many, n.ToString("N0", Invariant));
+
     /// <summary>Two sentences as one line: a space between them in English, none in Chinese, whose own full stop parts them.</summary>
     public static string Join(string first, string? second) =>
         second is null ? first : Current == Language.Chinese ? first + second : $"{first} {second}";

@@ -241,7 +241,8 @@ button.icon { width: 32px; padding: 0; }
 .glyph { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .action { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; max-width: 100%; vertical-align: top; }
 .action-reason { font: var(--font-caption); color: var(--secondary); max-width: 24rem; overflow-wrap: anywhere; white-space: normal; }
-.actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+/* buttons side by side, their tops level: a reason under one hangs below it without pushing the others down */
+.actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
 .spinner { width: 14px; height: 14px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -349,7 +350,7 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .profile-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; }
 .profile-status .summary { color: var(--secondary); min-width: 0; }
 .duration { font: var(--font-caption); color: var(--secondary); font-variant-numeric: tabular-nums; }
-.row-primary { flex: none; justify-content: flex-end; flex-wrap: nowrap; }
+.row-primary { flex: none; justify-content: flex-end; flex-wrap: nowrap; align-items: center; }
 .row-head > .disclosure.icon, .row-head > .open-page { flex: none; margin-left: -4px; }
 /* The chevron turned to point on: it opens a page, where a disclosure's points down to unfold. */
 .open-page .glyph { transform: rotate(-90deg); }
@@ -386,24 +387,46 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .location-unavailable { color: var(--secondary); }
 .driver .facts { margin: 16px 0 0; }
 
-/* the programs inside an app's details: lines, not boxes */
+/* "Add an app": the place first, then what it is, then its programs */
+.new-app { display: grid; gap: 16px; }
+.setup-step { display: grid; gap: 12px; }
+.setup-step > h2 { font: var(--font-body-large); }
+.path-field { display: flex; gap: 8px; align-items: center; }
+.path-field input { flex: 1; min-width: 0; }
+.found { display: flex; align-items: flex-start; gap: 8px; }
+.found .glyph { color: var(--up); margin-top: 3px; flex: none; }
+.setup-step .program-head { grid-template-columns: minmax(0, 1fr) 40px; }
+.setup-step .program-list-head { grid-template-columns: minmax(0, 1fr) 40px; }
+
 /* an app's page */
 .app-page > .card:first-child { margin-bottom: 28px; }
 .app-traffic { margin-top: 16px; display: grid; gap: 8px; }
 .app-page .card > .run:first-child { margin-top: 0; }
-.program-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
-.program-list li { padding: 10px 0; border-top: 1px solid var(--divider); }
-.programs { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--divider); display: grid; gap: 8px; }
-.programs ul { list-style: none; margin: 0; padding: 0; display: grid; }
-.programs li { padding: 10px 0; border-top: 1px solid var(--divider); }
-.programs li:first-child { border-top: 0; padding-top: 4px; }
-.program-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* a group's title with its own buttons on the same line, at the right */
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
+.group-head .actions { flex: none; gap: 4px; }
+/* a heading's buttons say why they are off in their tooltip: the line under the heading says it for them */
+.group-head .action-reason { display: none; }
+/* the programs: a line each — name and what it is doing, the switch, the chevron — in one grid, so every switch and
+   every chevron sits in the same column whatever the name's length */
+.program-card { padding: 4px 16px; }
+.program-list-head, .program-head { display: grid; grid-template-columns: minmax(0, 1fr) 40px 32px; align-items: center; column-gap: 12px; }
+.program-list-head { padding: 8px 0; font: var(--font-caption); color: var(--secondary); }
+/* over the switches, its right edge at theirs: wider than their column, it reaches left */
+.program-list-head > span:last-child { grid-column: 2; justify-self: end; white-space: nowrap; }
+.program-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.program-list li { border-top: 1px solid var(--divider); }
+.program-head { padding: 12px 0; }
+.program-head > .disclosure.icon { margin: 0; }
 .program-name { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
-.program-name > span:first-child { font: var(--font-body-strong); }
-.program-name > span:first-child .metadata { font-weight: 400; }
-.program-path { font: var(--font-caption); color: var(--secondary); overflow-wrap: anywhere; }
-.programs li.left-out .program-name > span:first-child { color: var(--secondary); font-weight: 400; }
-.programs .actions { flex: none; flex-wrap: nowrap; }
+.program-title { font: var(--font-body-strong); overflow-wrap: anywhere; }
+.program-title .metadata { font-weight: 400; }
+.left-out .program-title { color: var(--secondary); font-weight: 400; }
+.activity { display: inline-flex; align-items: center; gap: 6px; }
+.activity::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--dot); flex: none; }
+.program-details { padding: 0 0 16px; display: grid; gap: 12px; justify-items: start; }
+.program-details .facts { justify-self: stretch; }
+.program-path { overflow-wrap: anywhere; }
 .startup-settings { margin-top: 8px; }
 summary { min-height: 32px; padding: 6px 8px; border-radius: var(--radius-control); color: var(--secondary); cursor: default; }
 summary:hover { background: var(--hover); color: var(--text); }

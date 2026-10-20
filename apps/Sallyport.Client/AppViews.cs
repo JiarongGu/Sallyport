@@ -8,10 +8,14 @@ namespace Sallyport.Client;
 
 internal sealed record ProgramActions(UiAction Toggle, UiAction Edit, UiAction Launch);
 
+/// <summary>What a program is doing now, in a word or two, in a tone: "Running · through jp", "Not running".</summary>
+internal sealed record ActivityView(Tone Tone, string Text);
+
 /// <summary>One program of an app, as its row shows it: what it does (<see cref="StatusText"/>: its methods, or why it is
-/// left out), whether it is the one Launch starts, and the flags a proxy launch gives it.</summary>
+/// left out), whether it is the one Launch starts, the flags a proxy launch gives it, and — while its app's page is
+/// open — what it is doing now (<see cref="Activity"/>) with its details (<see cref="Facts"/>).</summary>
 internal sealed record ProgramView(string Id, string Name, string Path, bool Included, string StatusText, bool Missing, bool LaunchTarget,
-    IReadOnlyList<string> StartupSettings, ProgramActions Actions);
+    IReadOnlyList<string> StartupSettings, ProgramActions Actions, ActivityView? Activity = null, IReadOnlyList<Fact>? Facts = null);
 
 internal sealed record AppItemActions(UiAction Route, UiAction Stop, UiAction Launch, UiAction Edit, UiAction Rescan, UiAction AddProgram, UiAction Remove);
 
@@ -30,7 +34,7 @@ internal sealed record EditorOption(string Id, string Label, string? Help = null
 /// <summary>What the host knows of an app beyond the store, for <see cref="AppViews.Item"/>.</summary>
 internal sealed record ItemFacts(
     RoutedItem Item, StoredProfile? Profile, RunFacts? Run, bool AnotherRunning, bool DriverReady, bool Busy, AppPhase? Launching,
-    Func<RoutedProgram, IReadOnlyList<string>> StartupSettings);
+    Func<RoutedProgram, IReadOnlyList<string>> StartupSettings, Func<string, ProgramActivity?>? Activity = null);
 
 internal static class AppViews
 {
@@ -79,6 +83,10 @@ internal static class AppViews
         var runView = mine is null ? null : GameViews.Run(item.AsGame(), profile, mine);
         var target = LaunchTarget(item);
         var launching = f.Launching is not null;
+        // Sallyport starts a program only where it has to: one told of the proxy as it starts. A game or a program routed
+        // by its packets is started as the person always starts it (the owner: "we dont really need start the game").
+        var proxyOnly = packets.Count == 0 && proxied > 0;
+        var routedNow = live && mine?.Route is not null;
 
         var methodText = (packets.Count, proxied) switch
         {
@@ -113,16 +121,44 @@ internal static class AppViews
             (Tone.Off, L.T("Ready to launch"));
 
         var programs = item.Programs.Select(p => new ProgramView(p.Id, Path.GetFileName(p.Path), p.Path, p.Included, Methods(p), !File.Exists(p.Path),
-                target?.Id == p.Id, p.Included && p.Proxy is not null ? f.StartupSettings(p) : [],
+                proxyOnly && target?.Id == p.Id, p.Included && p.Proxy is not null ? f.StartupSettings(p) : [],
                 new ProgramActions(
                     Toggle: UiAction.Shown(p.Included ? L.T("Leave out") : L.T("Include"), !live && !launching, L.T("Stop routing before changing its programs.")),
                     // A program left out has no methods to choose until it is included again.
                     Edit: p.Included ? UiAction.Shown(L.T("Methods…"), !live && !launching, L.T("Stop routing before changing its methods.")) : UiAction.Hidden,
-                    // Its own Launch for a program started with proxy settings beside the app's (a browser in a game's app);
-                    // a folder's helpers are started by the game, not by the person.
-                    Launch: p.Included && p.Proxy is not null && p.Id != target?.Id
-                        ? UiAction.Shown(L.T("Launch"), cannotLaunchFor(p) is null && !launching, cannotLaunchFor(p)) : UiAction.Hidden)))
+                    // Its own Launch for a program started with proxy settings (a browser in a game's app), but the one the
+                    // app's own Launch starts; a folder's helpers are started by the game, not by the person.
+                    Launch: p.Included && p.Proxy is not null && !(proxyOnly && p.Id == target?.Id)
+                        ? UiAction.Shown(L.T("Launch"), cannotLaunchFor(p) is null && !launching, cannotLaunchFor(p)) : UiAction.Hidden),
+                Activity(p), ProgramFacts(p)))
             .ToList();
+
+        // Where its traffic goes now, and whether it is running, while its app's page is open; never a guess.
+        ActivityView? Activity(RoutedProgram p)
+        {
+            var way = !p.Included ? L.T("your own connection")
+                : p.Packets && routedNow && profile is not null ? L.T("through {0}", profile.Name)
+                : p.Packets ? L.T("through the VPN once routing is on")
+                : L.T("through the VPN when launched from here");
+            if (f.Activity?.Invoke(p.Path) is not { } seen) return null;
+            if (seen.Processes == 0) return new(Tone.Off, L.T("Not running"));
+            var running = seen.Processes == 1 ? L.T("Running") : L.T("Running · {0} processes", seen.Processes);
+            return new(p.Included && p.Packets && routedNow ? Tone.Up : Tone.Info, L.T("{0} · {1}", running, way));
+        }
+
+        IReadOnlyList<Fact> ProgramFacts(RoutedProgram p)
+        {
+            var facts = new List<Fact> { new(L.T("How"), Methods(p)) };
+            if (f.Activity?.Invoke(p.Path) is { Processes: > 0 } seen)
+                facts.Add(new(L.T("Connections now"), L.T("{0} TCP · {1} UDP", seen.Tcp, seen.Udp)));
+            // The router's own count, by the executable it found each process running: what went through the VPN.
+            if (mine?.Route?.Programs?.FirstOrDefault(r => string.Equals(r.Path, p.Path, StringComparison.OrdinalIgnoreCase)) is { } routed)
+                facts.Add(new(L.T("Through the VPN"), L.T("{0} · {1}", L.Count(routed.Flows, "1 connection", "{0} connections"),
+                    L.Count(routed.Packets, "1 packet sent", "{0} packets sent"))));
+            else if (p.Included && p.Packets && routedNow)
+                facts.Add(new(L.T("Through the VPN"), L.T("Nothing yet")));
+            return facts;
+        }
 
         string? cannotLaunchFor(RoutedProgram p) =>
             !File.Exists(p.Path) ? L.T("{0} is not where it was added from.", Path.GetFileName(p.Path)) :
@@ -131,16 +167,16 @@ internal static class AppViews
 
         var included = item.Programs.Count(p => p.Included);
         var programsText = item.Folder is null && item.Programs.Count == 1 ? "" :
-            L.T(live ? "{0} included of {1}; changes wait until routing stops." : "{0} included of {1}.",
+            L.T(live ? "Through the VPN: {0} of {1}. To change them, stop routing first." : "Through the VPN: {0} of {1}.",
                 L.Count(included, "1 program", "{0} programs"), item.Programs.Count);
         return new AppItemView(item.Id, item.Name, item.Folder, profile is null ? L.T("No VPN profile chosen") : L.T("Through {0}", profile.Name), methodText,
             item.RoutesPackets ? GameViews.LossText(item.Choice) : null, tone, status,
-            target is null ? null : L.T("Launch starts {0}", Path.GetFileName(target.Path)), runView, programsText, programs,
+            proxyOnly && target is not null ? L.T("Launch starts {0}", Path.GetFileName(target.Path)) : null, runView, programsText, programs,
             new AppItemActions(
                 Route: !item.RoutesPackets || live ? UiAction.Hidden
                     : UiAction.Shown(mine is { Ended: not null } ? L.T("Route again") : L.T("Route"), cannotRoute is null && !f.Busy && !launching, cannotRoute),
                 Stop: live ? UiAction.Shown(L.T("Stop routing")) : UiAction.Hidden,
-                Launch: UiAction.Shown(L.T("Launch"), cannotLaunch is null && !f.Busy, cannotLaunch, busy: launching),
+                Launch: proxyOnly ? UiAction.Shown(L.T("Launch"), cannotLaunch is null && !f.Busy, cannotLaunch, busy: launching) : UiAction.Hidden,
                 Edit: UiAction.Shown(L.T("Edit"), !live && !launching, L.T("Stop routing before changing it.")),
                 Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown(L.T("Scan folder again"), !live && !launching, L.T("Stop routing before scanning again.")),
                 AddProgram: UiAction.Shown(L.T("Add a program…"), !live && !launching && !f.Busy,
@@ -153,12 +189,12 @@ internal static class AppViews
                 new(L.T("Routes"), methodText),
                 .. item.RoutesPackets ? [new Fact(L.T("If the VPN drops"), GameViews.LossShort(item.Choice))] : Array.Empty<Fact>(),
                 .. item.Folder is { } folder ? [new Fact(L.T("Folder"), folder)] : Array.Empty<Fact>(),
-                .. target is not null ? [new Fact(L.T("Launch starts"), Path.GetFileName(target.Path))] : Array.Empty<Fact>(),
+                .. proxyOnly && target is not null ? [new Fact(L.T("Launch starts"), Path.GetFileName(target.Path))] : Array.Empty<Fact>(),
             ]);
     }
 
     public static EmptyView? Empty(int profiles, int apps) =>
         apps > 0 ? null :
         profiles == 0 ? new(L.T("No apps yet"), L.T("Import a VPN profile first, then add the programs or the game folder to route through it."), "IMPORT") :
-        new(L.T("No apps yet"), L.T("Add a game or a program by choosing its program. A game's whole folder goes through your VPN by the packet driver; a browser by proxy settings when Sallyport launches it."), "ADD_APP");
+        new(L.T("No apps yet"), L.T("Add a game or a program: choose its folder or its .exe, see what is in it, then turn it on. Only what you add goes through your VPN."), "ADD_APP");
 }

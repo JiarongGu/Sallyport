@@ -98,6 +98,20 @@ public sealed class AttributionTests
     }
 
     [Fact]
+    public void Each_process_counts_its_connections_and_UDP_sockets_but_not_a_listener_or_a_shared_port()
+    {
+        var counts = OwnerTable.CountByProcess(
+            [(true, 4242), (true, 4242), (false, 4242), (true, 0)],
+            [(true, 4242)],
+            [4242, 77, -1]);
+
+        Assert.Equal(new ProcessSockets(3, 1), counts[4242]);
+        Assert.Equal(new ProcessSockets(0, 1), counts[77]);
+        // A TIME_WAIT row (PID 0) and a port two processes share (-1) are no one's.
+        Assert.Equal(2, counts.Count);
+    }
+
+    [Fact]
     public void A_UDP_port_two_processes_share_is_marked_shared()
     {
         var index = new Dictionary<(uint, ushort), int>();

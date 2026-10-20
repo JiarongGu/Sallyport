@@ -85,18 +85,22 @@ public class TrayMenuTests
     }
 
     [Fact]
-    public void Apps_not_routed_are_offered_to_launch_or_route_with_the_windows_reasons()
+    public void Apps_not_routed_are_offered_to_route_or_a_browser_to_launch_with_the_windows_reasons()
     {
-        var menu = TrayMenu.Build([Profile(null)], [Item(Zenless)], "");
+        var browser = new RoutedItem("a1b2c3d4e5f6", "Edge", null, At, Jp.Id, LossMode.Hold, null,
+            [new("000000000009", @"C:\Nowhere\msedge.exe", true, null, true, false, new ProxyLaunch(AppKind.Chromium, "", "a1b2c3d4e5f6"))]);
+        var menu = TrayMenu.Build([Profile(null)], [Item(Zenless), Item(browser)], "");
 
         var apps = Assert.Single(menu, e => e is { Kind: TrayEntryKind.Submenu, Text: "Apps" });
-        var zenless = Assert.Single(apps.Items!);
+        var zenless = apps.Items![0];
         Assert.Equal("Zenless  ·  Through jp", zenless.Text);
         Assert.True(Assert.Single(zenless.Items!, e => e.Verb == TrayVerb.Route) is { Text: "Route", Enabled: true, Target: "0123456789abcdef" });
-        // Its program is not on this machine: the window disables Launch and says why, and so does the tray.
-        var launch = Assert.Single(zenless.Items!, e => e.Verb == TrayVerb.Launch);
+        // A game is started as the person always starts it: no Launch for it here either.
+        Assert.DoesNotContain(zenless.Items!, e => e.Verb == TrayVerb.Launch);
+        // A browser is launched with its proxy settings; its program is not on this machine, so Launch is off and says why.
+        var launch = Assert.Single(apps.Items![1].Items!, e => e.Verb == TrayVerb.Launch);
         Assert.False(launch.Enabled);
-        Assert.Equal("Zenless.exe is not where it was added from.", launch.Tip);
+        Assert.Equal("msedge.exe is not where it was added from.", launch.Tip);
     }
 
     [Fact]

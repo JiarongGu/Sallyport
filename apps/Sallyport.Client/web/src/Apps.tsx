@@ -4,7 +4,7 @@ import type { AppItemView, ClientState, ProgramView } from './contract';
 import { post } from './commands';
 import { duration } from './format';
 import { RunDetails } from './Run';
-import { ActionButton, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
+import { ActionButton, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { Traffic } from './Network';
 
 /** Everything the person routes, one card per app — a program or a folder. Each opens a page of its own. */
@@ -55,9 +55,11 @@ function AppCard({ app, now, open }: { app: AppItemView; now: number; open: () =
   </article>;
 }
 
-/** One app's page: what it is doing now, how it is set up, and its programs — the setup and monitoring a card has no
- *  room for. Its editors open here, beside what they change. */
-export function AppPage({ app, state, now, editorForm }: { app: AppItemView; state: ClientState; now: number; editorForm: ReactNode }) {
+/** One app's page: what it is doing now, how it is set up, and each of its programs with what that program is doing —
+ *  the setup and monitoring a card has no room for. Its editors open here, beside what they change. */
+export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
+  app: AppItemView; state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
+}) {
   const monitorId = useId();
   const setupId = useId();
   const programsId = useId();
@@ -81,29 +83,33 @@ export function AppPage({ app, state, now, editorForm }: { app: AppItemView; sta
       </div>
     </section>
 
-    <section className="settings-group" aria-labelledby={setupId}>
-      <h2 id={setupId}>{t('Setup')}</h2>
-      <div className="card">
-        <div className="row-head">
-          <Facts facts={app.setup} />
-          <ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} />
+    <section className="settings-group" aria-labelledby={programsId}>
+      <div className="group-head">
+        <h2 id={programsId}>{t('Programs')}</h2>
+        <div className="actions">
+          <ActionButton action={app.actions.addProgram} subtle glyph="plus" onClick={() => post('ADD_APP_PROGRAM', { id: app.id })} />
+          <ActionButton action={app.actions.rescan} subtle glyph="refresh" onClick={() => post('RESCAN_APP', { id: app.id })} />
         </div>
-        {appEditor}
+      </div>
+      {app.programsText && <p className="secondary">{app.programsText}</p>}
+      <div className="card program-card">
+        <div className="program-list-head" aria-hidden="true"><span>{t('Program')}</span><span>{t('Through the VPN')}</span></div>
+        <ul className="program-list">
+          {app.programs.map((program) => <ProgramRow key={program.id} app={app} program={program}
+            expanded={expanded.has(`program:${program.id}`) || programEditing === program.id} toggle={() => toggle(`program:${program.id}`)}
+            editorForm={programEditing === program.id ? editorForm : null} />)}
+        </ul>
       </div>
     </section>
 
-    <section className="settings-group" aria-labelledby={programsId}>
-      <h2 id={programsId}>{t('Programs')}</h2>
-      {app.programsText && <p className="secondary">{app.programsText}</p>}
+    <section className="settings-group" aria-labelledby={setupId}>
+      <div className="group-head">
+        <h2 id={setupId}>{t('Setup')}</h2>
+        <div className="actions"><ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} /></div>
+      </div>
       <div className="card">
-        <div className="actions">
-          <ActionButton action={app.actions.addProgram} onClick={() => post('ADD_APP_PROGRAM', { id: app.id })} />
-          <ActionButton action={app.actions.rescan} onClick={() => post('RESCAN_APP', { id: app.id })} />
-        </div>
-        <ul className="program-list">
-          {app.programs.map((program) => <ProgramRow key={program.id} app={app} program={program}
-            editorForm={programEditing === program.id ? editorForm : null} />)}
-        </ul>
+        <Facts facts={app.setup} />
+        {appEditor}
       </div>
     </section>
 
@@ -113,25 +119,37 @@ export function AppPage({ app, state, now, editorForm }: { app: AppItemView; sta
   </section>;
 }
 
-function ProgramRow({ app, program, editorForm }: { app: AppItemView; program: ProgramView; editorForm: ReactNode }) {
+/** One program of an app: its name, what it is doing now, whether it goes through the VPN (the switch), and folded
+ *  under it, its details and what can be changed. */
+function ProgramRow({ app, program, expanded, toggle, editorForm }: {
+  app: AppItemView; program: ProgramView; expanded: boolean; toggle: () => void; editorForm: ReactNode;
+}) {
   const settingsId = useId();
+  const detailsId = useId();
   return <li className={program.included ? 'included' : 'left-out'}>
-    <div className="program-line">
+    <div className="program-head">
       <div className="program-name">
-        <span>{program.name}{program.launchTarget && <span className="metadata secondary">{t(' · Launch starts this')}</span>}</span>
-        <span className={`metadata ${program.missing ? 'tone-trouble' : 'secondary'}`}>{program.missing ? t('Not found where it was added from') : program.statusText}</span>
-        <span className="metadata secondary program-path">{program.path}</span>
+        <span className="program-title">{program.name}{program.launchTarget && <span className="metadata secondary">{t(' · Launch starts this')}</span>}</span>
+        {program.missing ? <span className="metadata tone-trouble">{t('Not found where it was added from')}</span>
+          : program.activity ? <span className={`metadata activity tone-${program.activity.tone}`}>{program.activity.text}</span>
+          : <span className="metadata secondary">{program.statusText}</span>}
       </div>
-      <div className="actions">
-        <ActionButton action={program.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id, programId: program.id })} />
-        <ActionButton action={program.actions.edit} subtle focusKey={`program:${program.id}`} onClick={() => post('BEGIN_PROGRAM_EDIT', { id: app.id, programId: program.id })} />
-        <ActionButton action={program.actions.toggle} subtle onClick={() => post('SET_APP_PROGRAM', { id: app.id, programId: program.id, included: !program.included })} />
-      </div>
+      <Switch on={program.included} action={program.actions.toggle}
+        onFlip={() => post('SET_APP_PROGRAM', { id: app.id, programId: program.id, included: !program.included })} />
+      <Disclosure open={expanded} controls={detailsId} onClick={toggle} icon />
     </div>
-    {program.startupSettings.length > 0 && <details className="startup-settings">
-      <summary aria-controls={settingsId}>{t('Startup settings')}</summary>
-      <pre id={settingsId}>{program.startupSettings.join('\n')}</pre>
-    </details>}
-    {editorForm}
+    <div id={detailsId} hidden={!expanded} className="program-details">
+      {program.facts && <Facts facts={program.facts} />}
+      <p className="metadata secondary program-path">{program.path}</p>
+      {(program.actions.edit.visible || program.actions.launch.visible) && <div className="actions">
+        <ActionButton action={program.actions.edit} focusKey={`program:${program.id}`} onClick={() => post('BEGIN_PROGRAM_EDIT', { id: app.id, programId: program.id })} />
+        <ActionButton action={program.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id, programId: program.id })} />
+      </div>}
+      {program.startupSettings.length > 0 && <details className="startup-settings">
+        <summary aria-controls={settingsId}>{t('Startup settings')}</summary>
+        <pre id={settingsId}>{program.startupSettings.join('\n')}</pre>
+      </details>}
+      {editorForm}
+    </div>
   </li>;
 }

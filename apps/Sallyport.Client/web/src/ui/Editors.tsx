@@ -1,15 +1,16 @@
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, PolicyValues, ProgramEditValues } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, NewAppValues, PolicyValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
-import { ActionButton, Disclosure } from './shared';
+import { ActionButton, Disclosure, Icon } from './shared';
 import { paintCaptionButtons } from './Chrome';
 
 export type Draft =
   | { token: string; kind: 'app'; values: AppEditValues }
   | { token: string; kind: 'program'; values: ProgramEditValues }
   | { token: string; kind: 'defaults'; values: DefaultsValues }
-  | { token: string; kind: 'policy'; values: PolicyValues };
+  | { token: string; kind: 'policy'; values: PolicyValues }
+  | { token: string; kind: 'new-app'; values: NewAppValues };
 
 export function seedDraft(editor: Editor): Draft {
   switch (editor.kind) {
@@ -17,6 +18,7 @@ export function seedDraft(editor: Editor): Draft {
     case 'program': return { token: editor.token, kind: 'program', values: { ...editor.values } };
     case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
     case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
+    case 'new-app': return { token: editor.token, kind: 'new-app', values: { ...editor.values, included: [...editor.values.included] } };
   }
 }
 
@@ -241,6 +243,118 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
       <ActionButton action={editor.save} primary type="submit" />
       <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
       <ActionButton action={editor.reset} onClick={() => post('RESET_POLICY', { token: editor.token })} />
+    </div>
+  </form>;
+}
+
+/** "Add an app", a page of its own: first where it is — typed, pasted or browsed to, a folder or a program — and what
+ *  was found there; then its name, VPN profile and what its traffic does when the VPN drops; then, for a folder, which
+ *  of its programs go through the VPN. Nothing is kept until Add app. */
+export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoices }: {
+  editor: Editor;
+  draft: Draft;
+  onChange: (draft: Draft) => void;
+  profileChoices: ClientState['profileChoices'];
+  lossChoices: ClientState['lossChoices'];
+}) {
+  const form = useRef<HTMLFormElement>(null);
+  const prefix = useId();
+  useEditorFocus(form);
+  if (draft.kind !== 'new-app' || editor.kind !== 'new-app') return null;
+  const values = draft.values;
+  const found = editor.save.enabled && !editor.errors.path;
+  const update = (next: Partial<NewAppValues>) => onChange({ ...draft, values: { ...values, ...next } });
+  // The host looks only when the place changed: leaving the field, Enter, or Browse.
+  const locate = () => { if (values.path.trim() !== editor.values.path) post('NEW_APP_LOCATION', { token: editor.token, values }); };
+  const error = (field: EditorField) => editor.errors[field]
+    ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p> : null;
+  const included = new Set(values.included);
+
+  return <form ref={form} className="new-app" tabIndex={-1} aria-label={t('Add an app')} noValidate onSubmit={(event) => {
+    event.preventDefault();
+    if (editor.save.enabled) post('SAVE_NEW_APP', { token: editor.token, values });
+  }}>
+    <section className="card setup-step" aria-labelledby={`${prefix}-where`}>
+      <h2 id={`${prefix}-where`}>{t('Where is it?')}</h2>
+      <p className="secondary">{t('A game’s folder, or a program (.exe). With a game’s folder, everything in it goes through your VPN together.')}</p>
+      <div className="path-field">
+        <input id={`${prefix}-path`} type="text" autoComplete="off" spellCheck={false} value={values.path} aria-label={t('Where is it?')}
+          placeholder={t('For example D:\\Games\\MyGame')} aria-invalid={!!editor.errors.path}
+          aria-describedby={editor.errors.path ? `${prefix}-path-error` : undefined}
+          onChange={(event) => update({ path: event.target.value })} onBlur={locate}
+          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); locate(); } }} />
+        {/* Pressed without taking the focus: leaving the field would look at the place typed and renew the form under it. */}
+        <button type="button" onMouseDown={(event) => event.preventDefault()}
+          onClick={() => post('NEW_APP_BROWSE', { token: editor.token, values })}>{t('Browse…')}</button>
+      </div>
+      {error('path')}
+      {found && editor.hint && <p className="found"><Icon name="check" /><span>{editor.hint}</span></p>}
+    </section>
+
+    {found && <section className="card setup-step" aria-labelledby={`${prefix}-about`}>
+      <h2 id={`${prefix}-about`}>{t('About it')}</h2>
+      <div className="editor-fields">
+        <div className="field">
+          <label htmlFor={`${prefix}-name`}>{t('Name')}</label>
+          <input id={`${prefix}-name`} type="text" autoComplete="off" value={values.name} aria-invalid={!!editor.errors.name}
+            onChange={(event) => update({ name: event.target.value })} />
+          {error('name')}
+        </div>
+        <div className="field">
+          <label htmlFor={`${prefix}-profile`}>{t('VPN profile')}</label>
+          <select id={`${prefix}-profile`} value={values.profileId ?? ''} aria-invalid={!!editor.errors.profileId}
+            onChange={(event) => update({ profileId: event.target.value || null })}>
+            <option value="">{t('Choose later')}</option>
+            {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
+          </select>
+          {error('profileId')}
+        </div>
+        <fieldset className="field full-field">
+          <legend>{t('When the VPN drops')}</legend>
+          {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
+            <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={values.loss === choice.value}
+              onChange={() => update({ loss: choice.value })} />
+            <span><span>{choice.label}</span><span className="secondary metadata">{choice.help}</span></span>
+          </label>)}
+          {error('loss')}
+        </fieldset>
+        {values.loss === 'hold' && <div className="field">
+          <label htmlFor={`${prefix}-after`}>{t('Use my own connection after')}</label>
+          <div className="unit-field">
+            <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false} placeholder={t('never')}
+              value={values.directAfterText} aria-invalid={!!editor.errors.directAfterText}
+              onChange={(event) => update({ directAfterText: event.target.value })} />
+            <span className="secondary">{t('seconds')}</span>
+          </div>
+          {error('directAfterText')}
+        </div>}
+      </div>
+    </section>}
+
+    {found && editor.options && <section className="card setup-step" aria-labelledby={`${prefix}-programs`}>
+      <h2 id={`${prefix}-programs`}>{t('Its programs')}</h2>
+      <p className="secondary">{t('On: its traffic goes through your VPN while the app is routed. Off: it keeps your own connection.')}</p>
+      <div className="program-list-head" aria-hidden="true"><span>{t('Program')}</span><span>{t('Through the VPN')}</span></div>
+      <ul className="program-list">
+        {editor.options.map((option) => <li key={option.id} className={included.has(option.id) ? 'included' : 'left-out'}>
+          <div className="program-head setup-program">
+            <div className="program-name">
+              <span className="program-title">{option.label}</span>
+              {option.help && <span className="metadata secondary">{option.help}</span>}
+            </div>
+            <button type="button" role="switch" aria-checked={included.has(option.id)} className="switch" aria-label={option.label}
+              onClick={() => update({ included: included.has(option.id) ? values.included.filter((path) => path !== option.id) : [...values.included, option.id] })}>
+              <span className="knob" aria-hidden="true" />
+            </button>
+          </div>
+        </li>)}
+      </ul>
+    </section>}
+
+    {error('form')}
+    <div className="actions">
+      <ActionButton action={editor.save} primary type="submit" />
+      <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
     </div>
   </form>;
 }
