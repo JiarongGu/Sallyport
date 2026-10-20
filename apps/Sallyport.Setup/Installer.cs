@@ -5,6 +5,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Win32;
+using Sallyport.Setup;
 using Sallyport.Windows;
 using Sallyport.Windows.PacketFilter;
 using Sallyport.Windows.Service;
@@ -87,23 +88,23 @@ sealed class Installer
     /// one that holds anything else.</summary>
     public static string? Unfit(string folder)
     {
-        if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder)) return "Type a full folder path, such as D:\\Program Files\\Sallyport.";
+        if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder)) return L.T("Type a full folder path, such as D:\\Program Files\\Sallyport.");
         string full;
         try { full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)); }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return "That is not a folder path Windows accepts."; }
-        if (full.StartsWith(@"\\", StringComparison.Ordinal)) return "Choose a folder on this computer, not on a network share.";
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return L.T("That is not a folder path Windows accepts."); }
+        if (full.StartsWith(@"\\", StringComparison.Ordinal)) return L.T("Choose a folder on this computer, not on a network share.");
         var root = Path.GetPathRoot(full)!;
-        if (Path.TrimEndingDirectorySeparator(root).Equals(full, StringComparison.OrdinalIgnoreCase)) return "Choose a folder, not a whole drive.";
+        if (Path.TrimEndingDirectorySeparator(root).Equals(full, StringComparison.OrdinalIgnoreCase)) return L.T("Choose a folder, not a whole drive.");
         var drive = new DriveInfo(root);
-        if (!drive.IsReady) return $"Drive {root} is not ready.";
-        if (drive.DriveType != DriveType.Fixed) return $"Choose a folder on one of this computer's own drives; {root} is {drive.DriveType.ToString().ToLowerInvariant()}.";
+        if (!drive.IsReady) return L.T("Drive {0} is not ready.", root);
+        if (drive.DriveType != DriveType.Fixed) return L.T("Choose a folder on one of this computer's own drives; {0} is {1}.", root, drive.DriveType.ToString().ToLowerInvariant());
         if (drive.DriveFormat is not ("NTFS" or "ReFS"))
-            return $"Choose a folder on an NTFS drive: {root} is {drive.DriveFormat}, which cannot keep a folder for administrators only.";
+            return L.T("Choose a folder on an NTFS drive: {0} is {1}, which cannot keep a folder for administrators only.", root, drive.DriveFormat);
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-        if (full.StartsWith(windows, StringComparison.OrdinalIgnoreCase)) return "Choose a folder outside Windows' own.";
-        if (File.Exists(full)) return "That is a file, not a folder.";
+        if (full.StartsWith(windows, StringComparison.OrdinalIgnoreCase)) return L.T("Choose a folder outside Windows' own.");
+        if (File.Exists(full)) return L.T("That is a file, not a folder.");
         if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any() && !IsSallyport(full) && !HoldsKeptData(full))
-            return "That folder already holds other files. Choose an empty folder or a new one.";
+            return L.T("That folder already holds other files. Choose an empty folder or a new one.");
         return null;
     }
 
@@ -155,14 +156,14 @@ sealed class Installer
     public static string? Missing()
     {
         if (!Environment.Is64BitOperatingSystem || System.Runtime.InteropServices.RuntimeInformation.OSArchitecture != System.Runtime.InteropServices.Architecture.X64)
-            return "Sallyport needs 64-bit Windows on an x64 processor.";
-        if (Environment.OSVersion.Version.Build < 17763) return "Sallyport needs Windows 10 version 1809 or later.";
+            return L.T("Sallyport needs 64-bit Windows on an x64 processor.");
+        if (Environment.OSVersion.Version.Build < 17763) return L.T("Sallyport needs Windows 10 version 1809 or later.");
         // The Evergreen WebView2 runtime registers its version under EdgeUpdate's client key, machine-wide or per user.
         const string WebView2 = @"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
         var version = Registry.LocalMachine.OpenSubKey(WebView2)?.GetValue("pv") as string
             ?? Registry.CurrentUser.OpenSubKey(WebView2.Replace(@"WOW6432Node\", ""))?.GetValue("pv") as string;
         if (string.IsNullOrEmpty(version) || version == "0.0.0.0")
-            return $"Sallyport's window needs Microsoft's WebView2 Runtime, which this computer does not have. Install it from {WebView2Download}, then run this setup again.";
+            return L.T("Sallyport's window needs Microsoft's WebView2 Runtime, which this computer does not have. Install it from {0}, then run this setup again.", WebView2Download);
         return null;
     }
 
@@ -170,14 +171,14 @@ sealed class Installer
 
     public async Task<IReadOnlyList<string>> InstallAsync(Stream payload, string version, SetupChoices choices, CancellationToken ct)
     {
-        say("Closing Sallyport…", 0.01);
+        say(L.T("Closing Sallyport…"), 0.01);
         CloseClients();
-        say("Stopping the Sallyport service…", 0.04);
+        say(L.T("Stopping the Sallyport service…"), 0.04);
         try { ServiceControl.Stop(RouterProtocol.ServiceName, TimeSpan.FromSeconds(20)); }
         catch (Win32Exception) { }
 
         if (Unfit(_folder) is { } why) throw new SetupFailed(why);
-        say("Copying files…", 0.08);
+        say(L.T("Copying files…"), 0.08);
         var staged = _folder + ".new";
         var previous = _folder + ".old";
         // The folder it goes in is not setup's to protect: only Sallyport's own is.
@@ -206,12 +207,12 @@ sealed class Installer
         if (hadPrevious && Directory.Exists(Path.Combine(previous, "data")) && !Directory.Exists(Data))
             Directory.Move(Path.Combine(previous, "data"), Data);
         try { if (hadPrevious) Directory.Delete(previous, recursive: true); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave($"The old version's files could not all be removed from {previous}."); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("The old version's files could not all be removed from {0}.", previous)); }
 
         Directory.CreateDirectory(Data);
         ProtectUsers();
 
-        say("Registering the Sallyport service…", 0.72);
+        say(L.T("Registering the Sallyport service…"), 0.72);
         ServiceControl.Install(RouterProtocol.ServiceName, "Sallyport game routing",
             "Routes the programs you run in Sallyport through your VPN. Idle until you run one.", Path.Combine(_folder, "Sallyport.Service.exe"));
         ServiceControl.Start(RouterProtocol.ServiceName);
@@ -224,29 +225,29 @@ sealed class Installer
             if (driver.Status().Service is ServiceState.NotInstalled or ServiceState.Unknown)
                 try
                 {
-                    say("Fetching the packet driver from NT Kernel…", 0.76);
+                    say(L.T("Fetching the packet driver from NT Kernel…"), 0.76);
                     using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
                     await driver.FetchAsync(http, ct);
-                    say("Installing the packet driver (the network pauses for a few seconds)…", 0.84);
+                    say(L.T("Installing the packet driver (the network pauses for a few seconds)…"), 0.84);
                     // Its own files beside Sallyport's folder, not in the system drive's Program Files (D19), in a folder
                     // given Sallyport's rights first: off the system drive it would inherit rights that let users change them.
                     Protect(InstallLayout.DriverFolder(_folder));
                     var outcome = await driver.InstallAsync(InstallLayout.DriverFolder(_folder), ct);
                     if (outcome.Succeeded) installedDriver = true;
-                    else leave($"The packet driver was not installed: {outcome.Text}. Install it later from Sallyport's Settings.");
+                    else leave(L.T("The packet driver was not installed: {0}. Install it later from Sallyport's Settings.", outcome.Text));
                 }
                 catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidDataException or IOException)
                 {
-                    leave($"The packet driver could not be fetched from NT Kernel ({e.GetType().Name}). Install it later from Sallyport's Settings.");
+                    leave(L.T("The packet driver could not be fetched from NT Kernel ({0}). Install it later from Sallyport's Settings.", e.GetType().Name));
                 }
         }
         WriteRecord(new SetupRecord(version, installedDriver, DateTimeOffset.Now));
 
-        say("Adding Sallyport to the Start menu…", 0.95);
-        ShellLink.Create(Shortcut, Client, "", "Route your games and apps through your VPN");
+        say(L.T("Adding Sallyport to the Start menu…"), 0.95);
+        ShellLink.Create(Shortcut, Client, "", L.T("Route your games and apps through your VPN"));
         RegisterOpenWith();
         RegisterUninstall(version);
-        say("Done.", 1);
+        say(L.T("Done."), 1);
         KeepLog();
         return _left;
     }
@@ -267,38 +268,38 @@ sealed class Installer
 
     public async Task<IReadOnlyList<string>> UninstallAsync(SetupChoices choices, CancellationToken ct)
     {
-        say("Closing Sallyport…", 0.02);
+        say(L.T("Closing Sallyport…"), 0.02);
         CloseClients();
-        say("Removing the Sallyport service…", 0.10);
+        say(L.T("Removing the Sallyport service…"), 0.10);
         // Removing it stops it, and its routing with it: the adapter is given back before the service goes.
         try { ServiceControl.Uninstall(RouterProtocol.ServiceName, TimeSpan.FromSeconds(30)); }
-        catch (Win32Exception e) { leave($"The Sallyport service was not removed (Windows error {e.NativeErrorCode})."); }
+        catch (Win32Exception e) { leave(L.T("The Sallyport service was not removed (Windows error {0}).", e.NativeErrorCode)); }
 
         if (RemovesDriver)
         {
             var driver = new PacketFilterSetup(Path.Combine(Data, "drivers"));
-            say("Removing the packet driver Sallyport installed (the network pauses for a few seconds)…", 0.30);
+            say(L.T("Removing the packet driver Sallyport installed (the network pauses for a few seconds)…"), 0.30);
             try
             {
                 using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
                 await driver.FetchAsync(http, ct);
                 var outcome = await driver.UninstallAsync(ct);
-                if (!outcome.Succeeded) leave($"The packet driver was not removed: {outcome.Text}.");
+                if (!outcome.Succeeded) leave(L.T("The packet driver was not removed: {0}.", outcome.Text));
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidDataException or IOException)
             {
-                leave($"The packet driver was not removed: its installer could not be fetched ({e.GetType().Name}). Remove \"Windows Packet Filter\" from Windows' installed apps.");
+                leave(L.T("The packet driver was not removed: its installer could not be fetched ({0}). Remove \"Windows Packet Filter\" from Windows' installed apps.", e.GetType().Name));
             }
         }
 
-        say("Removing Sallyport from the Start menu and from Windows' lists…", 0.70);
+        say(L.T("Removing Sallyport from the Start menu and from Windows' lists…"), 0.70);
         try { File.Delete(Shortcut); } catch (IOException) { }
         Registry.LocalMachine.DeleteSubKeyTree(UninstallKey, throwOnMissingSubKey: false);
         Registry.LocalMachine.DeleteSubKeyTree($@"Software\Classes\{ProgId}", throwOnMissingSubKey: false);
         Registry.LocalMachine.OpenSubKey(@"Software\Classes\.ovpn\OpenWithProgids", writable: true)?.DeleteValue(ProgId, throwOnMissingValue: false);
         Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)?.DeleteValue(Name, throwOnMissingValue: false);
 
-        say("Removing files…", 0.80);
+        say(L.T("Removing files…"), 0.80);
         // Only a folder that is still Sallyport's: whatever else someone put there since is not setup's to take. Its
         // users' profiles and settings stay unless the person said otherwise, where installing again finds them.
         var keep = choices.RemoveData ? null : Users;
@@ -310,11 +311,11 @@ sealed class Installer
         }
         if (choices.RemoveData)
         {
-            say("Removing the VPN profiles and settings…", 0.92);
+            say(L.T("Removing the VPN profiles and settings…"), 0.92);
             // An earlier client kept them in the person's own %LOCALAPPDATA%.
             DeleteFolder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Name));
         }
-        say("Done.", 1);
+        say(L.T("Done."), 1);
         return _left;
     }
 
@@ -474,7 +475,7 @@ sealed class Installer
                 if (Directory.Exists(entry)) Directory.Delete(entry, recursive: true);
                 else File.Delete(entry);
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave($"{entry} could not be removed ({e.GetType().Name})."); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("{0} could not be removed ({1}).", entry, e.GetType().Name)); }
     }
 
     private static void RemoveAfterExit(string folder, string? keep)
@@ -497,7 +498,7 @@ sealed class Installer
     {
         if (!Directory.Exists(folder)) return;
         try { Directory.Delete(folder, recursive: true); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave($"{folder} could not all be removed ({e.GetType().Name})."); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("{0} could not all be removed ({1}).", folder, e.GetType().Name)); }
     }
 }
 

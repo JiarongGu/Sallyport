@@ -127,7 +127,7 @@ internal sealed class Connections : IDisposable
         try
         {
             if (channel.Session.Dispatcher is not { } dispatcher)
-                throw new ShenoraException("NOT_CONNECTED", "id", id, "the profile is not up");
+                throw new ShenoraException("NOT_CONNECTED", "id", id, L.T("the profile is not up"));
             var target = IPAddress.Parse(LatencyTarget);
             var direct = await SampleAsync(async () =>
             {
@@ -203,16 +203,16 @@ internal sealed class Connections : IDisposable
             {
                 existing.Wanted = true;
                 if (existing.Proxy is null && existing.Session.Network is not null) Bind(existing);
-                if (existing.ProxyProblem is { } problem) throw new ShenoraException("PORT_IN_USE", "port", existing.Port.ToString(), $"the proxy could not listen: {problem}");
+                if (existing.ProxyProblem is { } problem) throw new ShenoraException("PORT_IN_USE", "port", existing.Port.ToString(), L.T("the proxy could not listen: {0}", problem));
             }
             else
             {
                 var port = _settings.PortOf(id);
                 if (_channels.Values.Any(c => c.Port == port))
-                    throw new ShenoraException("PORT_TAKEN", "port", port.ToString(), $"another connected profile uses port {port}");
+                    throw new ShenoraException("PORT_TAKEN", "port", port.ToString(), L.T("another connected profile uses port {0}", port));
                 // The proxy binds only once the tunnel is up; a port already taken is said now, not after the handshake.
                 if (!ClientSettings.IsFree(port))
-                    throw new ShenoraException("PORT_IN_USE", "port", port.ToString(), $"something else already listens on 127.0.0.1:{port}");
+                    throw new ShenoraException("PORT_IN_USE", "port", port.ToString(), L.T("something else already listens on 127.0.0.1:{0}", port));
                 Open(id, port).Wanted = true;
             }
         }
@@ -268,7 +268,7 @@ internal sealed class Connections : IDisposable
         }
         if (channel is not null)
         {
-            if (channel.Holders.Count > 0) ChannelEnded?.Invoke(id, $"{_store.Find(id)?.Name ?? "Its profile"} was disconnected.");
+            if (channel.Holders.Count > 0) ChannelEnded?.Invoke(id, L.T("{0} was disconnected.", _store.Find(id)?.Name ?? L.T("Its profile")));
             await LeaveAsync(channel);
         }
         Poll();
@@ -283,9 +283,9 @@ internal sealed class Connections : IDisposable
             var status = StatusOf(id);
             if (status?.State == TunnelServiceStatus.Up) return status;
             if (!IsRunning(id))
-                throw new ShenoraException("NOT_CONNECTED", "id", id, status?.LastError is { } why ? $"the profile did not connect: {why}" : "the profile is not connected");
+                throw new ShenoraException("NOT_CONNECTED", "id", id, status?.LastError is { } why ? L.T("the profile did not connect: {0}", why) : L.T("the profile is not connected"));
             if (DateTime.UtcNow > deadline)
-                throw new ShenoraException("CONNECT_TIMEOUT", "id", id, $"the profile was not up within {within.TotalSeconds:0} s");
+                throw new ShenoraException("CONNECT_TIMEOUT", "id", id, L.T("the profile was not up within {0:0} s", within.TotalSeconds));
             await Task.Delay(200, ct);
         }
     }
@@ -298,11 +298,11 @@ internal sealed class Connections : IDisposable
         lock (_gate)
         {
             if (!_channels.TryGetValue(id, out channel) || channel.Session.Status.State != SessionState.Up)
-                throw new ShenoraException("NOT_CONNECTED", "id", id, "the profile is not up");
+                throw new ShenoraException("NOT_CONNECTED", "id", id, L.T("the profile is not up"));
         }
         // Could not be checked — not "failed": the proxy not listening says nothing of the tunnel (rule 6).
         if (channel.Proxy is not { } proxy)
-            throw new ShenoraException("CHECK_UNAVAILABLE", "id", id, "its proxy is not listening, so the location could not be checked");
+            throw new ShenoraException("CHECK_UNAVAILABLE", "id", id, L.T("its proxy is not listening, so the location could not be checked"));
 
         using var handler = new SocketsHttpHandler
         {
@@ -317,7 +317,7 @@ internal sealed class Connections : IDisposable
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or JsonException)
         {
             // Could not be checked — not "failed": the lookup service is not the tunnel (rule 6).
-            throw new ShenoraException("CHECK_UNAVAILABLE", "id", id, "the lookup did not answer through the tunnel; the tunnel itself may still work");
+            throw new ShenoraException("CHECK_UNAVAILABLE", "id", id, L.T("the lookup did not answer through the tunnel; the tunnel itself may still work"));
         }
 
         string? Read(string name) => answer.ValueKind == JsonValueKind.Object && answer.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
@@ -345,10 +345,10 @@ internal sealed class Connections : IDisposable
     {
         Profile.OvpnProfile profile;
         try { profile = _store.Load(id); }
-        catch (FileNotFoundException) { throw new ShenoraException("PROFILE_GONE", "id", id, "the profile is no longer stored"); }
+        catch (FileNotFoundException) { throw new ShenoraException("PROFILE_GONE", "id", id, L.T("the profile is no longer stored")); }
         // The message of what failed to open is not passed on: it could quote the profile.
         catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException)
-        { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, "the stored profile could not be opened"); }
+        { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, L.T("the stored profile could not be opened")); }
 
         // The profile's own connection settings, with the person's changes over them.
         var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = _settings.PolicyOf(id).Over(profile.Policy) });
@@ -377,7 +377,7 @@ internal sealed class Connections : IDisposable
                 channel.Proxy = proxy;
                 channel.ProxyProblem = null;
             }
-            catch (SocketException) { channel.ProxyProblem = $"port {channel.Port} is in use by something else"; }
+            catch (SocketException) { channel.ProxyProblem = L.T("port {0} is in use by something else", channel.Port); }
         }
     }
 
@@ -395,8 +395,8 @@ internal sealed class Connections : IDisposable
         }
         if (channel.Holders.Count > 0)
             ChannelEnded?.Invoke(id, channel.Session.Status.State == SessionState.GaveUp
-                ? $"The connection was given up after its retries. {Sentence(last.LastError)}".TrimEnd()
-                : $"The connection was refused: {last.LastError ?? "no reason given"}.");
+                ? L.T("The connection was given up after its retries. {0}", Sentence(last.LastError)).TrimEnd()
+                : L.T("The connection was refused: {0}.", last.LastError ?? L.T("no reason given")));
         await DisposeAsync(channel);
         Poll();
     }

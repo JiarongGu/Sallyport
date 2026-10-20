@@ -37,102 +37,108 @@ internal static class GameViews
 {
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
 
-    public static IReadOnlyList<LossChoice> LossChoices { get; } =
+    public static IReadOnlyList<LossChoice> LossChoices =>
     [
-        new(LossMode.Hold, "Hold the game's traffic", "Nothing of the game leaves outside the VPN while it reconnects. The game may lag or disconnect meanwhile."),
-        new(LossMode.Direct, "Use my own connection", "The game keeps playing over your own connection while the VPN reconnects, and goes back through it once it is up."),
-        new(LossMode.Stop, "Stop routing", "Routing ends when the connection is lost; the game carries on over your own connection."),
+        new(LossMode.Hold, L.T("Hold its traffic"), L.T("Nothing of the app leaves outside the VPN while it reconnects. The app may lag or disconnect meanwhile.")),
+        new(LossMode.Direct, L.T("Use my own connection"), L.T("The app keeps going over your own connection while the VPN reconnects, and goes back through it once it is up.")),
+        new(LossMode.Stop, L.T("Stop routing"), L.T("Routing ends when the connection is lost; the app carries on over your own connection.")),
     ];
 
-    public static string LossText(GameChoice choice) => choice.Loss switch
+    /// <summary>What a loss policy does, as the end of a sentence: "your own connection until it is back".</summary>
+    public static string LossShort(GameChoice choice) => choice.Loss switch
     {
-        LossMode.Direct => "If the VPN drops: your own connection until it is back",
-        LossMode.Stop => "If the VPN drops: routing stops",
-        _ when choice.DirectAfterSeconds is > 0 and var s => $"If the VPN drops: held, then your own connection after {s} s",
-        _ => "If the VPN drops: the game's traffic is held",
+        LossMode.Direct => L.T("your own connection until it is back"),
+        LossMode.Stop => L.T("routing stops"),
+        _ when choice.DirectAfterSeconds is > 0 and var s => L.T("held, then your own connection after {0} s", s),
+        _ => L.T("its traffic is held"),
     };
+
+    public static string LossText(GameChoice choice) => L.T("If the VPN drops: {0}", LossShort(choice));
 
     public static RunView Run(GameProfile game, StoredProfile? profile, RunFacts run)
     {
-        var name = profile?.Name ?? "its profile";
+        var name = profile?.Name ?? L.T("its profile");
         var route = run.Route;
         var tunnel = run.Tunnel;
         var (phase, tone, text, detail) = run switch
         {
-            { Ended: GameRunner.StoppedByPerson } => (RunPhase.Ended, Tone.Off, "Stopped", (string?)null),
-            { Ended: { } why } => (RunPhase.Ended, Tone.Trouble, "Routing stopped", why),
-            { Preparing: true } => (RunPhase.Preparing, Tone.Busy, "Preparing…", "Asking the Sallyport service to route the game's programs."),
+            { Ended: GameRunner.StoppedByPerson } => (RunPhase.Ended, Tone.Off, L.T("Stopped"), (string?)null),
+            { Ended: { } why } => (RunPhase.Ended, Tone.Trouble, L.T("Routing stopped"), why),
+            { Preparing: true } => (RunPhase.Preparing, Tone.Busy, L.T("Preparing…"), L.T("Asking the Sallyport service to route the app's programs.")),
             _ => route?.Phase switch
             {
-                RoutePhase.Routing => (RunPhase.Routing, Tone.Up, $"Routed through {name}", "Every connection of the game's programs goes through the VPN."),
-                RoutePhase.Held => (RunPhase.Held, Tone.Busy, "Reconnecting — the game's traffic is held",
+                RoutePhase.Routing => (RunPhase.Routing, Tone.Up, L.T("Routed through {0}", name), L.T("Every connection of the app's programs goes through the VPN.")),
+                RoutePhase.Held => (RunPhase.Held, Tone.Busy, L.T("Reconnecting — its traffic is held"),
                     Join(Attempts(tunnel), DirectAfter(run))),
-                RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, "Reconnecting — the game uses your own connection",
-                    Join(Attempts(tunnel), "It goes back through the VPN once it is up.")),
-                _ => (RunPhase.Connecting, Tone.Busy, $"Connecting {name}…", "The game's traffic is held until the VPN is up."),
+                RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, L.T("Reconnecting — it uses your own connection"),
+                    Join(Attempts(tunnel), L.T("It goes back through the VPN once it is up."))),
+                _ => (RunPhase.Connecting, Tone.Busy, L.T("Connecting {0}…", name), L.T("Its traffic is held until the VPN is up.")),
             },
         };
 
         var facts = new List<Fact>();
         if (route is { } s)
         {
-            facts.Add(new("Game processes", s.Selected.ToString("N0", English)));
-            facts.Add(new("Connections routed", s.RoutedFlows.ToString("N0", English)));
-            facts.Add(new("Packets out / in", $"{s.Routed:N0} / {s.HandedUp:N0}"));
-            if (s.HeldWhileDown > 0) facts.Add(new("Held while reconnecting", s.HeldWhileDown.ToString("N0", English)));
-            if (s.DirectWhileDown > 0) facts.Add(new("Sent directly while reconnecting", s.DirectWhileDown.ToString("N0", English)));
-            if (s.Blocked > 0) facts.Add(new("Blocked (IPv6, local network)", s.Blocked.ToString("N0", English)));
+            facts.Add(new(L.T("Its processes"), s.Selected.ToString("N0", English)));
+            facts.Add(new(L.T("Connections routed"), s.RoutedFlows.ToString("N0", English)));
+            facts.Add(new(L.T("Packets out / in"), $"{s.Routed:N0} / {s.HandedUp:N0}"));
+            if (s.HeldWhileDown > 0) facts.Add(new(L.T("Held while reconnecting"), s.HeldWhileDown.ToString("N0", English)));
+            if (s.DirectWhileDown > 0) facts.Add(new(L.T("Sent directly while reconnecting"), s.DirectWhileDown.ToString("N0", English)));
+            if (s.Blocked > 0) facts.Add(new(L.T("Blocked (IPv6, local network)"), s.Blocked.ToString("N0", English)));
         }
         if (tunnel is { State: SessionState.Up })
         {
-            if (tunnel.Remote is { } remote) facts.Add(new("Connected over", remote));
-            if (tunnel.Address is { } address) facts.Add(new("Tunnel address", address));
-            if (tunnel.Reconnects > 0) facts.Add(new("Reconnects", tunnel.Reconnects.ToString("N0", English)));
+            if (tunnel.Remote is { } remote) facts.Add(new(L.T("Connected over"), remote));
+            if (tunnel.Address is { } address) facts.Add(new(L.T("Tunnel address"), address));
+            if (tunnel.Reconnects > 0) facts.Add(new(L.T("Reconnects"), tunnel.Reconnects.ToString("N0", English)));
         }
         return new RunView(phase, tone, text, detail, phase == RunPhase.Routing ? run.PhaseSince : null, facts, Coverage(route));
     }
 
-    /// <summary>Whether everything of the game went through the VPN: holds, failed (with how many), or could not be
+    /// <summary>Whether everything of the app went through the VPN: holds, failed (with how many), or could not be
     /// checked (and why) — never collapsed (rule 6).</summary>
     public static CheckView Coverage(RouteState? route) => route switch
     {
-        null => new(CheckResult.Unavailable, "Not checked yet."),
-        { LateFlows: > 0 and var late } => new(CheckResult.Failed, $"{Plural((int)late, "connection")} of the game left before it was routed."),
-        { Selected: 0 } => new(CheckResult.Unavailable, "No program of the game has run yet, so nothing could be checked."),
+        null => new(CheckResult.Unavailable, L.T("Not checked yet.")),
+        { LateFlows: > 0 and var late } => new(CheckResult.Failed,
+            L.Count((int)late, "1 connection of the app left before it was routed.", "{0} connections of the app left before it was routed.")),
+        { Selected: 0 } => new(CheckResult.Unavailable, L.T("No program of the app has run yet, so nothing could be checked.")),
         { Unreadable: > 0 and var n } => new(CheckResult.Unavailable,
-            $"Every connection seen from the game went through the VPN, but {Plural(n, "process")} could not be read, so whether they were the game could not be checked."),
-        _ => new(CheckResult.Holds, "Every connection of the game's programs went through the VPN."),
+            L.Count(n, "Every connection seen from the app went through the VPN, but 1 process could not be read, so whether it was the app could not be checked.",
+                "Every connection seen from the app went through the VPN, but {0} processes could not be read, so whether they were the app could not be checked.")),
+        _ => new(CheckResult.Holds, L.T("Every connection of the app's programs went through the VPN.")),
     };
 
     public static DriverView Driver(DriverFacts f)
     {
         var (phase, tone, text, detail) = f switch
         {
-            { Working: true } => (DriverPhase.Working, Tone.Busy, f.WorkingText ?? "Working…", "Windows may ask for permission. The network pauses for a few seconds."),
-            { ServiceInstalled: false } => (DriverPhase.ServiceMissing, Tone.Trouble, "The Sallyport service is not installed",
-                "Game routing needs it. Install Sallyport with its setup to put it in."),
-            { DriverInstalled: false } => (DriverPhase.NotInstalled, Tone.Off, "The packet driver is not installed",
-                "Game routing takes each game's packets through NT Kernel's free Windows Packet Filter driver. Sallyport fetches NT Kernel's own release and installs it."),
-            { ServiceRunning: false } => (DriverPhase.Unknown, Tone.Trouble, "The Sallyport service is not running", "Windows starts it at boot; restart the computer if it stays stopped."),
-            _ => (DriverPhase.Ready, Tone.Up, "Packet routing is ready", (string?)null),
+            { Working: true } => (DriverPhase.Working, Tone.Busy, f.WorkingText ?? L.T("Working…"), L.T("Windows may ask for permission. The network pauses for a few seconds.")),
+            { ServiceInstalled: false } => (DriverPhase.ServiceMissing, Tone.Trouble, L.T("The Sallyport service is not installed"),
+                L.T("Packet routing needs it. Install Sallyport with its setup to put it in.")),
+            { DriverInstalled: false } => (DriverPhase.NotInstalled, Tone.Off, L.T("The packet driver is not installed"),
+                L.T("Packet routing takes each app's packets through NT Kernel's free Windows Packet Filter driver. Sallyport fetches NT Kernel's own release and installs it.")),
+            { ServiceRunning: false } => (DriverPhase.Unknown, Tone.Trouble, L.T("The Sallyport service is not running"),
+                L.T("Windows starts it at boot; restart the computer if it stays stopped.")),
+            _ => (DriverPhase.Ready, Tone.Up, L.T("Packet routing is ready"), (string?)null),
         };
         var facts = new List<Fact>
         {
-            new("Packet driver", f.DriverInstalled ? f.DriverRunning ? "Installed, running" : "Installed, not running" : "Not installed"),
-            new("Sallyport service", f.ServiceInstalled ? f.ServiceRunning ? "Running" : "Stopped" : "Not installed"),
+            new(L.T("Packet driver"), f.DriverInstalled ? f.DriverRunning ? L.T("Installed, running") : L.T("Installed, not running") : L.T("Not installed")),
+            new(L.T("Sallyport service"), f.ServiceInstalled ? f.ServiceRunning ? L.T("Running") : L.T("Stopped") : L.T("Not installed")),
         };
-        if (f.Version is { } version) facts.Add(new("Driver version", version));
+        if (f.Version is { } version) facts.Add(new(L.T("Driver version"), version));
         return new DriverView(phase, tone, text, detail, facts,
-            Install: f.DriverInstalled ? UiAction.Hidden : UiAction.Shown("Install driver…", !f.Working, busy: f.Working),
-            Remove: f.DriverInstalled ? UiAction.Shown("Remove driver…", !f.Working, busy: f.Working) : UiAction.Hidden);
+            Install: f.DriverInstalled ? UiAction.Hidden : UiAction.Shown(L.T("Install driver…"), !f.Working, busy: f.Working),
+            Remove: f.DriverInstalled ? UiAction.Shown(L.T("Remove driver…"), !f.Working, busy: f.Working) : UiAction.Hidden);
     }
 
     // The confirmation said before the driver is installed or removed: the network pauses (D18, measured).
-    public const string DriverInstallText =
-        "Windows will ask for permission. While the driver is put in, this computer's network pauses for a few seconds (about 2 s measured; other computers may differ).";
+    public static string DriverInstallText =>
+        L.T("Windows will ask for permission. While the driver is put in, this computer's network pauses for a few seconds (about 2 s measured; other computers may differ).");
 
-    public const string DriverRemoveText =
-        "Windows will ask for permission. While the driver is taken out, this computer's network pauses for a few seconds (about 6 s measured; other computers may differ). Games can no longer be routed until it is installed again.";
+    public static string DriverRemoveText =>
+        L.T("Windows will ask for permission. While the driver is taken out, this computer's network pauses for a few seconds (about 6 s measured; other computers may differ). Apps can no longer be routed by their packets until it is installed again.");
 
     public static PolicyValues PolicyValuesOf(ConnectionPolicy p) => new(
         Seconds(p.RetryWait), Seconds(p.RetryWaitMax), p.RoundsMax?.ToString(English) ?? "0", p.RandomOrder, Seconds(p.AttemptTimeout),
@@ -140,23 +146,22 @@ internal static class GameViews
 
     /// <summary>What the profile itself says, under the connection settings, so a change is made knowing what it changes.</summary>
     public static string PolicyHint(ConnectionPolicy p, bool overridden) =>
-        $"The profile's own: wait {Seconds(p.RetryWait)} s growing to {Seconds(p.RetryWaitMax)} s, " +
-        (p.RoundsMax is { } rounds ? $"give up after {Plural(rounds, "round")}" : "never give up") +
-        $", {(p.RandomOrder ? "servers in random order" : "servers in the order listed")}, {Seconds(p.AttemptTimeout)} s to answer" +
-        (p.PingRestart is { } r ? $", dead after {r} s of silence when the server sets none." : ".") +
-        (overridden ? " Your changes are shown above." : "");
+        L.T("The profile's own: wait {0} s growing to {1} s, {2}, {3}, {4} s to answer{5}", Seconds(p.RetryWait), Seconds(p.RetryWaitMax),
+            p.RoundsMax is { } rounds ? L.Count(rounds, "give up after 1 round", "give up after {0} rounds") : L.T("never give up"),
+            p.RandomOrder ? L.T("servers in random order") : L.T("servers in the order listed"), Seconds(p.AttemptTimeout),
+            p.PingRestart is { } r ? L.T(", dead after {0} s of silence when the server sets none.", r) : L.T("."))
+        + (overridden ? L.Join("", L.T("Your changes are shown above.")) : "");
 
     private static string Seconds(TimeSpan t) => ((int)Math.Round(t.TotalSeconds)).ToString(English);
 
+    // The reason itself is the protocol library's (English, or Windows' own words for a socket error).
     private static string? Attempts(SessionStatus? tunnel) => tunnel is null ? null
-        : tunnel.LastError is { } why ? $"Last attempt: {why}" : null;
+        : tunnel.LastError is { } why ? L.T("Last attempt: {0}", why) : null;
 
     private static string? DirectAfter(RunFacts run) =>
         run.Loss.DirectAfter is { } after && run.PhaseSince is { } since
-            ? $"Your own connection in {Math.Max(0, (int)Math.Ceiling((since + after - DateTimeOffset.Now).TotalSeconds))} s if it is not back."
+            ? L.T("Your own connection in {0} s if it is not back.", Math.Max(0, (int)Math.Ceiling((since + after - DateTimeOffset.Now).TotalSeconds)))
             : null;
 
-    private static string? Join(string? first, string? second) => first is null ? second : second is null ? first : $"{first} {second}";
-
-    private static string Plural(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n:N0} {noun}{(noun.EndsWith('s') ? "es" : "s")}";
+    private static string? Join(string? first, string? second) => first is null ? second : L.Join(first, second);
 }

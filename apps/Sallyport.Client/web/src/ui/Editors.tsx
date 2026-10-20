@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, PolicyValues, PortValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
+import { t } from '../i18n';
 import { ActionButton } from './shared';
 
 export type Draft =
@@ -52,25 +53,25 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
     : null;
 
   const text = (field: EditorField & keyof PolicyValues, label: string, unit: string) => draft.kind === 'policy' ? <div className="field">
-    <label htmlFor={`${prefix}-${field}`}>{label}</label>
+    <label htmlFor={`${prefix}-${field}`}>{t(label)}</label>
     <div className="unit-field">
       <input id={`${prefix}-${field}`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
         value={draft.values[field] as string} disabled={saving}
         aria-invalid={!!editor.errors[field]} aria-describedby={description(field)}
         onChange={(event) => onChange({ ...draft, values: { ...draft.values, [field]: event.target.value } })} />
-      <span className="secondary">{unit}</span>
+      <span className="secondary">{t(unit)}</span>
     </div>
     {error(field)}
   </div> : null;
   const check = (field: 'randomOrder' | 'retryAfterAuthFailure', label: string) => draft.kind === 'policy' ? <label className="check-field">
     <input type="checkbox" checked={draft.values[field]} disabled={saving}
       onChange={(event) => onChange({ ...draft, values: { ...draft.values, [field]: event.target.checked } })} />
-    {label}
+    {t(label)}
   </label> : null;
 
   return <form ref={form} className="editor" tabIndex={-1}
-    aria-label={editor.kind === 'port' ? 'SOCKS5 port' : editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
-      : editor.kind === 'defaults' ? 'Defaults for new apps' : 'Edit app'}
+    aria-label={t(editor.kind === 'port' ? 'SOCKS5 port' : editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
+      : editor.kind === 'defaults' ? 'Defaults for new apps' : 'Edit app')}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
       event.preventDefault();
@@ -84,7 +85,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
       }
     }}>
     {editor.kind === 'port' && draft.kind === 'port' ? <>
-      <label htmlFor={`${prefix}-port`}>SOCKS5 port</label>
+      <label htmlFor={`${prefix}-port`}>{t('SOCKS5 port')}</label>
       <div className="port-field">
         <code>127.0.0.1:</code>
         <input id={`${prefix}-port`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
@@ -95,14 +96,14 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
       {error('portText')}
     </> : draft.kind === 'app' ? <div className="editor-fields">
       <div className="field">
-        <label htmlFor={`${prefix}-name`}>Name</label>
+        <label htmlFor={`${prefix}-name`}>{t('Name')}</label>
         <input id={`${prefix}-name`} value={draft.values.name} disabled={saving}
           aria-invalid={!!editor.errors.name} aria-describedby={description('name')}
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, name: event.target.value } })} />
         {error('name')}
       </div>
       <div className="field">
-        <label htmlFor={`${prefix}-profile`}>VPN profile</label>
+        <label htmlFor={`${prefix}-profile`}>{t('VPN profile')}</label>
         <select id={`${prefix}-profile`} value={draft.values.profileId ?? ''} disabled={saving}
           aria-invalid={!!editor.errors.profileId} aria-describedby={description('profileId')}
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, profileId: event.target.value || null } })}>
@@ -112,17 +113,17 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         {error('profileId')}
       </div>
       {editor.options && editor.options.length > 0 && <div className="field">
-        <label htmlFor={`${prefix}-launch`}>Launch starts</label>
+        <label htmlFor={`${prefix}-launch`}>{t('Launch starts')}</label>
         <select id={`${prefix}-launch`} value={draft.values.launchProgramId ?? ''} disabled={saving}
           aria-invalid={!!editor.errors.launchProgramId} aria-describedby={description('launchProgramId')}
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, launchProgramId: event.target.value || null } })}>
-          <option value="">Nothing chosen</option>
+          <option value="">{t('Nothing chosen')}</option>
           {editor.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </select>
         {error('launchProgramId')}
       </div>}
       <fieldset className="field full-field loss-choices" aria-describedby={description('loss')}>
-        <legend>When the VPN drops (all-traffic programs)</legend>
+        <legend>{t('When the VPN drops (all-traffic programs)')}</legend>
         {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
           <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={draft.values.loss === choice.value} disabled={saving}
             onChange={() => onChange({ ...draft, values: { ...draft.values, loss: choice.value } })} />
@@ -131,10 +132,10 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         {error('loss')}
       </fieldset>
       {draft.values.loss === 'hold' && <div className="field">
-        <label htmlFor={`${prefix}-after`}>Use my own connection after</label>
+        <label htmlFor={`${prefix}-after`}>{t('Use my own connection after')}</label>
         <div className="unit-field">
           <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
-            value={draft.values.directAfterText} disabled={saving} placeholder="never"
+            value={draft.values.directAfterText} disabled={saving} placeholder={t('never')}
             aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
           <span className="secondary">seconds</span>
@@ -143,21 +144,21 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
       </div>}
     </div> : draft.kind === 'program' ? <div className="editor-fields">
       <fieldset className="field full-field">
-        <legend>How its traffic reaches the VPN</legend>
+        <legend>{t('How its traffic reaches the VPN')}</legend>
         <label className="check-field">
           <input type="checkbox" checked={draft.values.packets} disabled={saving}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, packets: event.target.checked } })} />
-          <span><span>All traffic — packet driver</span><span className="secondary metadata">Everything it sends, TCP and UDP, while the app is routed.</span></span>
+          <span><span>{t('All traffic — packet driver')}</span><span className="secondary metadata">{t('Everything it sends, TCP and UDP, while the app is routed.')}</span></span>
         </label>
         <label className="check-field">
           <input type="checkbox" checked={draft.values.proxy} disabled={saving}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, proxy: event.target.checked } })} />
-          <span><span>Proxy settings when launched here</span><span className="secondary metadata">Started from Sallyport with the profile’s proxy. TCP only.</span></span>
+          <span><span>{t('Proxy settings when launched here')}</span><span className="secondary metadata">{t('Started from Sallyport with the profile’s proxy. TCP only.')}</span></span>
         </label>
       </fieldset>
       {draft.values.proxy && <>
         <div className="field">
-          <label htmlFor={`${prefix}-kind`}>How it is told about the proxy</label>
+          <label htmlFor={`${prefix}-kind`}>{t('How it is told about the proxy')}</label>
           <select id={`${prefix}-kind`} value={draft.values.kind} disabled={saving}
             aria-invalid={!!editor.errors.kind} aria-describedby={description('kind')}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, kind: event.target.value as ProgramEditValues['kind'] } })}>
@@ -168,7 +169,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         </div>
       </>}
       <div className="field full-field">
-        <label htmlFor={`${prefix}-arguments`}>Extra arguments when launched</label>
+        <label htmlFor={`${prefix}-arguments`}>{t('Extra arguments when launched')}</label>
         <textarea id={`${prefix}-arguments`} rows={2} value={draft.values.arguments} disabled={saving} spellCheck={false}
           aria-invalid={!!editor.errors.arguments} aria-describedby={description('arguments')}
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, arguments: event.target.value } })} />
@@ -176,17 +177,17 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
       </div>
     </div> : draft.kind === 'defaults' ? <div className="editor-fields">
       <div className="field">
-        <label htmlFor={`${prefix}-profile`}>VPN profile</label>
+        <label htmlFor={`${prefix}-profile`}>{t('VPN profile')}</label>
         <select id={`${prefix}-profile`} value={draft.values.profileId ?? ''} disabled={saving}
           aria-invalid={!!editor.errors.profileId} aria-describedby={description('profileId')}
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, profileId: event.target.value || null } })}>
-          <option value="">The first that can connect</option>
+          <option value="">{t('The first that can connect')}</option>
           {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
         </select>
         {error('profileId')}
       </div>
       <fieldset className="field full-field loss-choices" aria-describedby={description('loss')}>
-        <legend>When the VPN drops</legend>
+        <legend>{t('When the VPN drops')}</legend>
         {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
           <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={draft.values.loss === choice.value} disabled={saving}
             onChange={() => onChange({ ...draft, values: { ...draft.values, loss: choice.value } })} />
@@ -195,10 +196,10 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         {error('loss')}
       </fieldset>
       {draft.values.loss === 'hold' && <div className="field">
-        <label htmlFor={`${prefix}-after`}>Use my own connection after</label>
+        <label htmlFor={`${prefix}-after`}>{t('Use my own connection after')}</label>
         <div className="unit-field">
           <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
-            value={draft.values.directAfterText} disabled={saving} placeholder="never"
+            value={draft.values.directAfterText} disabled={saving} placeholder={t('never')}
             aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
           <span className="secondary">seconds</span>

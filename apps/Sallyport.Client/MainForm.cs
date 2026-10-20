@@ -142,7 +142,7 @@ internal sealed class MainForm : OptimizedForm
         PaintCaptionButtonsUntilThePageDoes();
         if (!WebViewEnvironment.IsRuntimeAvailable())
         {
-            MessageBox.Show("The WebView2 Runtime is not installed.\n\nInstall the Evergreen WebView2 Runtime from Microsoft and start Sallyport again.",
+            MessageBox.Show(L.T("The WebView2 Runtime is not installed.\n\nInstall the Evergreen WebView2 Runtime from Microsoft and start Sallyport again."),
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             _tray.Exit();
             return;
@@ -158,7 +158,7 @@ internal sealed class MainForm : OptimizedForm
                 Controls.Remove(_splash);
                 _splash.Dispose();
                 if (!args.IsSuccess)
-                    MessageBox.Show($"The window's page did not load ({args.WebErrorStatus}).", Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show(L.T("The window's page did not load ({0}).", args.WebErrorStatus), Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             };
             _host.Navigate();
             Receive(_start.Arguments, atStart: true);

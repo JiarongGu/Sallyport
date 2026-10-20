@@ -172,6 +172,8 @@ export interface SettingsView {
   about: Fact[];
   /** What a new app starts with; edit posts BEGIN_DEFAULTS_EDIT. */
   defaults: { facts: Fact[]; edit: Action };
+  /** The language in force ("en", "zh-Hans") and the choices; choosing posts SET_LANGUAGE. */
+  language: { setting: string; choices: { id: string; label: string }[] };
 }
 
 /** What a new app starts with: a profile (null: the first that can connect) and its loss policy. */
@@ -319,6 +321,8 @@ export interface ClientState {
   lossChoices: { value: LossMode; label: string; help: string }[];
   editor: Editor | null;
   confirmation: Confirmation | null;
+  /** The language the host speaks in this state, for the page's own words: "en" or "zh-Hans". */
+  language: string;
   /** Newest first. Info notices leave on their own after a few seconds; warnings and errors stay until dismissed. */
   notices: Notice[];
 }
@@ -360,5 +364,6 @@ export interface Commands {
   CANCEL_CONFIRMATION: { token: string };
   COPY_GUIDE_EXAMPLE: Record<string, never>;
   SET_START_WITH_WINDOWS: { enabled: boolean };
+  SET_LANGUAGE: { language: string };
   DISMISS_NOTICE: { id: string };
 }

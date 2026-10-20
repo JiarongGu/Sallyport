@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { isShenoraAvailable, useWindowMaximized, WindowCommands } from '@shenora/react';
 import { useEffect, useMemo, useRef } from 'react';
 import type { ClientState } from '../contract';
@@ -54,11 +55,11 @@ export function TitleBar({ summary }: { summary?: ClientState['summary'] }) {
     <div className="window-summary" title={summary?.text}>{summary && <StatusPill tone={summary.tone} announce>{summary.text}</StatusPill>}</div>
     <div className="caption-buttons" ref={buttons} onMouseDown={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.stopPropagation()}>
-      <button type="button" aria-label="Minimize" onClick={() => run(commands.minimize())}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5H11" /></svg></button>
-      <button type="button" aria-label={maximized ? 'Restore' : 'Maximize'} onClick={() => run(commands.toggleMaximize())}>
+      <button type="button" aria-label={t('Minimize')} onClick={() => run(commands.minimize())}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5H11" /></svg></button>
+      <button type="button" aria-label={maximized ? t('Restore') : t('Maximize')} onClick={() => run(commands.toggleMaximize())}>
         <svg viewBox="0 0 12 12" aria-hidden="true">{maximized ? <path d="M3.5 3.5V1.5H10.5V8.5H8.5M1.5 3.5H8.5V10.5H1.5Z" /> : <path d="M1.5 1.5H10.5V10.5H1.5Z" />}</svg>
       </button>
-      <button type="button" className="caption-close" aria-label="Close" onClick={() => run(commands.close())}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" /></svg></button>
+      <button type="button" className="caption-close" aria-label={t('Close')} onClick={() => run(commands.close())}><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 1.5L10.5 10.5M10.5 1.5L1.5 10.5" /></svg></button>
     </div>
   </header>;
 }

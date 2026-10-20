@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { useId, type ReactNode } from 'react';
 import type { ClientState, ProfileView } from './contract';
 import { post } from './commands';
@@ -7,8 +8,8 @@ import { ActionButton, Disclosure, EmptyView, Facts, PageHeader, StatusPill } fr
 export function Profiles({ state, now, expanded, toggle, editorForm }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
-  return <section className="page" aria-label="Profiles">
-    <PageHeader title="Profiles" subtitle="Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.">
+  return <section className="page" aria-label={t('Profiles')}>
+    <PageHeader title={t('Profiles')} subtitle={t('Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.')}>
       <ActionButton action={state.actions.import} primary onClick={() => post('IMPORT', {})} />
     </PageHeader>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}
@@ -32,7 +33,7 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
         <h2 id={headingId}>{profile.name}</h2>
         <div className="profile-status">
           <StatusPill tone={profile.tone} announce>{profile.statusText}</StatusPill>
-          {profile.connectedSince && <span className="secondary duration">Connected for {duration(profile.connectedSince, now)}</span>}
+          {profile.connectedSince && <span className="secondary duration">{t('Connected for {0}', duration(profile.connectedSince, now))}</span>}
         </div>
       </div>
       <div className="actions row-primary">
@@ -43,7 +44,7 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
     {profile.detailText && <p className="supporting secondary">{profile.detailText}</p>}
     {countdown(profile.nextAttemptAt, now) && <p className="supporting secondary countdown" role="timer">{countdown(profile.nextAttemptAt, now)}</p>}
     <div className="row-foot">
-      <span className="endpoint"><span className="secondary">SOCKS5 · </span><code>{profile.endpointText}</code></span>
+      <span className="endpoint"><span className="secondary">{t('SOCKS5 · ')}</span><code>{profile.endpointText}</code></span>
       <ActionButton action={profile.actions.copy} onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
       <Disclosure open={expanded} controls={detailsId} onClick={toggle} />
     </div>
@@ -66,11 +67,11 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
 
 function LocationResult({ profile }: { profile: ProfileView }) {
   const location = profile.location;
-  return <section className="location" aria-label="Exit location">
-    {location.previousResult && <p className="metadata secondary">Previous result</p>}
+  return <section className="location" aria-label={t('Exit location')}>
+    {location.previousResult && <p className="metadata secondary">{t('Previous result')}</p>}
     <p className={location.phase === 'unavailable' ? 'location-unavailable' : ''} role="status">{location.text}</p>
     <Facts facts={location.facts} />
-    {location.checkedAt && <p className="metadata secondary">Checked <time dateTime={location.checkedAt}>{clock(location.checkedAt)}</time></p>}
+    {location.checkedAt && <p className="metadata secondary">{t('Checked')} <time dateTime={location.checkedAt}>{clock(location.checkedAt)}</time></p>}
     <ActionButton action={profile.actions.locate} onClick={() => post('LOCATE', { id: profile.id })} />
   </section>;
 }

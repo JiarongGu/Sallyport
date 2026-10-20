@@ -103,7 +103,7 @@ public class WindowViewTests
         Assert.Equal(Tone.Busy, channel.Tone);
         Assert.Equal("Reconnecting…", channel.StatusText);
         Assert.Null(channel.ConnectedSince);
-        Assert.Equal("Reconnecting — the game's traffic is held", channel.Selections[0].Run.StatusText);
+        Assert.Equal("Reconnecting — its traffic is held", channel.Selections[0].Run.StatusText);
     }
 
     [Fact]

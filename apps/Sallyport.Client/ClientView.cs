@@ -6,7 +6,8 @@ using Sallyport.Runtime;
 namespace Sallyport.Client;
 
 // The window's view model, one record per type in web/src/contract.ts, and the words in it: the page renders this and
-// decides nothing (docs/design/client-ui.md §4). Every state-dependent sentence the window shows is written here.
+// decides nothing (docs/design/client-ui.md §4). Every state-dependent sentence the window shows is written here, in the
+// person's language (L).
 
 internal enum Tone { Off, Busy, Up, Trouble, Info }
 
@@ -70,7 +71,8 @@ internal sealed record ClientState(
     IReadOnlyList<LossChoice> LossChoices,
     EditorView? Editor,
     ConfirmationView? Confirmation,
-    IReadOnlyList<Notice> Notices)
+    IReadOnlyList<Notice> Notices,
+    string Language = "en")
 {
     internal sealed record SummaryView(string Text, Tone Tone);
     internal sealed record TopActions(UiAction Import, UiAction AddProgram, UiAction AddFolder);
@@ -80,7 +82,7 @@ internal sealed record ClientState(
 }
 
 /// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>. <see cref="UsedBy"/>: the
-/// game being routed through it, which a proxy may not share.</summary>
+/// app being routed through it.</summary>
 internal sealed record ProfileFacts(
     StoredProfile Stored, int Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
     int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false, DateTimeOffset? NextAttemptAt = null);
@@ -107,61 +109,62 @@ internal static class ClientView
 
         var (phase, tone, text, detail) = f switch
         {
-            { Removing: true } => (ProfilePhase.Removing, Tone.Busy, "Removing profile…", (string?)null),
-            { Disconnecting: true } => (ProfilePhase.Disconnecting, Tone.Busy, "Disconnecting…", null),
-            { Stored.Unsupported: { } why } => (ProfilePhase.Unsupported, Tone.Off, "Unsupported profile", $"This version cannot connect this profile: {why}."),
+            { Removing: true } => (ProfilePhase.Removing, Tone.Busy, L.T("Removing profile…"), (string?)null),
+            { Disconnecting: true } => (ProfilePhase.Disconnecting, Tone.Busy, L.T("Disconnecting…"), null),
+            { Stored.Unsupported: { } why } => (ProfilePhase.Unsupported, Tone.Off, L.T("Unsupported profile"), L.T("This version cannot connect this profile: {0}.", why)),
             _ => status?.State switch
             {
                 TunnelServiceStatus.Connecting when status.Attempts > 1 =>
-                    (ProfilePhase.Connecting, Tone.Busy, "Retrying connection…", Join($"{Plural(status.Attempts, "attempt")} so far.", LastAttempt(status))),
-                TunnelServiceStatus.Connecting => (ProfilePhase.Connecting, Tone.Busy, "Connecting…", null),
-                TunnelServiceStatus.Up => (ProfilePhase.Up, Tone.Up, "Connected", null),
-                TunnelServiceStatus.Reconnecting => (ProfilePhase.Reconnecting, Tone.Busy, "Reconnecting…",
+                    (ProfilePhase.Connecting, Tone.Busy, L.T("Retrying connection…"),
+                        L.Join(L.Count(status.Attempts, "1 attempt so far.", "{0} attempts so far."), LastAttempt(status))),
+                TunnelServiceStatus.Connecting => (ProfilePhase.Connecting, Tone.Busy, L.T("Connecting…"), null),
+                TunnelServiceStatus.Up => (ProfilePhase.Up, Tone.Up, L.T("Connected"), null),
+                TunnelServiceStatus.Reconnecting => (ProfilePhase.Reconnecting, Tone.Busy, L.T("Reconnecting…"),
                     f.AttemptsSinceUp is int n and > 0
-                        ? Join($"{Plural(n, "attempt")} since the connection was lost.", LastAttempt(status))
-                        : "The connection was lost."),
-                TunnelServiceStatus.Refused => (ProfilePhase.Refused, Tone.Trouble, "Could not connect", Sentence(status.LastError)),
-                TunnelServiceStatus.Stopped => (ProfilePhase.Stopped, Tone.Trouble, "Connection stopped", Sentence(status.LastError)),
-                _ => (ProfilePhase.Idle, Tone.Off, "Not connected", null),
+                        ? L.Join(L.Count(n, "1 attempt since the connection was lost.", "{0} attempts since the connection was lost."), LastAttempt(status))
+                        : L.T("The connection was lost.")),
+                TunnelServiceStatus.Refused => (ProfilePhase.Refused, Tone.Trouble, L.T("Could not connect"), Sentence(status.LastError)),
+                TunnelServiceStatus.Stopped => (ProfilePhase.Stopped, Tone.Trouble, L.T("Connection stopped"), Sentence(status.LastError)),
+                _ => (ProfilePhase.Idle, Tone.Off, L.T("Not connected"), null),
             },
         };
 
         var busy = f.Removing || f.Disconnecting;
         var facts = new List<Fact>
         {
-            new("Transport", string.Join(", ", f.Stored.Remotes)),
-            new("Imported", f.Stored.Imported.ToLocalTime().ToString("d MMM yyyy", English)),
-            new("SOCKS5 port", f.Port.ToString(English)),
+            new(L.T("Transport"), string.Join(", ", f.Stored.Remotes)),
+            new(L.T("Imported"), L.Date(f.Stored.Imported.ToLocalTime())),
+            new(L.T("SOCKS5 port"), f.Port.ToString(English)),
         };
         if (up && status is not null)
         {
-            if (status.Remote is { } remote) facts.Add(new("Connected over", remote));
-            if (status.Address is { } address) facts.Add(new("Tunnel address", address));
-            facts.Add(new("Open connections", status.OpenConnections.ToString("N0", English)));
-            facts.Add(new("Downloaded", Bytes(status.BytesDown)));
-            facts.Add(new("Uploaded", Bytes(status.BytesUp)));
+            if (status.Remote is { } remote) facts.Add(new(L.T("Connected over"), remote));
+            if (status.Address is { } address) facts.Add(new(L.T("Tunnel address"), address));
+            facts.Add(new(L.T("Open connections"), status.OpenConnections.ToString("N0", English)));
+            facts.Add(new(L.T("Downloaded"), Bytes(status.BytesDown)));
+            facts.Add(new(L.T("Uploaded"), Bytes(status.BytesUp)));
         }
 
-        if (f.UsedBy is { } game) facts.Add(new("Routing through it", game));
-        if (f.PolicyChanged) facts.Add(new("Connection settings", "Changed by you"));
+        if (f.UsedBy is { } game) facts.Add(new(L.T("Routing through it"), game));
+        if (f.PolicyChanged) facts.Add(new(L.T("Connection settings"), L.T("Changed by you")));
 
         var location = Located(f, up);
         var actions = new ProfileActions(
             Connect: running || busy ? UiAction.Hidden
-                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? "Try again" : "Connect", f.Stored.Unsupported is null,
-                    "This version cannot connect this profile."),
+                : UiAction.Shown(phase is ProfilePhase.Refused or ProfilePhase.Stopped ? L.T("Try again") : L.T("Connect"), f.Stored.Unsupported is null,
+                    L.T("This version cannot connect this profile.")),
             Disconnect: running || f.Disconnecting
-                ? UiAction.Shown(status?.State == TunnelServiceStatus.Connecting ? "Cancel" : "Disconnect", busy: f.Disconnecting)
+                ? UiAction.Shown(status?.State == TunnelServiceStatus.Connecting ? L.T("Cancel") : L.T("Disconnect"), busy: f.Disconnecting)
                 : UiAction.Hidden,
-            Copy: UiAction.Shown("Copy address", !busy),
-            EditPort: UiAction.Shown("Change port", !running && !busy, running ? "Disconnect before changing the port." : null),
+            Copy: UiAction.Shown(L.T("Copy address"), !busy),
+            EditPort: UiAction.Shown(L.T("Change port"), !running && !busy, running ? L.T("Disconnect before changing the port.") : null),
             Locate: up
-                ? UiAction.Shown(location.Phase switch { LocationPhase.Checked => "Check again", LocationPhase.Unavailable => "Try again", _ => "Check location" },
+                ? UiAction.Shown(location.Phase switch { LocationPhase.Checked => L.T("Check again"), LocationPhase.Unavailable => L.T("Try again"), _ => L.T("Check location") },
                     busy: f.Locating)
                 : UiAction.Hidden,
-            Remove: UiAction.Shown("Remove profile", !running && !busy && f.UsedBy is null,
-                f.UsedBy is not null ? "Stop routing what goes through it first." : running ? "Disconnect before removing it." : null),
-            Settings: UiAction.Shown("Connection settings", !busy && f.Stored.Unsupported is null, "This version cannot connect this profile."));
+            Remove: UiAction.Shown(L.T("Remove profile"), !running && !busy && f.UsedBy is null,
+                f.UsedBy is not null ? L.T("Stop routing what goes through it first.") : running ? L.T("Disconnect before removing it.") : null),
+            Settings: UiAction.Shown(L.T("Connection settings"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")));
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.
         var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;
@@ -180,33 +183,33 @@ internal static class ClientView
         var connected = Count(ProfilePhase.Up);
 
         var parts = new List<string>();
-        if (connected > 0) parts.Add($"{connected} connected");
-        if (connecting > 0) parts.Add($"{connecting} connecting");
-        if (reconnecting > 0) parts.Add($"{reconnecting} reconnecting");
-        if (failed > 0) parts.Add($"{failed} could not connect");
+        if (connected > 0) parts.Add(L.T("{0} connected", connected));
+        if (connecting > 0) parts.Add(L.T("{0} connecting", connecting));
+        if (reconnecting > 0) parts.Add(L.T("{0} reconnecting", reconnecting));
+        if (failed > 0) parts.Add(L.T("{0} could not connect", failed));
         var tone = failed > 0 ? Tone.Trouble : connecting + reconnecting > 0 ? Tone.Busy : connected > 0 ? Tone.Up : Tone.Off;
-        return new(parts.Count == 0 ? "Not connected" : string.Join(" · ", parts), tone);
+        return new(parts.Count == 0 ? L.T("Not connected") : string.Join(" · ", parts), tone);
     }
 
     public static EmptyView? ProfilesEmpty(int profiles) => profiles > 0 ? null : new(
-        "No profiles yet",
-        "Import an OpenVPN profile from your VPN provider. Sallyport keeps an encrypted copy for your Windows account.",
+        L.T("No profiles yet"),
+        L.T("Import an OpenVPN profile from your VPN provider. Sallyport keeps an encrypted copy for your Windows account."),
         "IMPORT");
 
     public static string KindLabel(AppKind kind) => kind switch
     {
-        AppKind.Chromium => "Chromium browser",
-        AppKind.Firefox => "Firefox browser",
-        AppKind.Electron => "Electron app",
-        _ => "Proxy environment",
+        AppKind.Chromium => L.T("Chromium browser"),
+        AppKind.Firefox => L.T("Firefox browser"),
+        AppKind.Electron => L.T("Electron app"),
+        _ => L.T("Proxy environment"),
     };
 
     public static string KindHelp(AppKind kind) => kind switch
     {
-        AppKind.Chromium => "Uses a separate browser profile. Your usual browser stays unchanged.",
-        AppKind.Firefox => "Uses a separate browser profile with SOCKS5 and remote DNS.",
-        AppKind.Electron => "Quit the app completely, including its tray icon, before launching here. An existing instance may ignore these settings.",
-        _ => "Sets proxy environment variables. Only programs that honour them use the tunnel.",
+        AppKind.Chromium => L.T("Uses a separate browser profile. Your usual browser stays unchanged."),
+        AppKind.Firefox => L.T("Uses a separate browser profile with SOCKS5 and remote DNS."),
+        AppKind.Electron => L.T("Quit the app completely, including its tray icon, before launching here. An existing instance may ignore these settings."),
+        _ => L.T("Sets proxy environment variables. Only programs that honour them use the tunnel."),
     };
 
     public static string CurlExample(string endpoint) => $"curl --socks5-hostname {endpoint} https://ipinfo.io/json";
@@ -223,29 +226,26 @@ internal static class ClientView
 
     private static LocationView Located(ProfileFacts f, bool up)
     {
-        if (!up) return new(LocationPhase.Disconnected, "Connect to check location.", [], null, false);
+        if (!up) return new(LocationPhase.Disconnected, L.T("Connect to check location."), [], null, false);
         var found = f.Location;
         var facts = found is null ? [] : new List<Fact>
         {
-            new("IP", found.Ip ?? "not provided"),
+            new(L.T("IP"), found.Ip ?? L.T("not provided")),
         };
-        if (found?.Org is { } org) facts.Add(new("Organisation", org));
+        if (found?.Org is { } org) facts.Add(new(L.T("Organisation"), org));
 
         if (f.Locating)
-            return new(LocationPhase.Checking, "Checking location…", facts, found?.Checked, found is not null);
+            return new(LocationPhase.Checking, L.T("Checking location…"), facts, found?.Checked, found is not null);
         if (f.LocationFailed)
-            return new(LocationPhase.Unavailable, "Location could not be checked. The lookup did not answer; the tunnel may still work.", [], null, false);
+            return new(LocationPhase.Unavailable, L.T("Location could not be checked. The lookup did not answer; the tunnel may still work."), [], null, false);
         if (found is null)
-            return new(LocationPhase.Unchecked, "Checks your exit IP using ipinfo.io through this tunnel.", [], null, false);
+            return new(LocationPhase.Unchecked, L.T("Checks your exit IP using ipinfo.io through this tunnel."), [], null, false);
         var place = string.Join(", ", new[] { found.City, found.Region, found.Country }.Where(s => !string.IsNullOrWhiteSpace(s)));
-        return new(LocationPhase.Checked, place.Length > 0 ? $"Exit location: {place}" : "Location not provided.", facts, found.Checked, false);
+        return new(LocationPhase.Checked, place.Length > 0 ? L.T("Exit location: {0}", place) : L.T("Location not provided."), facts, found.Checked, false);
     }
 
-    private static string? LastAttempt(TunnelServiceStatus status) => status.LastError is { } why ? $"Last attempt: {why}" : null;
+    // The reason itself is the protocol library's (English, or Windows' own words for a socket error).
+    private static string? LastAttempt(TunnelServiceStatus status) => status.LastError is { } why ? L.T("Last attempt: {0}", why) : null;
 
     private static string? Sentence(string? reason) => reason is null ? null : char.ToUpperInvariant(reason[0]) + reason[1..];
-
-    private static string Join(string first, string? second) => second is null ? first : $"{first} {second}";
-
-    private static string Plural(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n:N0} {noun}s";
 }

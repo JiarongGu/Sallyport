@@ -121,7 +121,7 @@ internal sealed class StatusTray : IDisposable
         if (!_icons.TryGetValue(summary.Tone, out var icon))
             _icons[summary.Tone] = icon = Draw(Colours[summary.Tone], SystemInformation.SmallIconSize.Width);
         _icon.Icon = icon;
-        _icon.Text = Tooltip($"Sallyport — {summary.Text}");
+        _icon.Text = Tooltip(L.T("Sallyport — {0}", summary.Text));
     }
 
     private void Fill()
@@ -130,14 +130,14 @@ internal sealed class StatusTray : IDisposable
         foreach (var old in _menu.Items.Cast<ToolStripItem>().ToList()) old.Dispose();
         var state = _core.Snapshot();
 
-        var open = new ToolStripMenuItem("Open Sallyport", null, (_, _) => ShowWindow());
+        var open = new ToolStripMenuItem(L.T("Open Sallyport"), null, (_, _) => ShowWindow());
         open.Font = _bold ??= new Font(open.Font, FontStyle.Bold);
         _menu.Items.Add(open);
-        _menu.Items.Add(new ToolStripMenuItem("Open Network", null, (_, _) => ShowPage(Page.Network)) { ToolTipText = state.Network.StatusText });
+        _menu.Items.Add(new ToolStripMenuItem(L.T("Open Network"), null, (_, _) => ShowPage(Page.Network)) { ToolTipText = state.Network.StatusText });
         _menu.Items.Add(new ToolStripSeparator());
 
         if (state.Profiles.Count == 0)
-            _menu.Items.Add(new ToolStripMenuItem("No profiles yet — open Sallyport to import one") { Enabled = false });
+            _menu.Items.Add(new ToolStripMenuItem(L.T("No profiles yet — open Sallyport to import one")) { Enabled = false });
         foreach (var profile in state.Profiles)
         {
             var id = profile.Id;
@@ -162,7 +162,7 @@ internal sealed class StatusTray : IDisposable
         if (state.Apps.Where(a => a.Run is not { Phase: not RunPhase.Ended }).ToList() is { Count: > 0 } apps)
         {
             _menu.Items.Add(new ToolStripSeparator());
-            var all = new ToolStripMenuItem("Apps");
+            var all = new ToolStripMenuItem(L.T("Apps"));
             foreach (var app in apps)
             {
                 var id = app.Id;
@@ -176,8 +176,8 @@ internal sealed class StatusTray : IDisposable
         }
 
         _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(new ToolStripMenuItem("Settings", null, (_, _) => ShowPage(Page.Settings)));
-        _menu.Items.Add(new ToolStripMenuItem("Exit Sallyport", null, (_, _) => Exit()) { ToolTipText = "Stops game routing, disconnects every profile, then quits." });
+        _menu.Items.Add(new ToolStripMenuItem(L.T("Settings"), null, (_, _) => ShowPage(Page.Settings)));
+        _menu.Items.Add(new ToolStripMenuItem(L.T("Exit Sallyport"), null, (_, _) => Exit()) { ToolTipText = L.T("Stops routing, disconnects every profile, then quits.") });
     }
 
     /// <summary>A profile's action as the window decides it: shown or not, pressable or not, and why.</summary>
@@ -195,7 +195,7 @@ internal sealed class StatusTray : IDisposable
     {
         try { await action(); }
         catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
-        catch (Exception e) { _core.Notify(NoticeKind.Error, $"That did not work ({e.GetType().Name})."); }
+        catch (Exception e) { _core.Notify(NoticeKind.Error, L.T("That did not work ({0}).", e.GetType().Name)); }
     }
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
@@ -206,7 +206,7 @@ internal sealed class StatusTray : IDisposable
         _window.Hide();
         if (_toldHidden) return;
         _toldHidden = true;
-        Tell("Sallyport is still running in the tray. Connections and game routing stay on.");
+        Tell(L.T("Sallyport is still running in the notification area. Connections and routing stay on."));
     }
 
     /// <summary>The notification area refuses a tip longer than 127 characters: cut at the last whole phrase that fits.</summary>

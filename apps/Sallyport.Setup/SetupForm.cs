@@ -20,12 +20,13 @@ sealed class SetupForm : Form
     private readonly Func<Stream?> _payload;
     private readonly string _version;
     private readonly string? _missing;
-    private readonly Font _headingFont = new("Segoe UI Semibold", 14f);
-    private readonly Font _titleFont = new("Segoe UI Semibold", 12.5f);
-    private readonly Font _strongFont = new("Segoe UI Semibold", 9.75f);
+    private readonly Font _headingFont = new(L.FontSemibold, 14f);
+    private readonly Font _titleFont = new(L.FontSemibold, 12.5f);
+    private readonly Font _strongFont = new(L.FontSemibold, 9.75f);
     private long? _needed;
     private bool _busy;
     private string _verb = "Install";
+    private bool _failed;
     private Installer? _installer;
 
     private readonly Panel _header = new() { Dock = DockStyle.Top, Height = 76 };
@@ -37,19 +38,19 @@ sealed class SetupForm : Form
 
     private readonly Label _chooseHeading = new();
     private readonly Label _chooseIntro = new();
-    private readonly Label _whereLabel = new() { Text = "Install folder" };
+    private readonly Label _whereLabel = new() { Text = L.T("Install folder") };
     private readonly FlowLayoutPanel _whereRow = new() { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 0, 0, 6) };
     private readonly FieldBox _where;
     private readonly ActionButton _browse;
     private readonly Label _whereHint = new();
     private readonly OptionBox _option;
     private readonly Label _missingNote = new();
-    private readonly LinkLabel _missingLink = new() { Text = "Get the WebView2 Runtime from Microsoft" };
+    private readonly LinkLabel _missingLink = new() { Text = L.T("Get the WebView2 Runtime from Microsoft") };
 
     private readonly Label _progressHeading = new();
     private readonly Label _stepText = new();
     private readonly Meter _meter;
-    private readonly LinkLabel _detailsLink = new() { Text = "Show details" };
+    private readonly LinkLabel _detailsLink = new() { Text = L.T("Show details") };
     private readonly TextBox _details;
 
     private readonly Mark _mark;
@@ -59,7 +60,7 @@ sealed class SetupForm : Form
 
     private readonly ActionButton _primary;
     private readonly ActionButton _secondary;
-    private readonly LinkLabel _logLink = new() { Text = "Setup log", Visible = false, AutoSize = true };
+    private readonly LinkLabel _logLink = new() { Text = L.T("Setup log"), Visible = false, AutoSize = true };
 
     public SetupForm(bool uninstall, SetupChoices choices, Func<Stream?> payload, string version, string folder, bool installed)
     {
@@ -72,8 +73,8 @@ sealed class SetupForm : Form
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96f, 96f);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Font = new Font("Segoe UI", 9.75f);
-        Text = uninstall ? "Remove Sallyport" : "Sallyport setup";
+        Font = new Font(L.Font, 9.75f);
+        Text = uninstall ? L.T("Remove Sallyport") : L.T("Sallyport setup");
         Icon = Draw.GateIcon(32);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -84,8 +85,8 @@ sealed class SetupForm : Form
 
         _where = new FieldBox(_theme, Font) { Size = new Size(Width96 - 104, 34) };
         _where.Box.Text = folder;
-        _where.Box.AccessibleName = "Install folder";
-        _browse = new ActionButton(_theme, "Browse…") { MinimumSize = new Size(96, 34) };
+        _where.Box.AccessibleName = L.T("Install folder");
+        _browse = new ActionButton(_theme, L.T("Browse…")) { MinimumSize = new Size(96, 34) };
         _option = new OptionBox(_theme, Font) { Width = Width96 };
         _meter = new Meter(_theme) { Width = Width96, Height = 8, Margin = new Padding(0, 4, 0, 12) };
         _details = new TextBox
@@ -94,9 +95,9 @@ sealed class SetupForm : Form
             BackColor = _theme.Surface, ForeColor = _theme.Secondary, Visible = false, TabStop = false, Margin = new Padding(0, 4, 0, 0),
         };
         _mark = new Mark(_theme);
-        _openNow = new OptionBox(_theme, Font) { Width = Width96, Text = "Open Sallyport now", Checked = true, Margin = new Padding(0, 8, 0, 0) };
+        _openNow = new OptionBox(_theme, Font) { Width = Width96, Text = L.T("Open Sallyport now"), Checked = true, Margin = new Padding(0, 8, 0, 0) };
         _primary = new ActionButton(_theme, "", primary: true);
-        _secondary = new ActionButton(_theme, "Cancel");
+        _secondary = new ActionButton(_theme, L.T("Cancel"));
 
         Style(_chooseHeading, _headingFont, _theme.Text, 0, 0, 0, 6);
         Style(_chooseIntro, Font, _theme.Secondary, 0, 0, 0, 18);
@@ -149,7 +150,7 @@ sealed class SetupForm : Form
         _detailsLink.LinkClicked += (_, _) =>
         {
             _details.Visible = !_details.Visible;
-            _detailsLink.Text = _details.Visible ? "Hide details" : "Show details";
+            _detailsLink.Text = _details.Visible ? L.T("Hide details") : L.T("Show details");
         };
         _logLink.LinkClicked += (_, _) => Open(_installer?.LogFile ?? Installer.TempLog);
         _missingLink.LinkClicked += (_, _) => Open(Installer.WebView2Download);
@@ -176,23 +177,27 @@ sealed class SetupForm : Form
     {
         var old = Installer.ExistingVersion();
         var verb = _verb = !_installed ? "Install" : old is not null && old != _version ? "Update" : "Reinstall";
-        _chooseHeading.Text = verb == "Update" ? $"Update Sallyport {old} → {_version}" : $"{verb} Sallyport {_version}";
-        _chooseIntro.Text = _installed
-            ? $"Sallyport is {(verb == "Update" ? "updated" : "reinstalled")} where it is. Your VPN profiles, apps and settings are kept."
-            : "Sallyport routes the games and apps you choose through your OpenVPN server; everything else keeps your normal connection. " +
-              "A small Windows service does the routing, idle until you use it.";
+        _chooseHeading.Text = verb switch
+        {
+            "Update" => L.T("Update Sallyport {0} → {1}", old, _version),
+            "Reinstall" => L.T("Reinstall Sallyport {0}", _version),
+            _ => L.T("Install Sallyport {0}", _version),
+        };
+        _chooseIntro.Text = !_installed
+            ? L.T("Sallyport routes the games and apps you choose through your OpenVPN server; everything else keeps your normal connection. A small Windows service does the routing, idle until you use it.")
+            : verb == "Update" ? L.T("Sallyport is updated where it is. Your VPN profiles, apps and settings are kept.")
+            : L.T("Sallyport is reinstalled where it is. Your VPN profiles, apps and settings are kept.");
         _where.Box.ReadOnly = _installed;
         _browse.Visible = !_installed;
         if (_installed) _where.Width = Width96;
-        _option.Text = "Install the packet driver";
-        _option.Description = "Routes games without any setting in them: NT Kernel's free Windows Packet Filter, fetched from NT Kernel. " +
-            "The network pauses for a few seconds while it goes in. Without it, apps can still use Sallyport's proxy.";
+        _option.Text = L.T("Install the packet driver");
+        _option.Description = L.T("Routes games without any setting in them: NT Kernel's free Windows Packet Filter, fetched from NT Kernel. The network pauses for a few seconds while it goes in. Without it, apps can still use Sallyport's proxy.");
         _option.Checked = choices.Driver;
         _missingNote.Text = _missing ?? "";
         _missingNote.Visible = _missing is not null;
         _missingLink.Visible = _missing?.Contains(Installer.WebView2Download, StringComparison.Ordinal) == true;
-        _primary.Text = verb;
-        _whereHint.Text = "Working out the space it needs…";
+        _primary.Text = L.T(verb);
+        _whereHint.Text = L.T("Working out the space it needs…");
         CheckWhere();
 
         Shown += async (_, _) =>
@@ -208,8 +213,8 @@ sealed class SetupForm : Form
             if (driver is not (ServiceState.NotInstalled or ServiceState.Unknown))
             {
                 // Already here (Sallyport's or another program's): nothing to choose, and nothing setup will fetch.
-                _option.Text = "Packet driver";
-                _option.Description = "Already installed on this computer.";
+                _option.Text = L.T("Packet driver");
+                _option.Description = L.T("Already installed on this computer.");
                 _option.Checked = true;
                 _option.Enabled = false;
             }
@@ -220,17 +225,16 @@ sealed class SetupForm : Form
     private void SetUpRemoval(SetupChoices choices)
     {
         var installer = new Installer(_ => { }, _where.Box.Text);
-        _chooseHeading.Text = "Remove Sallyport";
-        _chooseIntro.Text = $"Stops any routing, then removes the Sallyport service, its Start menu entry and its files from {installer.Folder}. " +
-            (installer.RemovesDriver
-                ? "The packet driver Sallyport installed goes too; the network pauses for a few seconds while it does."
-                : "The packet driver stays: Sallyport did not install it.");
+        _chooseHeading.Text = L.T("Remove Sallyport");
+        _chooseIntro.Text = L.Join(L.T("Stops any routing, then removes the Sallyport service, its Start menu entry and its files from {0}.", installer.Folder),
+            installer.RemovesDriver
+                ? L.T("The packet driver Sallyport installed goes too; the network pauses for a few seconds while it does.")
+                : L.T("The packet driver stays: Sallyport did not install it."));
         _whereLabel.Visible = _whereRow.Visible = _whereHint.Visible = _missingNote.Visible = _missingLink.Visible = false;
-        _option.Text = "Also remove the VPN profiles and settings";
-        _option.Description = "Sallyport's encrypted copies and its settings, kept in its folder for each Windows user. Left, installing " +
-            "Sallyport in the same folder again finds them. The .ovpn files you imported are not touched.";
+        _option.Text = L.T("Also remove the VPN profiles and settings");
+        _option.Description = L.T("Sallyport's encrypted copies and its settings, kept in its folder for each Windows user. Left, installing Sallyport in the same folder again finds them. The .ovpn files you imported are not touched.");
         _option.Checked = choices.RemoveData;
-        _primary.Text = "Remove";
+        _primary.Text = L.T("Remove");
     }
 
     // The folder as typed or chosen, checked as it changes: why it will not do, or what it needs and what is free.
@@ -243,7 +247,7 @@ sealed class SetupForm : Form
         if (_installed)
         {
             trouble = null;
-            hint = "Sallyport is installed here. To move it, remove it from Windows' installed apps, then install it again.";
+            hint = L.T("Sallyport is installed here. To move it, remove it from Windows' installed apps, then install it again.");
         }
         else if (Installer.Unfit(folder) is { } why)
         {
@@ -252,23 +256,23 @@ sealed class SetupForm : Form
         else if (_needed is null)
         {
             trouble = null;
-            hint = "Working out the space it needs…";
+            hint = L.T("Working out the space it needs…");
         }
         else if (_needed < 0)
         {
-            trouble = hint = "This setup carries nothing to install.";
+            trouble = hint = L.T("This setup carries nothing to install.");
         }
         else
         {
             var free = Installer.FreeBytes(folder);
             var drive = Path.GetPathRoot(Path.GetFullPath(folder))!.TrimEnd('\\');
             // Room for the files and for the update after them, which is staged beside these before it replaces them.
-            if (free is { } bytes && bytes < _needed * 2) trouble = hint = $"Needs {Amount(_needed.Value * 2)} free; {drive} has {Amount(bytes)}.";
+            if (free is { } bytes && bytes < _needed * 2) trouble = hint = L.T("Needs {0} free; {1} has {2}.", Amount(_needed.Value * 2), drive, Amount(bytes));
             else
             {
                 trouble = null;
-                hint = free is { } room ? $"Needs {Amount(_needed.Value)} · {Amount(room)} free on {drive}" : $"Needs {Amount(_needed.Value)}";
-                if (Installer.HoldsKeptData(folder)) hint += " · the profiles and settings kept here are used again";
+                hint = free is { } room ? L.T("Needs {0} · {1} free on {2}", Amount(_needed.Value), Amount(room), drive) : L.T("Needs {0}", Amount(_needed.Value));
+                if (Installer.HoldsKeptData(folder)) hint += L.T(" · the profiles and settings kept here are used again");
             }
         }
         _whereHint.Text = hint;
@@ -284,7 +288,7 @@ sealed class SetupForm : Form
         var current = _where.Box.Text.Trim();
         using var pick = new FolderBrowserDialog
         {
-            Description = "Choose where to install Sallyport. It goes in a Sallyport folder inside the one you choose.",
+            Description = L.T("Choose where to install Sallyport. It goes in a Sallyport folder inside the one you choose."),
             UseDescriptionForTitle = true,
             ShowNewFolderButton = true,
         };
@@ -305,8 +309,12 @@ sealed class SetupForm : Form
     {
         if (_finish.Visible)
         {
-            if (_primary.Text == "Try again")
+            if (_failed)
             {
+                // Back to the choice as it was: its own buttons, the folder checked again.
+                _failed = false;
+                _primary.Text = _uninstall ? L.T("Remove") : L.T(_verb);
+                _secondary.Text = L.T("Cancel");
                 ShowPage(_choose);
                 CheckWhere();
                 return;
@@ -327,8 +335,9 @@ sealed class SetupForm : Form
         _details.Clear();
         _meter.Value = 0;
         _meter.Fill = _theme.Accent;
-        _progressHeading.Text = _uninstall ? "Removing Sallyport" : $"{_verb switch { "Update" => "Updating", "Reinstall" => "Reinstalling", _ => "Installing" }} Sallyport";
-        _stepText.Text = "Starting…";
+        _progressHeading.Text = _uninstall ? L.T("Removing Sallyport")
+            : _verb switch { "Update" => L.T("Updating Sallyport"), "Reinstall" => L.T("Reinstalling Sallyport"), _ => L.T("Installing Sallyport") };
+        _stepText.Text = L.T("Starting…");
         ShowPage(_progress);
         _primary.Enabled = _secondary.Enabled = false;
         ControlBox = false;
@@ -343,14 +352,14 @@ sealed class SetupForm : Form
             if (_uninstall) left = await Task.Run(() => installer.UninstallAsync(choices, CancellationToken.None));
             else
             {
-                await using var payload = _payload() ?? throw new SetupFailed("This setup carries nothing to install.");
+                await using var payload = _payload() ?? throw new SetupFailed(L.T("This setup carries nothing to install."));
                 left = await Task.Run(() => installer.InstallAsync(payload, _version, choices, CancellationToken.None));
             }
         }
         catch (Exception e) when (e is SetupFailed or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidDataException or HttpRequestException)
         {
             failure = e.Message;
-            Report(new SetupProgress($"Stopped: {failure}", _meter.Value));
+            Report(new SetupProgress(L.T("Stopped: {0}", failure), _meter.Value));
         }
         finally
         {
@@ -375,36 +384,42 @@ sealed class SetupForm : Form
 
     private void Finish(IReadOnlyList<string>? left, string? failure)
     {
-        var what = _uninstall ? "removed" : _verb switch { "Update" => "updated", "Reinstall" => "reinstalled", _ => "installed" };
+        _failed = failure is not null;
         if (failure is not null)
         {
             _mark.Shown = Mark.Kind.Failed;
-            _finishHeading.Text = _uninstall ? "Sallyport was not removed" : "Setup did not finish";
-            _finishText.Text = $"{failure}\n\nThe details below, and the setup log, say every step it took.";
-            _primary.Text = "Try again";
-            _secondary.Text = "Close";
+            _finishHeading.Text = _uninstall ? L.T("Sallyport was not removed") : L.T("Setup did not finish");
+            _finishText.Text = failure + "\n\n" + L.T("The details below, and the setup log, say every step it took.");
+            _primary.Text = L.T("Try again");
+            _secondary.Text = L.T("Close");
             _secondary.Visible = true;
         }
         else
         {
             var partly = left is { Count: > 0 };
             _mark.Shown = partly ? Mark.Kind.Partly : Mark.Kind.Done;
-            _finishHeading.Text = partly ? $"Sallyport is {what}, with something left" : $"Sallyport is {what}";
+            _finishHeading.Text = (_uninstall ? "removed" : _verb) switch
+            {
+                "removed" => partly ? L.T("Sallyport is removed, with something left") : L.T("Sallyport is removed"),
+                "Update" => partly ? L.T("Sallyport is updated, with something left") : L.T("Sallyport is updated"),
+                "Reinstall" => partly ? L.T("Sallyport is reinstalled, with something left") : L.T("Sallyport is reinstalled"),
+                _ => partly ? L.T("Sallyport is installed, with something left") : L.T("Sallyport is installed"),
+            };
             var done = _uninstall
                 ? _option.Checked
-                    ? "Its service, Start menu entry, files, profiles and settings are gone."
-                    : $"Its service, Start menu entry and files are gone. The VPN profiles and settings stay in {InstallLayout.Users(_installer!.Folder)}: " +
-                      "install Sallyport in the same folder again and it finds them."
-                : $"It is in {_installer!.Folder}. Find it in the Start menu, or open a .ovpn file with it.";
+                    ? L.T("Its service, Start menu entry, files, profiles and settings are gone.")
+                    : L.T("Its service, Start menu entry and files are gone. The VPN profiles and settings stay in {0}: install Sallyport in the same folder again and it finds them.",
+                        InstallLayout.Users(_installer!.Folder))
+                : L.T("It is in {0}. Find it in the Start menu, or open a .ovpn file with it.", _installer!.Folder);
             _finishText.Text = partly ? $"{done}\n\n{string.Join("\n", left!)}" : done;
-            _primary.Text = "Finish";
+            _primary.Text = L.T("Finish");
             _secondary.Visible = false;
         }
         _openNow.Visible = !_uninstall && failure is null;
         // The steps stay one click away on the last page too, open where it failed.
         _finish.Controls.AddRange([_detailsLink, _details]);
         _details.Visible = failure is not null;
-        _detailsLink.Text = _details.Visible ? "Hide details" : "Show details";
+        _detailsLink.Text = _details.Visible ? L.T("Hide details") : L.T("Show details");
         _primary.Enabled = _secondary.Enabled = true;
         ShowPage(_finish);
         _primary.Focus();
@@ -438,7 +453,7 @@ sealed class SetupForm : Form
         Draw.Gate(g, new RectangleF(24 * s, 18 * s, 40 * s, 40 * s), SetupTheme.Brand, Color.White);
         var x = (int)(78 * s);
         TextRenderer.DrawText(g, "Sallyport", _titleFont, new Point(x, (int)(15 * s)), _theme.Text, TextFormatFlags.NoPrefix);
-        TextRenderer.DrawText(g, $"Version {_version} · routes the games and apps you choose through your VPN", Font,
+        TextRenderer.DrawText(g, L.T("Version {0} · routes the games and apps you choose through your VPN", _version), Font,
             new Point(x, (int)(41 * s)), _theme.Secondary, TextFormatFlags.NoPrefix);
         using var line = new Pen(_theme.Divider);
         g.DrawLine(line, 0, _header.Height - 1, _header.Width, _header.Height - 1);

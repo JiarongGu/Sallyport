@@ -1,6 +1,7 @@
 import { getBridge, useShenoraEvent } from '@shenora/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClientState, Notice, Page } from './contract';
+import { setLanguage, t } from './i18n';
 import { MODULE } from './contract';
 import { Apps } from './Apps';
 import { Network } from './Network';
@@ -86,17 +87,19 @@ export function App() {
     editor={state.editor} draft={currentDraft} onChange={setDraft}
     profileChoices={state.profileChoices} kindChoices={state.kindChoices} lossChoices={state.lossChoices} /> : null;
   const shown = page ?? state?.initialPage ?? 'apps';
+  // Before anything renders: the page's own words follow the host's language from the same state.
+  setLanguage(state?.language ?? 'en');
 
   return <div className="shell">
     <TitleBar summary={state?.summary} />
-    <nav className="navigation" aria-label="Main">
+    <nav className="navigation" aria-label={t('Main')}>
       {pages.map(([value, label]) =>
         <button key={value} type="button" className={`nav-item${shown === value ? ' selected' : ''}`}
-          aria-current={shown === value ? 'page' : undefined} onClick={() => setPage(value)}>{label}</button>)}
+          aria-current={shown === value ? 'page' : undefined} onClick={() => setPage(value)}>{t(label)}</button>)}
     </nav>
     <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
     <main className="content" id="main-content">
-      {!state ? <div className="loading secondary" role="status">Loading…</div> :
+      {!state ? <div className="loading secondary" role="status">{t('Loading…')}</div> :
         shown === 'apps' ? <Apps state={state} now={now} expanded={expanded} toggle={toggle}
           editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
         shown === 'network' ? <Network state={state} now={now} go={setPage} /> :

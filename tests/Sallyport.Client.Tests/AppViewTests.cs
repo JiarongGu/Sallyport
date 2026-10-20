@@ -83,9 +83,9 @@ public class AppViewTests
             phaseSince: DateTimeOffset.Now));
         var direct = GameViews.Run(Zenless().AsGame(), Jp, Facts(Route(RoutePhase.Direct)));
 
-        Assert.Equal("Reconnecting — the game's traffic is held", held.StatusText);
+        Assert.Equal("Reconnecting — its traffic is held", held.StatusText);
         Assert.Matches(@"Your own connection in (59|60) s if it is not back\.", held.DetailText);
-        Assert.Equal("Reconnecting — the game uses your own connection", direct.StatusText);
+        Assert.Equal("Reconnecting — it uses your own connection", direct.StatusText);
     }
 
     [Fact]
@@ -120,7 +120,7 @@ public class AppViewTests
         Assert.Equal("Ready to launch", view.StatusText);
         Assert.False(view.Actions.Route.Visible);
         Assert.Null(view.LossText);
-        Assert.Equal("Launched with proxy settings (chromium browser)", view.Programs[0].StatusText);
+        Assert.Equal("Launched with proxy settings (Chromium browser)", view.Programs[0].StatusText);
         Assert.Equal(["--proxy-server=socks5://127.0.0.1:1088"], view.Programs[0].StartupSettings);
         // Not on this machine: Launch says why, and the program says it is missing.
         Assert.True(view.Actions.Launch is { Visible: true, Enabled: false, Reason: "msedge.exe is not where it was added from." });
@@ -139,7 +139,7 @@ public class AppViewTests
         var view = View(item: both, launching: AppPhase.Connecting);
 
         Assert.Equal("All traffic of 1 program · 1 launched with proxy settings", view.MethodText);
-        Assert.Equal("All traffic · launched with proxy settings (proxy environment)", view.Programs[0].StatusText);
+        Assert.Equal("All traffic · launched with proxy settings (Proxy environment)", view.Programs[0].StatusText);
         Assert.Equal("Routing it before launch…", view.StatusText);
         Assert.True(view.Actions.Launch.Busy);
         Assert.False(view.Actions.Edit.Enabled);
@@ -160,14 +160,14 @@ public class AppViewTests
     {
         Assert.Equal(CheckResult.Unavailable, GameViews.Coverage(null).Result);
         Assert.Equal(CheckResult.Unavailable, GameViews.Coverage(Route(RoutePhase.Routing, selected: 0)).Result);
-        Assert.Equal((CheckResult.Failed, "2 connections of the game left before it was routed."),
+        Assert.Equal((CheckResult.Failed, "2 connections of the app left before it was routed."),
             (GameViews.Coverage(Route(RoutePhase.Routing, late: 2)).Result, GameViews.Coverage(Route(RoutePhase.Routing, late: 2)).Text));
         Assert.Equal(CheckResult.Unavailable, GameViews.Coverage(Route(RoutePhase.Routing, unreadable: 1)).Result);
         Assert.Equal(CheckResult.Holds, GameViews.Coverage(Route(RoutePhase.Routing)).Result);
     }
 
     [Theory]
-    [InlineData(LossMode.Hold, null, "If the VPN drops: the game's traffic is held")]
+    [InlineData(LossMode.Hold, null, "If the VPN drops: its traffic is held")]
     [InlineData(LossMode.Hold, 30, "If the VPN drops: held, then your own connection after 30 s")]
     [InlineData(LossMode.Direct, null, "If the VPN drops: your own connection until it is back")]
     [InlineData(LossMode.Stop, null, "If the VPN drops: routing stops")]

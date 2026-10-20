@@ -101,9 +101,9 @@ internal sealed class GameRunner(Connections connections) : IDisposable
         try
         {
             try { client = await RouterClient.ConnectAsync(folder, "client", TimeSpan.FromSeconds(5), r.Stop.Token); }
-            catch (TimeoutException) { End(r, "The Sallyport service is not running. Reinstall Sallyport to put it back."); return; }
+            catch (TimeoutException) { End(r, L.T("The Sallyport service is not running. Reinstall Sallyport to put it back.")); return; }
             catch (RouterRefused e) { End(r, e.Message); return; }
-            if (!client.Welcome.DriverReady) { End(r, client.Welcome.DriverProblem ?? "The packet driver is not ready."); return; }
+            if (!client.Welcome.DriverReady) { End(r, client.Welcome.DriverProblem ?? L.T("The packet driver is not ready.")); return; }
             client.RunEnded += ended => End(r, Sentence(ended.Reason));
 
             RouterRun run;
@@ -137,7 +137,7 @@ internal sealed class GameRunner(Connections connections) : IDisposable
                 if (session.Dispatcher is { } up) Attach(up);
                 var forwarding = RunPump.ForwardAsync(run, () => Volatile.Read(ref r.Current));
                 // The worker going (its pipe closed) is the run's end too, whatever the supervisor says of it.
-                _ = run.Completion.ContinueWith(_ => End(r, "The router stopped."), TaskScheduler.Default);
+                _ = run.Completion.ContinueWith(_ => End(r, L.T("The router stopped.")), TaskScheduler.Default);
                 try { await Task.Delay(Timeout.Infinite, r.Stop.Token); }
                 catch (OperationCanceledException) { }
                 finally
@@ -156,7 +156,7 @@ internal sealed class GameRunner(Connections connections) : IDisposable
             }
         }
         catch (OperationCanceledException) when (r.Stop.IsCancellationRequested) { }
-        catch (Exception e) { End(r, $"Routing stopped ({e.GetType().Name})."); }
+        catch (Exception e) { End(r, L.T("Routing stopped ({0}).", e.GetType().Name)); }
         finally
         {
             if (client is not null) await client.DisposeAsync();
@@ -176,7 +176,7 @@ internal sealed class GameRunner(Connections connections) : IDisposable
         }
         // Under the Stop policy the route is over once its tunnel is lost, and its hold on the channel with it: the channel
         // goes on retrying only if the person connected it for its proxy.
-        if (state.Phase == RoutePhase.Stopped) End(r, "The connection was lost, and this game stops routing when it is.");
+        if (state.Phase == RoutePhase.Stopped) End(r, L.T("The connection was lost, and this app stops routing when it is."));
         Changed?.Invoke();
     }
 

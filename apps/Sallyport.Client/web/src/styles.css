@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark light;
-  font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
+  font-family: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
   line-height: 1.428571;
   font-weight: 400;
@@ -263,3 +263,4 @@ h4 { font-size: 1rem; line-height: 1.428571; font-weight: 600; margin: 0; overfl
 .latency-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .countdown { font-variant-numeric: tabular-nums; }
 .settings-group .card .row-head .facts { margin: 0; flex: 1; }
+.language-choice { justify-self: start; min-width: 12rem; }

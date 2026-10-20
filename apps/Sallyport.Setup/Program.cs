@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Reflection;
 
 // Sallyport.Setup [/uninstall] [/quiet] [--folder <install folder>] [--payload <folder or zip>] [--no-driver] [--remove-data]
+//   [--language en|zh-Hans]
 //   Installs Sallyport, or with /uninstall removes it (as Windows' installed-apps list runs it), in the folder chosen (an
 //   update stays where Sallyport is; a first install defaults to Program Files). A window says each step;
 //   /quiet runs without one and answers by exit code: 0 done, 1 failed, 2 bad arguments. --payload installs from a
@@ -28,12 +29,13 @@ static class Program
         // An installed Sallyport is updated or removed where it is; the uninstaller in its folder knows its own.
         var existing = Installer.ExistingFolder()
             ?? (uninstall && File.Exists(Path.Combine(AppContext.BaseDirectory, "Sallyport.Service.exe")) ? AppContext.BaseDirectory : null);
+        L.Choose(Value("--language"), existing);
         var asked = Value("--folder");
         if (existing is not null && asked is not null && !uninstall
             && !Path.TrimEndingDirectorySeparator(Path.GetFullPath(asked)).Equals(Path.TrimEndingDirectorySeparator(existing), StringComparison.OrdinalIgnoreCase))
         {
             // Moving an installed Sallyport is removing it, then installing it elsewhere: never done behind a flag.
-            if (quiet) Console.WriteLine($"Sallyport is installed in {existing}; remove it before installing it elsewhere.");
+            if (quiet) Console.WriteLine(L.T("Sallyport is installed in {0}; remove it before installing it elsewhere.", existing));
             return 2;
         }
         var folder = existing ?? asked ?? Installer.DefaultFolder;
@@ -62,7 +64,7 @@ static class Program
             {
                 if (Installer.Missing() is { } why) { Console.WriteLine(why); return 1; }
                 if (Installer.Unfit(folder) is { } unfit) { Console.WriteLine(unfit); return 2; }
-                using var payload = OpenPayload(payloadArg) ?? throw new SetupFailed("This setup carries nothing to install.");
+                using var payload = OpenPayload(payloadArg) ?? throw new SetupFailed(L.T("This setup carries nothing to install."));
                 left = installer.InstallAsync(payload, Version, choices, CancellationToken.None).GetAwaiter().GetResult();
             }
             // Done, but with something left (the driver, a file in use): said again at the end, where it is seen.

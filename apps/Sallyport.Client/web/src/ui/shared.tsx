@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useId, type ReactNode, type Ref } from 'react';
 import type { Action, ClientState, Empty, Fact, Tone } from '../contract';
 import { post } from '../commands';
@@ -58,11 +59,11 @@ export function Facts({ facts }: { facts: Fact[] }) {
   ))}</dl>;
 }
 
-export function Disclosure({ open, controls, onClick, children = 'Details' }: {
+export function Disclosure({ open, controls, onClick, children }: {
   open: boolean; controls: string; onClick: () => void; children?: ReactNode;
 }) {
   return <button type="button" className="disclosure" aria-expanded={open} aria-controls={controls} onClick={onClick}>
-    <span aria-hidden="true">{open ? '⌄' : '›'}</span>{children}
+    <span aria-hidden="true">{open ? '⌄' : '›'}</span>{children ?? t('Details')}
   </button>;
 }
 

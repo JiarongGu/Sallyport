@@ -28,6 +28,7 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "LOCATE" => () => core.LocateAsync(Id(), cancellationToken),
             "CHECK_LATENCY" => () => core.CheckLatencyAsync(Id(), cancellationToken),
             "BEGIN_DEFAULTS_EDIT" => () => Done(core.BeginDefaultsEdit),
+            "SET_LANGUAGE" => () => Done(() => core.SetLanguage(Text("language"))),
             "SAVE_DEFAULTS" => () => Done(() => core.SaveDefaults(Token(), PayloadHelper.GetRequiredValue<DefaultsValues>(request.Payload, "values"))),
             "COPY_ENDPOINT" => () => Done(() => core.CopyEndpoint(Id())),
             "BEGIN_PORT_EDIT" => () => Done(() => core.BeginPortEdit(Id())),
@@ -64,7 +65,7 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
         // Anything else is this program's fault, not the person's: its kind is said, its message (which could carry a
         // path) is not.
         catch (Exception e) when (e is not OperationCanceledException)
-        { core.Notify(NoticeKind.Error, $"That did not work ({e.GetType().Name}).", SubjectOf(request)); }
+        { core.Notify(NoticeKind.Error, L.T("That did not work ({0}).", e.GetType().Name), SubjectOf(request)); }
         return null;
     }
 

@@ -76,6 +76,8 @@ internal sealed class ClientSettings
         public Dictionary<string, GameChoice> Games { get; set; } = [];
         public Dictionary<string, PolicyOverride> Policies { get; set; } = [];
         public AppDefaults Defaults { get; set; } = new();
+        /// <summary>"en", "zh-Hans", or null for Windows' own display language.</summary>
+        public string? Language { get; set; }
     }
 
     public ClientSettings(string file)
@@ -101,11 +103,11 @@ internal sealed class ClientSettings
 
     public void SetPort(string profileId, int port)
     {
-        if (port is < 1024 or > 65535) throw new ShenoraException("PORT_RANGE", "port", port.ToString(), "a port is 1024 to 65535");
+        if (port is < 1024 or > 65535) throw new ShenoraException("PORT_RANGE", "port", port.ToString(), L.T("a port is 1024 to 65535"));
         lock (_gate)
         {
             if (_saved.Ports.Any(p => p.Value == port && p.Key != profileId))
-                throw new ShenoraException("PORT_TAKEN", "port", port.ToString(), $"another profile already uses port {port}");
+                throw new ShenoraException("PORT_TAKEN", "port", port.ToString(), L.T("another profile already uses port {0}", port));
             _saved.Ports[profileId] = port;
             Save();
         }
@@ -122,6 +124,19 @@ internal sealed class ClientSettings
         {
             // Applications and games bound to it are kept: they show the profile as gone and can be pointed at another.
             if (_saved.Ports.Remove(profileId) | _saved.Policies.Remove(profileId)) Save();
+        }
+    }
+
+    public string? Language
+    {
+        get { lock (_gate) return _saved.Language; }
+        set
+        {
+            lock (_gate)
+            {
+                _saved.Language = value;
+                Save();
+            }
         }
     }
 

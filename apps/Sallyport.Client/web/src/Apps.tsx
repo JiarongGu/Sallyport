@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { useId, type ReactNode } from 'react';
 import type { AppItemView, ClientState, ProgramView } from './contract';
 import { post } from './commands';
@@ -11,8 +12,8 @@ export function Apps({ state, now, expanded, toggle, editorForm }: {
 }) {
   const editing = state.editor;
   const subject = editing?.kind === 'program' ? editing.subjectId.split('/')[0] : editing?.subjectId;
-  return <section className="page" aria-label="Apps">
-    <PageHeader title="Apps" subtitle="Programs and games routed through a VPN profile, by all their traffic or by proxy settings at launch. Everything else keeps your own connection.">
+  return <section className="page" aria-label={t('Apps')}>
+    <PageHeader title={t('Apps')} subtitle={t('Programs and games routed through a VPN profile, by all their traffic or by proxy settings at launch. Everything else keeps your own connection.')}>
       <div className="actions">
         <ActionButton action={state.actions.addProgram} focusKey="add-program" primary onClick={() => post('ADD_APP', { source: 'program' })} />
         <ActionButton action={state.actions.addFolder} focusKey="add-folder" onClick={() => post('ADD_APP', { source: 'folder' })} />
@@ -42,7 +43,7 @@ function AppCard({ app, now, expanded, toggle, editing, editorForm }: {
         <h3 id={headingId}>{app.name}</h3>
         <div className="profile-status">
           <StatusPill tone={app.tone} announce>{app.statusText}</StatusPill>
-          {app.run?.since && <span className="secondary duration">Routed for {duration(app.run.since, now)}</span>}
+          {app.run?.since && <span className="secondary duration">{t('Routed for {0}', duration(app.run.since, now))}</span>}
         </div>
       </div>
       <div className="actions row-primary">
@@ -58,8 +59,8 @@ function AppCard({ app, now, expanded, toggle, editing, editorForm }: {
     </div>
     <div id={detailsId} hidden={!expanded} className="row-details">
       <Facts facts={[
-        ...(app.folder ? [{ label: 'Folder', value: app.folder }] : []),
-        ...(app.launchText ? [{ label: 'Launch', value: app.launchText }] : []),
+        ...(app.folder ? [{ label: t('Folder'), value: app.folder }] : []),
+        ...(app.launchText ? [{ label: t('Launch'), value: app.launchText }] : []),
       ]} />
       <div className="actions">
         <ActionButton action={app.actions.edit} focusKey={`app:${app.id}`} onClick={() => post('BEGIN_APP_EDIT', { id: app.id })} />
@@ -67,7 +68,7 @@ function AppCard({ app, now, expanded, toggle, editing, editorForm }: {
         <ActionButton action={app.actions.addProgram} onClick={() => post('ADD_APP_PROGRAM', { id: app.id })} />
       </div>
       {expanded && appEditor}
-      <section className="programs" aria-label="Programs">
+      <section className="programs" aria-label={t('Programs')}>
         {app.programsText && <p className="secondary">{app.programsText}</p>}
         <ul>
           {app.programs.map((program) => <ProgramRow key={program.id} app={app} program={program}
@@ -87,8 +88,8 @@ function ProgramRow({ app, program, editorForm }: { app: AppItemView; program: P
   return <li className={program.included ? 'included' : 'left-out'}>
     <div className="program-line">
       <div className="program-name">
-        <span>{program.name}{program.launchTarget && <span className="metadata secondary"> · Launch starts this</span>}</span>
-        <span className={`metadata ${program.missing ? 'tone-trouble' : 'secondary'}`}>{program.missing ? 'Not found where it was added from' : program.statusText}</span>
+        <span>{program.name}{program.launchTarget && <span className="metadata secondary">{t(' · Launch starts this')}</span>}</span>
+        <span className={`metadata ${program.missing ? 'tone-trouble' : 'secondary'}`}>{program.missing ? t('Not found where it was added from') : program.statusText}</span>
         <span className="metadata secondary program-path">{program.path}</span>
       </div>
       <div className="actions">
@@ -98,7 +99,7 @@ function ProgramRow({ app, program, editorForm }: { app: AppItemView; program: P
       </div>
     </div>
     {program.startupSettings.length > 0 && <details className="startup-settings">
-      <summary aria-controls={settingsId}>Startup settings</summary>
+      <summary aria-controls={settingsId}>{t('Startup settings')}</summary>
       <pre id={settingsId}>{program.startupSettings.join('\n')}</pre>
     </details>}
     {editorForm}

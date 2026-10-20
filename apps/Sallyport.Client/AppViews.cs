@@ -58,13 +58,13 @@ internal static class AppViews
     }
 
     public static string Methods(RoutedProgram p) =>
-        !p.Included ? $"Left out — {p.Reason ?? "by you"}"
+        !p.Included ? L.T("Left out — {0}", p.Reason is { } reason ? L.T(reason) : L.T("by you"))
         : (p.Packets, p.Proxy) switch
         {
-            (true, { } proxy) => $"All traffic · launched with proxy settings ({ClientView.KindLabel(proxy.Kind).ToLowerInvariant()})",
-            (true, null) => "All traffic",
-            (false, { } proxy) => $"Launched with proxy settings ({ClientView.KindLabel(proxy.Kind).ToLowerInvariant()})",
-            _ => "Included, with no method chosen",
+            (true, { } proxy) => L.T("All traffic · launched with proxy settings ({0})", ClientView.KindLabel(proxy.Kind)),
+            (true, null) => L.T("All traffic"),
+            (false, { } proxy) => L.T("Launched with proxy settings ({0})", ClientView.KindLabel(proxy.Kind)),
+            _ => L.T("Included, with no method chosen"),
         };
 
     public static AppItemView Item(ItemFacts f)
@@ -81,74 +81,74 @@ internal static class AppViews
 
         var methodText = (packets.Count, proxied) switch
         {
-            (0, 0) => "No program routed yet",
-            (> 0, 0) => $"All traffic of {Plural(packets.Count, "program")}",
-            (0, > 0) => proxied == 1 ? "Launched with proxy settings" : $"{Plural(proxied, "program")} launched with proxy settings",
-            _ => $"All traffic of {Plural(packets.Count, "program")} · {proxied} launched with proxy settings",
+            (0, 0) => L.T("No program routed yet"),
+            (> 0, 0) => L.Count(packets.Count, "All traffic of 1 program", "All traffic of {0} programs"),
+            (0, > 0) => L.Count(proxied, "Launched with proxy settings", "{0} programs launched with proxy settings"),
+            _ => L.T("{0} · {1} launched with proxy settings", L.Count(packets.Count, "All traffic of 1 program", "All traffic of {0} programs"), proxied),
         };
 
         string? cannotRoute =
-            f.AnotherRunning ? "Another app is being routed. Stop it first." :
-            profile is null ? "Choose a VPN profile for it first (Edit)." :
-            profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
-            packets.Count == 0 ? "Include at least one program sending all its traffic." :
-            !f.DriverReady ? "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing." :
+            f.AnotherRunning ? L.T("Another app is being routed. Stop it first.") :
+            profile is null ? L.T("Choose a VPN profile for it first (Edit).") :
+            profile.Unsupported is not null ? L.T("This version cannot connect its VPN profile.") :
+            packets.Count == 0 ? L.T("Include at least one program sending all its traffic.") :
+            !f.DriverReady ? L.T("Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing.") :
             null;
         string? cannotLaunch =
-            target is null ? "Choose what Launch starts (Edit)." :
-            !File.Exists(target.Path) ? $"{Path.GetFileName(target.Path)} is not where it was added from." :
-            profile is null ? "Choose a VPN profile for it first (Edit)." :
-            profile.Unsupported is not null ? "This version cannot connect its VPN profile." :
+            target is null ? L.T("Choose what Launch starts (Edit).") :
+            !File.Exists(target.Path) ? L.T("{0} is not where it was added from.", Path.GetFileName(target.Path)) :
+            profile is null ? L.T("Choose a VPN profile for it first (Edit).") :
+            profile.Unsupported is not null ? L.T("This version cannot connect its VPN profile.") :
             packets.Count > 0 && !live ? cannotRoute :
             null;
 
         var (tone, status) =
-            f.Launching is AppPhase.Connecting ? (Tone.Busy, packets.Count > 0 && !live ? "Routing it before launch…" : $"Connecting {profile?.Name} before launch…") :
-            f.Launching is AppPhase.Starting ? (Tone.Busy, "Starting…") :
+            f.Launching is AppPhase.Connecting ? (Tone.Busy, packets.Count > 0 && !live ? L.T("Routing it before launch…") : L.T("Connecting {0} before launch…", profile?.Name)) :
+            f.Launching is AppPhase.Starting ? (Tone.Busy, L.T("Starting…")) :
             runView is { } r ? (r.Tone, r.StatusText) :
-            profile is null ? (Tone.Off, "Choose a VPN profile") :
-            item.Programs.Count(p => p.Included) == 0 ? (Tone.Off, "No program included") :
-            packets.Count > 0 ? (Tone.Off, "Not routing") :
-            (Tone.Off, "Ready to launch");
+            profile is null ? (Tone.Off, L.T("Choose a VPN profile")) :
+            item.Programs.Count(p => p.Included) == 0 ? (Tone.Off, L.T("No program included")) :
+            packets.Count > 0 ? (Tone.Off, L.T("Not routing")) :
+            (Tone.Off, L.T("Ready to launch"));
 
         var programs = item.Programs.Select(p => new ProgramView(p.Id, Path.GetFileName(p.Path), p.Path, p.Included, Methods(p), !File.Exists(p.Path),
                 target?.Id == p.Id, p.Included && p.Proxy is not null ? f.StartupSettings(p) : [],
                 new ProgramActions(
-                    Toggle: UiAction.Shown(p.Included ? "Leave out" : "Include", !live && !launching, "Stop routing before changing its programs."),
+                    Toggle: UiAction.Shown(p.Included ? L.T("Leave out") : L.T("Include"), !live && !launching, L.T("Stop routing before changing its programs.")),
                     // A program left out has no methods to choose until it is included again.
-                    Edit: p.Included ? UiAction.Shown("Methods…", !live && !launching, "Stop routing before changing its methods.") : UiAction.Hidden,
+                    Edit: p.Included ? UiAction.Shown(L.T("Methods…"), !live && !launching, L.T("Stop routing before changing its methods.")) : UiAction.Hidden,
                     // Its own Launch for a program started with proxy settings beside the app's (a browser in a game's app);
                     // a folder's helpers are started by the game, not by the person.
                     Launch: p.Included && p.Proxy is not null && p.Id != target?.Id
-                        ? UiAction.Shown("Launch", cannotLaunchFor(p) is null && !launching, cannotLaunchFor(p)) : UiAction.Hidden)))
+                        ? UiAction.Shown(L.T("Launch"), cannotLaunchFor(p) is null && !launching, cannotLaunchFor(p)) : UiAction.Hidden)))
             .ToList();
 
         string? cannotLaunchFor(RoutedProgram p) =>
-            !File.Exists(p.Path) ? $"{Path.GetFileName(p.Path)} is not where it was added from." :
-            profile is null ? "Choose a VPN profile for it first (Edit)." :
+            !File.Exists(p.Path) ? L.T("{0} is not where it was added from.", Path.GetFileName(p.Path)) :
+            profile is null ? L.T("Choose a VPN profile for it first (Edit).") :
             packets.Count > 0 && !live ? cannotRoute : null;
 
         var included = item.Programs.Count(p => p.Included);
         var programsText = item.Folder is null && item.Programs.Count == 1 ? "" :
-            $"{Plural(included, "program")} included of {item.Programs.Count}" + (live ? "; changes wait until routing stops." : ".");
-        return new AppItemView(item.Id, item.Name, item.Folder, profile is null ? "No VPN profile chosen" : $"Through {profile.Name}", methodText,
+            L.T(live ? "{0} included of {1}; changes wait until routing stops." : "{0} included of {1}.",
+                L.Count(included, "1 program", "{0} programs"), item.Programs.Count);
+        return new AppItemView(item.Id, item.Name, item.Folder, profile is null ? L.T("No VPN profile chosen") : L.T("Through {0}", profile.Name), methodText,
             item.RoutesPackets ? GameViews.LossText(item.Choice) : null, tone, status,
-            target is null ? null : $"Launch starts {Path.GetFileName(target.Path)}", runView, programsText, programs,
+            target is null ? null : L.T("Launch starts {0}", Path.GetFileName(target.Path)), runView, programsText, programs,
             new AppItemActions(
                 Route: !item.RoutesPackets || live ? UiAction.Hidden
-                    : UiAction.Shown(mine is { Ended: not null } ? "Route again" : "Route", cannotRoute is null && !f.Busy && !launching, cannotRoute),
-                Stop: live ? UiAction.Shown("Stop routing") : UiAction.Hidden,
-                Launch: UiAction.Shown("Launch", cannotLaunch is null && !f.Busy, cannotLaunch, busy: launching),
-                Edit: UiAction.Shown("Edit", !live && !launching, "Stop routing before changing it."),
-                Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown("Scan folder again", !live && !launching, "Stop routing before scanning again."),
-                AddProgram: UiAction.Shown("Add a program…", !live && !launching && !f.Busy, live ? "Stop routing before changing its programs." : "A file dialog is open."),
-                Remove: UiAction.Shown("Remove app", !live && !launching, "Stop routing before removing it.")));
+                    : UiAction.Shown(mine is { Ended: not null } ? L.T("Route again") : L.T("Route"), cannotRoute is null && !f.Busy && !launching, cannotRoute),
+                Stop: live ? UiAction.Shown(L.T("Stop routing")) : UiAction.Hidden,
+                Launch: UiAction.Shown(L.T("Launch"), cannotLaunch is null && !f.Busy, cannotLaunch, busy: launching),
+                Edit: UiAction.Shown(L.T("Edit"), !live && !launching, L.T("Stop routing before changing it.")),
+                Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown(L.T("Scan folder again"), !live && !launching, L.T("Stop routing before scanning again.")),
+                AddProgram: UiAction.Shown(L.T("Add a program…"), !live && !launching && !f.Busy,
+                    live ? L.T("Stop routing before changing its programs.") : L.T("A file dialog is open.")),
+                Remove: UiAction.Shown(L.T("Remove app"), !live && !launching, L.T("Stop routing before removing it."))));
     }
 
     public static EmptyView? Empty(int profiles, int apps) =>
         apps > 0 ? null :
-        profiles == 0 ? new("No apps yet", "Import a VPN profile first, then add the programs or the game folder to route through it.", "IMPORT") :
-        new("No apps yet", "Add a program, or a game's folder. Its traffic can go through your VPN by the packet driver, or by proxy settings when Sallyport launches it.", "ADD_FOLDER");
-
-    private static string Plural(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n:N0} {noun}s";
+        profiles == 0 ? new(L.T("No apps yet"), L.T("Import a VPN profile first, then add the programs or the game folder to route through it."), "IMPORT") :
+        new(L.T("No apps yet"), L.T("Add a program, or a game's folder. Its traffic can go through your VPN by the packet driver, or by proxy settings when Sallyport launches it."), "ADD_FOLDER");
 }
