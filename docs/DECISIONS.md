@@ -751,7 +751,9 @@ service stopped; after it, exit 0 in 7.3 s — the three programs replaced and n
 they were, the service running from the folder, the Start-menu entry, nothing beside. With a file of the test's own held
 open in the folder: exit 1 after 32 s, its log saying which folder, the service running again, nothing staged left. The
 installed release used: jp connected from the Overview with Zenless on, "VPN 已开启 · jp", disconnected (guard 174
-rounds, 0 failed). Not run: the workflow — the repository has no GitHub remote yet; its first dispatch, as a rehearsal,
+rounds, 0 failed). Again from `03cb107`, with D29 in it: Defender "found no threats"; the upgrade with the client open, exit
+0 in 10.6 s; jp connected from the Overview, Zenless "VPN 已开启 · jp", disconnected (guard 177 rounds, 0 failed). Not
+run: the workflow — the repository has no GitHub remote yet; its first dispatch, as a rehearsal,
 is where a hosted runner is first seen. Not done: code signing (TASKS item 6).
 
 ## D29 — A profile is added on a page of its own — a file, a drop or a link, then looked at — and may sign in with a username and password (2026-10-21; measured, but for a server that asks for one)
