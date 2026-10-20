@@ -1,10 +1,8 @@
 import { t } from '../i18n';
 import { isShenoraAvailable, WindowCommands } from '@shenora/react';
 import { useEffect, useId, useRef, type MouseEvent, type ReactNode } from 'react';
-import type { ChannelView, ClientState, Page, ProfileView, Tone } from '../contract';
-import { post } from '../commands';
-import { duration } from '../format';
-import { Icon, StatusPill, Switch, type IconName } from './shared';
+import type { ClientState, Page, ProfileView } from '../contract';
+import { Icon, type IconName } from './shared';
 
 const commands = new WindowCommands();
 const run = (work: Promise<void>) => { void work.catch(() => console.error('Sallyport window command could not be sent.')); };
@@ -23,11 +21,11 @@ function systemMenu(event: MouseEvent) {
 }
 
 export const pages: readonly (readonly [Page, string, IconName])[] = [
-  ['network', 'Network', 'pulse'], ['apps', 'Apps', 'apps'], ['profiles', 'Profiles', 'key'], ['settings', 'Settings', 'gear'],
+  ['network', 'Overview', 'overview'], ['apps', 'Apps', 'apps'], ['profiles', 'Profiles', 'key'], ['settings', 'Settings', 'gear'],
 ];
 
-/** The profile shown first, here and on the Network page: the one chosen, else the first with a connection open
- *  (trouble first, as the host orders them), else the first. */
+/** The profile shown first on the Overview: the one chosen, else the first with a connection open (trouble first, as
+ *  the host orders them), else the first. */
 export function featuredProfile(state: ClientState, featured: string | null): ProfileView | undefined {
   return state.profiles.find((p) => p.id === featured)
     ?? state.profiles.find((p) => state.network.channels.some((c) => c.profileId === p.id))
@@ -35,62 +33,26 @@ export function featuredProfile(state: ClientState, featured: string | null): Pr
 }
 
 /**
- * Connect's menu, kept open in a wide window: the brand; the connection now, with its switch; the pages, each with
- * how many it holds; Settings and whether packet routing is ready at the foot. ☰ folds it to icons on one line of
- * centres, the folded and the open alike.
+ * The menu as a rail, always narrow: the mark; the pages, each an icon with its word under it; Settings at the foot;
+ * and under the buttons whether anything is connected, in its tone. The Overview holds the switch itself.
  */
-export function Sidebar({ state, shown, go, featured, collapsed, toggle, now }: {
-  state?: ClientState; shown: Page; go: (page: Page) => void; featured?: ProfileView; collapsed: boolean; toggle: () => void; now: number;
-}) {
-  const channel = featured && state?.network.channels.find((c) => c.profileId === featured.id);
-  const counts: Partial<Record<Page, { count: number; tone: Tone }>> = state ? {
-    network: { count: state.network.channels.length, tone: state.network.tone },
-    apps: { count: state.apps.length, tone: 'off' },
-    profiles: { count: state.profiles.length, tone: 'off' },
-  } : {};
+export function Sidebar({ state, shown, go }: { state?: ClientState; shown: Page; go: (page: Page) => void }) {
   const item = ([value, label, icon]: readonly [Page, string, IconName]) =>
     <button key={value} type="button" className={`nav-item${shown === value ? ' selected' : ''}`}
-      aria-current={shown === value ? 'page' : undefined} aria-label={t(label)} title={t(label)} onClick={() => go(value)}>
+      aria-current={shown === value ? 'page' : undefined} title={t(label)} onClick={() => go(value)}>
       <Icon name={icon} /><span className="nav-label">{t(label)}</span>
-      {!!counts[value]?.count && <span className={`badge badge-${counts[value]!.tone}`} aria-hidden="true">{counts[value]!.count}</span>}
     </button>;
-  return <aside className={`sidebar${collapsed ? ' collapsed' : ''}`} onMouseDown={dragFrom} onContextMenu={systemMenu}>
-    {/* The mark stays where it is, folded or open: only the name goes. */}
-    <div className="sidebar-head"><div className="brand"><GateMark /><span>Sallyport</span></div></div>
-    {featured && <ConnectionCard profile={featured} channel={channel} now={now} />}
+  return <aside className="sidebar" onMouseDown={dragFrom} onContextMenu={systemMenu}>
+    <div className="sidebar-head" title="Sallyport"><GateMark /></div>
     <nav className="navigation" aria-label={t('Main')}>
       {pages.filter(([value]) => value !== 'settings').map(item)}
       <span className="nav-spacer" />
-      {state && <div className="sidebar-foot" title={state.network.routing.statusText}>
-        <StatusPill tone={state.network.routing.tone}>{state.network.routing.statusText}</StatusPill>
-      </div>}
       {item(pages.find(([value]) => value === 'settings')!)}
-      {/* Folding is one of the menu's rows, so the mark at the top stays in sight either way. */}
-      <button type="button" className="nav-item fold" aria-expanded={!collapsed} aria-label={collapsed ? t('Expand menu') : t('Collapse menu')}
-        title={collapsed ? t('Expand menu') : t('Collapse menu')} onClick={toggle}>
-        <Icon name={collapsed ? 'expand' : 'collapse'} /><span className="nav-label">{t('Collapse menu')}</span>
-      </button>
     </nav>
-  </aside>;
-}
-
-/** The connection now, in a few words: its state, the profile and how long, the rates, and its switch. */
-function ConnectionCard({ profile, channel, now }: { profile: ProfileView; channel?: ChannelView; now: number }) {
-  const on = profile.actions.disconnect.visible;
-  const since = profile.connectedSince ?? channel?.connectedSince;
-  return <section className={`connection-card connection-${profile.tone}`} aria-label={t('Connection')} title={`${profile.name} — ${profile.statusText}`}>
-    <div className="connection-top">
-      <span className={`connection-dot tone-${profile.tone}`} aria-hidden="true" />
-      <span className="connection-state">{profile.statusText}</span>
-      <Switch on={on} action={on ? profile.actions.disconnect : profile.actions.connect}
-        onFlip={() => post(on ? 'DISCONNECT' : 'CONNECT', { id: profile.id })} />
-    </div>
-    <div className="connection-name">{profile.name}{since && <span className="secondary"> · {duration(since, now)}</span>}</div>
-    {channel?.traffic && <div className="connection-rates secondary">
-      <span><Icon name="down" />{channel.traffic.received.value}</span>
-      <span><Icon name="up" />{channel.traffic.sent.value}</span>
+    {state && <div className={`rail-status tone-${state.summary.tone}`} role="status" title={state.summary.text}>
+      <span className="rail-dot" aria-hidden="true" /><span className="rail-text">{state.summary.text}</span>
     </div>}
-  </section>;
+  </aside>;
 }
 
 /** The page's own header, which is also the window's title bar: its title, its actions, minimize and close — no

@@ -19,7 +19,7 @@ export function Network({ state, now, go, featured, feature }: {
   const profiles = state.profiles;
   const first = featuredProfile(state, featured);
   const others = network.channels.filter((c) => c.profileId !== first?.id);
-  return <section className="page network" aria-label={t('Network')}>
+  return <section className="page network" aria-label={t('Overview')}>
     <p className="page-intro secondary">{t('What is connected, and what goes through it now.')}</p>
     {!first ? state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} /> :
       <Hero profile={first} channel={network.channels.find((c) => c.profileId === first.id) ?? null} profiles={profiles}

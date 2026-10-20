@@ -4,7 +4,7 @@ import type { Action, ClientState, Empty, Fact, Tone } from '../contract';
 import { post } from '../commands';
 
 export type IconName = 'chevron' | 'copy' | 'dismiss' | 'check' | 'info' | 'warning' | 'error' | 'question' | 'menu' | 'pulse' | 'apps'
-  | 'key' | 'gear' | 'plus' | 'folder' | 'down' | 'up' | 'refresh' | 'collapse' | 'expand';
+  | 'key' | 'gear' | 'plus' | 'folder' | 'down' | 'up' | 'refresh' | 'overview';
 
 // 16px strokes in the text's colour: a text glyph (● › ⌄ ✓ △) comes from whichever font has it, larger and higher
 // in Microsoft YaHei than in Segoe UI.
@@ -27,8 +27,7 @@ const glyphs: Record<IconName, ReactNode> = {
   down: <path d="M8 2.5v11M4 9.5l4 4 4-4" />,
   up: <path d="M8 13.5v-11M4 6.5l4-4 4 4" />,
   refresh: <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v2.5h-2.5" />,
-  collapse: <path d="M8.5 4l-4 4 4 4M12.5 4l-4 4 4 4" />,
-  expand: <path d="M3.5 4l4 4-4 4M7.5 4l4 4-4 4" />,
+  overview: <><path d="M2.5 11.5a5.5 5.5 0 0 1 11 0" /><path d="M8 11.5l2.75-3.75" /><circle cx="8" cy="11.5" r=".75" /></>,
 };
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {

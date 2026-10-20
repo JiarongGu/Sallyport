@@ -9,7 +9,7 @@ import { Profiles } from './Profiles';
 import { Settings } from './Settings';
 import { EditorForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
-import { featuredProfile, MainHeader, pages, Sidebar } from './ui/Chrome';
+import { MainHeader, pages, Sidebar } from './ui/Chrome';
 import { ActionButton } from './ui/shared';
 import { post } from './commands';
 
@@ -21,8 +21,7 @@ export function App() {
   const [earlierOpen, setEarlierOpen] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [now, setNow] = useState(Date.now);
-  // Visual state only: whether the menu shows its words, and which profile the Network page puts first.
-  const [collapsed, setCollapsed] = useState(false);
+  // Visual state only: which profile the Overview puts first.
   const [featured, setFeatured] = useState<string | null>(() => { try { return localStorage.getItem('featured-profile'); } catch { return null; } });
   const feature = (id: string) => { setFeatured(id); try { localStorage.setItem('featured-profile', id); } catch { /* kept for this session only */ } };
   const polite = useRef<HTMLDivElement>(null);
@@ -104,9 +103,8 @@ export function App() {
   // Before anything renders: the page's own words follow the host's language from the same state.
   setLanguage(state?.language ?? 'en');
 
-  return <div className={`shell${collapsed ? ' collapsed' : ''}`}>
-    <Sidebar state={state} shown={shown} go={setPage} featured={state && featuredProfile(state, featured)} collapsed={collapsed}
-      toggle={() => setCollapsed((c) => !c)} now={now} />
+  return <div className="shell">
+    <Sidebar state={state} shown={shown} go={setPage} />
     <div className="main">
       <MainHeader title={t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}>
         {state && shown === 'apps' && <>

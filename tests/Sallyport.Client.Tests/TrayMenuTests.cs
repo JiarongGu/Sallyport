@@ -46,7 +46,7 @@ public class TrayMenuTests
              TrayEntryKind.Command, TrayEntryKind.Command],
             menu.Select(e => e.Kind));
         Assert.True(menu[0] is { Text: "Open Sallyport", Verb: TrayVerb.OpenWindow, Default: true });
-        Assert.True(menu[1] is { Text: "Open Network", Verb: TrayVerb.OpenNetwork, Tip: "Nothing is connected" });
+        Assert.True(menu[1] is { Text: "Open Overview", Verb: TrayVerb.OpenNetwork, Tip: "Nothing is connected" });
         Assert.True(menu[3] is { Text: "No profiles yet — open Sallyport to import one", Enabled: false });
         Assert.True(menu[5] is { Text: "Settings", Verb: TrayVerb.OpenSettings });
         Assert.True(menu[6] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Tip: "Stops routing, disconnects every profile, then quits." });

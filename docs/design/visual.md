@@ -23,17 +23,17 @@ list of quick toggles is what its users asked back for — never from code of th
 - **Frameless, no maximize.** No title bar and no tab strip: a sidebar, and a page under a 48px header that is the title
   bar (the page's title, its actions, minimize and close). `MainForm` strips `WS_MAXIMIZEBOX` (Shenora's frameless frame
   keeps it whatever `MaximizeBox` says) and refuses `SC_MAXIMIZE`; the window stays resizable (`WS_THICKFRAME`).
-- **The sidebar** (240 wide, 64 folded): the mark and the name; the connection now (its state, the profile and how long,
-  ↓/↑ rates, its switch — the profile the Network page puts first); the pages with how many each holds; then whether
-  packet routing is ready, Settings, and folding as a row of its own. The mark and every page icon share one centre,
-  32 from the edge, open or folded, so folding moves nothing but the words. Folded, a count shows only when it carries a
-  state (Network's), as a dot. Below 700 CSS pixels it folds by itself.
-- **The splash** (`Splash.cs`) draws the sidebar's head at the page's geometry and a loading line where the content
+- **The rail** (76 wide, always — the owner: *"let just make it always collapsed, and a status show under button
+  (connected or not) … we dont really need the top connect seciont in the menu"*): the mark; Overview, Apps, Profiles,
+  each an icon with its word under it; Settings at the foot; under the buttons whether anything is connected, a dot in
+  its tone and the host's word for it. The connection's switch is the Overview's, not the menu's.
+- **The splash** (`Splash.cs`) draws the rail's head (the mark, centred) at the page's geometry and a loading line where the content
   begins; the page lifts it (`CLOSE_SPLASH`) once its first state is painted.
 
 ## The pages
 
-- **Network** shows one connection first, as Connect does: a profile picker, a large switch, its state in capitals with
+- **Overview** (the Network page, renamed: *"the first page is more like the overview (main control for toggle)"*), where
+  the window opens once a profile exists, shows one connection first, as Connect does: a profile picker, a large switch, its state in capitals with
   its time and proxy, received and sent as figures with the rate now over a minute's graph of both (`Connections`
   samples each channel once a second and publishes when a rate moves), round trips as figures (`"19 ms"` over `"4 of 4
   answered"`), the routed app with Stop, the apps through it with Launch and a route switch; other open channels after.

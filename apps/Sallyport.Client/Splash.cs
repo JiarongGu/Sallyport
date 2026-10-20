@@ -4,18 +4,16 @@ using System.Runtime.InteropServices;
 namespace Sallyport.Client;
 
 /// <summary>
-/// The window while its page loads: the page's sidebar with the mark and the name where the page puts them, so the
-/// window looks like itself rather than a bare strip of caption buttons, and a thin line in the accent where the
+/// The window while its page loads: the page's rail with the mark where the page puts it, so the window looks like
+/// itself rather than a bare strip of caption buttons, and a thin line in the accent where the
 /// page's content begins, running while it waits. Its top moves the window, as the page's header and sidebar do.
 /// </summary>
 internal sealed class Splash : Control
 {
-    // The page's geometry in CSS pixels (styles.css): the sidebar 240 wide (64 when the window is under 700), its head
-    // 48 high with the mark 24 across at 20 — its centre, 32, is every page icon's, open or folded — and the name at 56
-    // in 15 at weight 600; the page's header 48 high. Drawn where the page draws them, the page replaces this without
-    // anything moving.
-    private const float HeaderHeight = 48, Sidebar = 240, NarrowSidebar = 64, NarrowBelow = 700, MarkLeft = 20, MarkSize = 24,
-        NameLeft = 56, NameSize = 15;
+    // The page's geometry in CSS pixels (styles.css): the rail 76 wide, always; its head 48 high with the mark 28 across
+    // at 24, centred; the page's header 48 high. Drawn where the page draws them, the page replaces this without anything
+    // moving.
+    private const float HeaderHeight = 48, Rail = 76, MarkLeft = 24, MarkSize = 28;
 
     /// <summary>The loading line: 2 CSS pixels where the content begins, a third of its width crossing in this long.</summary>
     private const float LineHeight = 2;
@@ -48,9 +46,7 @@ internal sealed class Splash : Control
 
     private int Scaled(float css) => (int)Math.Round(css * CssPixel);
 
-    private bool Narrow => Width / CssPixel < NarrowBelow;
-
-    private int SidebarWidth => Scaled(Narrow ? NarrowSidebar : Sidebar);
+    private int SidebarWidth => Scaled(Rail);
 
     private Rectangle LineBounds() => new(SidebarWidth, Scaled(HeaderHeight), Width - SidebarWidth, Math.Max(2, Scaled(LineHeight)));
 
@@ -62,13 +58,6 @@ internal sealed class Splash : Control
         using (var sidebar = new SolidBrush(_theme.Sidebar)) g.FillRectangle(sidebar, 0, 0, SidebarWidth, Height);
 
         BrandMark.Paint(g, new RectangleF(MarkLeft * scale, (HeaderHeight - MarkSize) / 2 * scale, MarkSize * scale, MarkSize * scale));
-        if (!Narrow)
-        {
-            using var font = NameFont(NameSize * scale);
-            var name = new Rectangle(Scaled(NameLeft), 0, SidebarWidth - Scaled(NameLeft), Scaled(HeaderHeight));
-            TextRenderer.DrawText(g, "Sallyport", font, name, _theme.Text,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
-        }
 
         if (_frames.Enabled) DrawLine(g);
     }
@@ -88,16 +77,6 @@ internal sealed class Splash : Control
         g.SetClip(bounds);
         g.FillRectangle(accent, x, bounds.Y, length, bounds.Height);
         g.Clip = clip;
-    }
-
-    /// <summary>The page's first choice of font where Windows has it (Segoe UI Variable, Windows 11), at its weight 600.</summary>
-    private static Font NameFont(float pixels)
-    {
-        var font = new Font("Segoe UI Variable Text Semibold", pixels, GraphicsUnit.Pixel);
-        // A family Windows does not have comes back as another one, not as an error.
-        if (font.Name == "Segoe UI Variable Text Semibold") return font;
-        font.Dispose();
-        return new Font("Segoe UI Semibold", pixels, GraphicsUnit.Pixel);
     }
 
     protected override void OnMouseDown(MouseEventArgs e)

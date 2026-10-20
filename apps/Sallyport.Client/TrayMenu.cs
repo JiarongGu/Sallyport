@@ -30,7 +30,7 @@ internal static class TrayMenu
         var menu = new List<TrayEntry>
         {
             new(TrayEntryKind.Command, L.T("Open Sallyport"), TrayVerb.OpenWindow, Default: true),
-            new(TrayEntryKind.Command, L.T("Open Network"), TrayVerb.OpenNetwork, Tip: networkStatus),
+            new(TrayEntryKind.Command, L.T("Open Overview"), TrayVerb.OpenNetwork, Tip: networkStatus),
             TrayEntry.Separator,
         };
 

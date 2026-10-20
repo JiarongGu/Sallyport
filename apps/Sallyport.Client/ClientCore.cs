@@ -903,8 +903,9 @@ internal sealed class ClientCore
                 stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id)), stored.ToDictionary(p => p.Id, p => _connections.TrafficOf(p.Id))),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(), _settings.Defaults,
                 stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null, _settings.Language),
-            // Where a first look is useful: with nothing to route through yet, the page that imports one.
-            stored.Count == 0 ? Page.Profiles : Page.Apps,
+            // Where a first look is useful: with nothing to route through yet, the page that imports one; else the Overview,
+            // where the switch is.
+            stored.Count == 0 ? Page.Profiles : Page.Network,
             navigation,
             [.. stored.Select(p => new ClientState.ProfileChoice(p.Id, L.T("{0} (port {1})", p.Name, _settings.PortOf(p.Id)), p.Unsupported is null))],
             [.. Enum.GetValues<AppKind>().Select(k => new ClientState.KindChoice(k, ClientView.KindLabel(k), ClientView.KindHelp(k)))],
