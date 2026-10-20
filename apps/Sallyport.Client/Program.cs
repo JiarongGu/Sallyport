@@ -7,7 +7,7 @@ using Shenora.Windows;
 
 namespace Sallyport.Client;
 
-// Sallyport.Client [profile.ovpn ...] [--add-game <folder>] [--tray] [--exit]
+// Sallyport.Client [profile.ovpn ...] [--add-game <folder or program>] [--tray] [--exit]
 //   The tray and window: import profiles, connect them (each a loopback SOCKS5 port), start applications through them,
 //   and route games through them (the router service, docs/design/product.md).
 //   A profile path imports it; --tray starts out of sight; --exit asks the running client to disconnect all and leave.

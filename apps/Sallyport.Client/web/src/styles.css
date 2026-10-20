@@ -462,6 +462,9 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 .inset.sign-in > .actions { justify-content: flex-start; }
 .setup-actions .change-source { margin-left: auto; align-self: center; }
 /* An Edit page's second card: apart from the form's Save, its buttons at its own edge. */
+/* Add an app's VPNs: each a tick, side by side while they fit. */
+.profile-picks { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: 0.5rem; }
+
 /* About's removal, under the version: its line and its button on one row. */
 .about .uninstall { display: flex; align-items: center; gap: 1rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--divider); }
 .about .uninstall > p { flex: 1; margin: 0; }

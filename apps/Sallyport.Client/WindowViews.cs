@@ -109,9 +109,10 @@ internal static class WindowViews
         var views = profiles.Where(p => p.Phase != ProfilePhase.Unsupported).Select(p =>
         {
             var (apps, addable) = sections?.GetValueOrDefault(p.Id) ?? ([], []);
+            // Always there: an app already added, or a new one (Add an app with this profile ticked).
             return new SectionView(p, channels.FirstOrDefault(c => c.ProfileId == p.Id), apps, addable,
-                addable.Count == 0 ? UiAction.Hidden : UiAction.Shown(L.T("Add an app to {0}", p.Name)),
-                apps.Count == 0 ? addable.Count == 0 ? L.T("Add a game or a program on Apps, then put it here.") : L.T("Put an app here and it goes through {0} whenever it is connected.", p.Name) : null);
+                UiAction.Shown(L.T("Add an app to {0}", p.Name)),
+                apps.Count == 0 ? L.T("Put an app here and it goes through {0} whenever it is connected.", p.Name) : null);
         }).ToList();
         return new NetworkView(status, worst, channels.Count == 0 ? new(L.T("Nothing is connected"), L.T("Connect a profile to begin: the apps whose Use VPN is on go through it.")) : null,
             channels, routing, views);

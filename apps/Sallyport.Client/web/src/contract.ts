@@ -339,7 +339,8 @@ export interface PolicyValues {
 export interface NewAppValues {
   path: string;
   name: string;
-  profileId: string | null;
+  /** The profiles it goes through: in each one's section, its Use VPN on (D24). */
+  profileIds: string[];
   loss: LossMode;
   directAfterText: string;
   /** Paths of the programs (from the editor's options) that go through the VPN. */
@@ -503,7 +504,8 @@ export interface Commands {
   SAVE_DEFAULTS: { token: string; values: DefaultsValues };
   COPY_ENDPOINT: { id: string };
   /** Opens "Add an app" (a new-app editor); its place is chosen there. */
-  ADD_APP: Record<string, never>;
+  /** profileId: opened from that profile's section on the Overview, and ticked. */
+  ADD_APP: { profileId?: string };
   /** One dialog for a folder or a program; what it picks goes to NEW_APP_LOCATION. */
   NEW_APP_BROWSE: { token: string; values: NewAppValues };
   /** The place typed or pasted: the host looks at what is there and answers with a new token. */

@@ -315,7 +315,9 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
   const form = useRef<HTMLFormElement>(null);
   const prefix = useId();
   useEditorFocus(form);
+  const [lossAsked, setLossAsked] = useState(false);
   if (draft.kind !== 'new-app' || editor.kind !== 'new-app') return null;
+  const lossOpen = lossAsked || !!editor.errors.loss || !!editor.errors.directAfterText;
   const values = draft.values;
   const found = editor.save.enabled && !editor.errors.path;
   const update = (next: Partial<NewAppValues>) => onChange({ ...draft, values: { ...values, ...next } });
@@ -324,6 +326,7 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
   const error = (field: EditorField) => editor.errors[field]
     ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p> : null;
   const included = new Set(values.included);
+  const through = new Set(values.profileIds);
 
   return <form ref={form} className="new-app" tabIndex={-1} aria-label={t('Add an app')} noValidate onSubmit={(event) => {
     event.preventDefault();
@@ -346,6 +349,24 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
       {found && editor.hint && <p className="found"><Icon name="check" /><span>{editor.hint}</span></p>}
     </section>
 
+    {/* Which VPNs: many to many (D23-D24) — in each one ticked, its Use VPN on. The one it was opened from is ticked. */}
+    {found && <section className="card setup-step" aria-labelledby={`${prefix}-through`}>
+      <h2 id={`${prefix}-through`}>{t('Which VPN it goes through')}</h2>
+      {profileChoices.length === 0
+        ? <p className="secondary">{t('You have no VPN profile yet. Add the app now, and put it in one once you have imported it.')}</p>
+        : <>
+          <p className="secondary">{t('Its Use VPN is on in each one ticked: it goes through whichever of them is connected. You can change this on the Overview.')}</p>
+          <div className="profile-picks" role="group" aria-labelledby={`${prefix}-through`}>
+            {profileChoices.map((choice) => <label key={choice.id} className="check-field profile-pick">
+              <input type="checkbox" checked={through.has(choice.id)} disabled={!choice.enabled}
+                onChange={() => update({ profileIds: through.has(choice.id) ? values.profileIds.filter((id) => id !== choice.id) : [...values.profileIds, choice.id] })} />
+              <span>{choice.label}</span>
+            </label>)}
+          </div>
+        </>}
+      {error('profileId')}
+    </section>}
+
     {found && <section className="card setup-step" aria-labelledby={`${prefix}-about`}>
       <h2 id={`${prefix}-about`}>{t('About it')}</h2>
       <div className="editor-fields">
@@ -355,17 +376,14 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
             onChange={(event) => update({ name: event.target.value })} />
           {error('name')}
         </div>
-        <div className="field">
-          <label htmlFor={`${prefix}-profile`}>{t('Goes through')}</label>
-          <select id={`${prefix}-profile`} value={values.profileId ?? ''} aria-invalid={!!editor.errors.profileId}
-            onChange={(event) => update({ profileId: event.target.value || null })}>
-            <option value="">{t('Choose later')}</option>
-            {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
-          </select>
-          {error('profileId')}
+        {/* What its traffic does when the VPN drops: the safe choice is already made, so it is folded under what it is. */}
+        <div className="field full-field more-toggle">
+          <Disclosure open={lossOpen} controls={`${prefix}-loss`} onClick={() => setLossAsked(!lossOpen)}>
+            {t('When the VPN drops: {0}', lossChoices.find((choice) => choice.value === values.loss)?.label ?? '')}
+          </Disclosure>
         </div>
-        <fieldset className="field full-field">
-          <legend>{t('When the VPN drops')}</legend>
+        <fieldset id={`${prefix}-loss`} hidden={!lossOpen} className="field full-field">
+          <legend className="sr-only">{t('When the VPN drops')}</legend>
           {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
             <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={values.loss === choice.value}
               onChange={() => update({ loss: choice.value })} />
@@ -373,7 +391,7 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
           </label>)}
           {error('loss')}
         </fieldset>
-        {values.loss === 'hold' && <div className="field">
+        {lossOpen && values.loss === 'hold' && <div className="field">
           <label htmlFor={`${prefix}-after`}>{t('Use my own connection after')}</label>
           <div className="unit-field">
             <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false} placeholder={t('never')}

@@ -19,6 +19,10 @@
   so the release carries one .NET runtime instead of four, and the install folder holds that program, WebView2's
   loader and `data`. An upgrade from 0.1.0 moves the service to the program; the Start menu, sign-in start and `.ovpn`
   association stay as they were.
+- Adding an app for apps and VPNs many to many (2026-10-21): Add an app asks which VPNs it goes through — each a
+  tick, its Use VPN on in each one ticked — after the program is found; what happens when the VPN drops is folded under
+  its choice. A profile's section on the Overview adds an app already there or a new one (A new app…, with that
+  profile ticked). `--add-game` takes a program as well as a folder, and opens Add an app on it.
 - Each app's own use and latency (2026-10-21): on the Overview and Apps, an app going through a VPN shows what it
   has received and sent through it and its own round trip — its TCP handshakes through the tunnel, or for a program on
   UDP alone its shortest wait for a reply; its check and its figures are on its own page. A connected profile's latency

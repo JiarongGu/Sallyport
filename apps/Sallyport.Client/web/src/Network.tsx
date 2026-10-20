@@ -73,16 +73,25 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
         screen reader. */}
     <section className="hero-apps" aria-label={t('Apps through {0}', profile.name)}>
       {section.hintText && <p className="secondary metadata section-hint">{section.hintText}
-        {section.addable.length === 0 && <> <button type="button" className="link" onClick={() => go('apps')}>{t('Open Apps')}</button></>}</p>}
+        </p>}
       {section.apps.length > 0 && <ul>{section.apps.map((app) => <SectionApp key={app.appId} app={app} now={now} />)}</ul>}
+      {/* An app already added, or a new one: Add an app, with this profile ticked. */}
       {section.add.visible && <select className="add-to-section" aria-label={section.add.label} value=""
-        onChange={(event) => event.target.value && post('ADD_APP_TO_PROFILE', { id: event.target.value, profileId: profile.id })}>
+        onChange={(event) => {
+          const value = event.target.value;
+          if (value === newApp) post('ADD_APP', { profileId: profile.id });
+          else if (value) post('ADD_APP_TO_PROFILE', { id: value, profileId: profile.id });
+        }}>
         <option value="">{section.add.label}</option>
         {section.addable.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+        <option value={newApp}>{t('A new app…')}</option>
       </select>}
     </section>
   </article>;
 }
+
+// Not an app's id (those are GUIDs): the add list's own entry for a new app.
+const newApp = '+new';
 
 /** An app in a section: its icon and name, what it is doing through this profile, its switch here; while this profile
  *  carries it, what it has had through the VPN and its own round trip (the owner: "its better we display its single app

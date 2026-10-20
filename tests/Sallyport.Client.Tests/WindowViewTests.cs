@@ -124,7 +124,9 @@ public class WindowViewTests
         Assert.Equal("Put an app here and it goes through jp whenever it is connected.", view.Sections[0].HintText);
         var us = view.Sections[1];
         Assert.Same(channel, us.Channel);
-        Assert.False(us.Add.Visible);
+        // Every app in it already, but a new one can always be added from here (Add an app with us ticked).
+        Assert.True(us.Add.Visible);
+        Assert.Empty(us.Addable);
         var selection = Assert.Single(us.Apps);
         Assert.Equal("Zenless Zone Zero", selection.Name);
         Assert.Equal("VPN on · us", selection.Run!.StatusText);

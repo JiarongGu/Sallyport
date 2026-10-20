@@ -729,22 +729,18 @@ internal sealed class ClientCore
 
     // ---- apps (docs/design/window.md): a program or a folder, each program with its methods
 
-    /// <summary>An app from a folder (a start's <c>--add-game</c>).</summary>
-    public void AddFolder(string folder)
+    /// <summary>A start's <c>--add-game</c>, a folder or a program: onto "Add an app" with it looked at, as a profile
+    /// opened from Explorer goes onto the import page — the person sees what was found before anything is kept.</summary>
+    public void OpenAddApp(string path)
     {
-        if (!Directory.Exists(folder)) throw new ShenoraException("APP_FOLDER", "folder", folder, L.T("That folder is not there."));
-        RoutedItem item;
-        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
-        if (name.Length == 0) name = "app";
-        if (name.Length > LongestName) name = name[..LongestName];
-        try { item = WithDefaults(_items.CreateFromFolder(name, folder, DefaultProfile()?.Id)); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        { throw new ShenoraException("APP_FOLDER", "folder", name, L.T("{0} could not be read: {1}.", name, e.GetType().Name)); }
-        var included = item.Programs.Count(p => p.Included);
-        Notify(NoticeKind.Info, item.Programs.Count == 0
-            ? L.T("Added {0}, but its folder holds no program. Scan it again once it is installed.", item.Name)
-            : L.T("Added {0}: {1} of its {2} programs will send all their traffic through the VPN.", item.Name, included, item.Programs.Count), new("app", item.Id));
-        Replan();
+        bool editing;
+        lock (_gate) editing = _editor is { Kind: not "new-app" };
+        if (editing) { Notify(NoticeKind.Warning, L.T("Finish or cancel what you are editing first, then add the app.")); return; }
+        BeginAddApp();
+        OpenEditor? open;
+        lock (_gate) open = _editor;
+        if (open is { Kind: "new-app" }) SetNewAppLocation(open.Token, (NewAppValues)open.Values with { Path = path });
+        Navigate(Page.Apps);
     }
 
     /// <summary>Asks for the app's program and makes an app of it — one way in for a game and a program alike: a browser
@@ -757,14 +753,18 @@ internal sealed class ClientCore
     // What the open "Add an app" found, for its token: the page shows it, the save makes the app from it.
     private (string Token, SetupPreview Preview)? _setup;
 
-    /// <summary>Opens "Add an app" with nothing chosen yet: the person's defaults for a new app.</summary>
-    public void BeginAddApp()
+    /// <summary>Opens "Add an app" with nothing chosen yet: the person's defaults for a new app, going through
+    /// <paramref name="profileId"/> when it is opened from that profile's section on the Overview, else the default
+    /// profile, if any.</summary>
+    public void BeginAddApp(string? profileId = null)
     {
         var defaults = _settings.Defaults;
+        IReadOnlyList<string> through = profileId is not null && _store.Find(profileId) is not null ? [profileId]
+            : DefaultProfile() is { } first ? [first.Id] : [];
         lock (_gate)
         {
             _setup = null;
-            _editor = new OpenEditor(NewToken(), "new-app", "", new NewAppValues("", "", DefaultProfile()?.Id, defaults.Loss,
+            _editor = new OpenEditor(NewToken(), "new-app", "", new NewAppValues("", "", through, defaults.Loss,
                 defaults.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? "", []), Empty);
         }
         Publish();
@@ -830,7 +830,8 @@ internal sealed class ClientCore
         if (preview is null) errors["path"] = why!;
         var name = values.Name?.Trim() ?? "";
         if (name.Length is 0 or > LongestName) errors["name"] = L.T("Use 1 to {0} characters.", LongestName);
-        if (values.ProfileId is not null && _store.Find(values.ProfileId) is null) errors["profileId"] = L.T("Choose a VPN profile.");
+        var through = (values.ProfileIds ?? []).Distinct().ToList();
+        if (through.Any(id => _store.Find(id) is null)) errors["profileId"] = L.T("Choose a VPN profile.");
         if (!Enum.IsDefined(values.Loss)) errors["loss"] = L.T("Choose what happens when the VPN drops.");
         int? directAfter = null;
         var directAfterText = values.DirectAfterText?.Trim() ?? "";
@@ -852,13 +853,16 @@ internal sealed class ClientCore
             {
                 try
                 {
+                    var first = through.FirstOrDefault();
                     made = preview!.Kind switch
                     {
-                        SetupKind.Browser => _items.CreateFromProgram(name, preview.Path, preview.ProgramKind, values.ProfileId, packets: false, proxy: true),
-                        SetupKind.Program => _items.CreateFromProgram(name, preview.Path, preview.ProgramKind, values.ProfileId, packets: true, proxy: false),
-                        _ when Directory.Exists(preview.Path) => _items.CreateFromFolder(name, preview.Path, values.ProfileId),
-                        _ => _items.CreateFromProgramFolder(name, preview.Path, values.ProfileId),
+                        SetupKind.Browser => _items.CreateFromProgram(name, preview.Path, preview.ProgramKind, first, packets: false, proxy: true),
+                        SetupKind.Program => _items.CreateFromProgram(name, preview.Path, preview.ProgramKind, first, packets: true, proxy: false),
+                        _ when Directory.Exists(preview.Path) => _items.CreateFromFolder(name, preview.Path, first),
+                        _ => _items.CreateFromProgramFolder(name, preview.Path, first),
                     };
+                    // Each other profile ticked: its section too, its switch on.
+                    foreach (var other in through.Skip(1)) made = made.WithUse(other, true);
                     // The person's choice of programs over the scan's, each marked as theirs where it differs.
                     foreach (var program in made.Programs.Where(p => p.Included != included.Contains(p.Path)).ToList())
                         if (preview.Kind == SetupKind.Folder) made = _items.Choose(made.Id, program.Path, included.Contains(program.Path));
@@ -876,11 +880,11 @@ internal sealed class ClientCore
         }
         if (made is not null)
         {
-            var through = _store.Find(made.Sections.FirstOrDefault()?.ProfileId ?? "")?.Name;
-            Notify(NoticeKind.Info, made.PacketPrograms.Count > 0 && through is not null
-                ? L.T("Added {0}. Use VPN is on: it goes through {1} whenever {1} is connected.", made.Name, through)
-                : made.PacketPrograms.Count == 0 ? L.T("Added {0}. Launch it from here to start it through your VPN.", made.Name)
-                : L.T("Added {0}.", made.Name), new("app", made.Id));
+            var names = made.Sections.Select(u => _store.Find(u.ProfileId)?.Name).OfType<string>().ToList();
+            Notify(NoticeKind.Info, made.PacketPrograms.Count == 0 ? L.T("Added {0}. Launch it from here to start it through your VPN.", made.Name)
+                : names.Count == 1 ? L.T("Added {0}. Use VPN is on: it goes through {1} whenever {1} is connected.", made.Name, names[0])
+                : names.Count > 1 ? L.T("Added {0}. Use VPN is on in {1}: it goes through the first of them that is connected.", made.Name, L.List(names))
+                : L.T("Added {0}. Put it in a VPN on the Overview, and it goes through it.", made.Name), new("app", made.Id));
             Replan();
             Navigate(Page.Apps, made.Id);
         }
@@ -924,15 +928,6 @@ internal sealed class ClientCore
     private StoredProfile? DefaultProfile() =>
         _settings.Defaults.ProfileId is { } chosen && _store.Find(chosen) is { Unsupported: null } profile ? profile
         : _store.List().FirstOrDefault(p => p.Unsupported is null);
-
-    private RoutedItem WithDefaults(RoutedItem item, bool force = false)
-    {
-        var defaults = _settings.Defaults;
-        if (!force && defaults.Loss == item.Loss && defaults.DirectAfterSeconds == item.DirectAfterSeconds) return item;
-        var updated = item with { Loss = defaults.Loss, DirectAfterSeconds = defaults.DirectAfterSeconds };
-        _items.Put(updated);
-        return updated;
-    }
 
     public void BeginDefaultsEdit()
     {

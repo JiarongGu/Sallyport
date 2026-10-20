@@ -6,7 +6,9 @@ namespace Sallyport.Client;
 
 /// <summary>What "Add an app" holds while the person sets an app up: where it is, its name, its VPN profile, what its
 /// traffic does when the VPN drops, and which of its programs go through the VPN (by path; a folder's).</summary>
-internal sealed record NewAppValues(string Path, string Name, string? ProfileId, LossMode Loss, string DirectAfterText, IReadOnlyList<string> Included);
+/// <summary>"Add an app": where it is, its name, the profiles it goes through — each one ticked puts it in that profile's
+/// section with its Use VPN on (D24) — what its traffic does when the VPN drops, and, for a folder, which programs.</summary>
+internal sealed record NewAppValues(string Path, string Name, IReadOnlyList<string> ProfileIds, LossMode Loss, string DirectAfterText, IReadOnlyList<string> Included);
 
 /// <summary>How an app at a place would be made: a folder of programs, a program on its own, or a browser launched with
 /// proxy settings.</summary>

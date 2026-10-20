@@ -44,7 +44,7 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "SET_RETRY" => () => Done(() => core.SetRetry(PayloadHelper.GetRequiredValue<int>(request.Payload, "rounds"))),
             "SAVE_DEFAULTS" => () => Done(() => core.SaveDefaults(Token(), PayloadHelper.GetRequiredValue<DefaultsValues>(request.Payload, "values"))),
             "COPY_ENDPOINT" => () => Done(() => core.CopyEndpoint(Id())),
-            "ADD_APP" => () => Done(core.BeginAddApp),
+            "ADD_APP" => () => Done(() => core.BeginAddApp(PayloadHelper.GetOptionalValue<string>(request.Payload, "profileId"))),
             "NEW_APP_BROWSE" => () => core.BrowseNewAppAsync(Token(), PayloadHelper.GetRequiredValue<NewAppValues>(request.Payload, "values")),
             "NEW_APP_LOCATION" => () => Done(() => core.SetNewAppLocation(Token(), PayloadHelper.GetRequiredValue<NewAppValues>(request.Payload, "values"))),
             "SAVE_NEW_APP" => () => Done(() => core.SaveNewApp(Token(), PayloadHelper.GetRequiredValue<NewAppValues>(request.Payload, "values"))),

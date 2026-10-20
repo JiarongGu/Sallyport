@@ -134,9 +134,7 @@ internal sealed class MainForm : OptimizedForm
         _core.OpenProfileFiles([.. args.Where(a => !a.StartsWith('-')
             && (a.EndsWith(".ovpn", StringComparison.OrdinalIgnoreCase) || a.EndsWith(".conf", StringComparison.OrdinalIgnoreCase)))]);
         var addGame = Array.IndexOf(args, "--add-game");
-        if (addGame >= 0 && addGame + 1 < args.Length)
-            try { _core.AddFolder(args[addGame + 1]); }
-            catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
+        if (addGame >= 0 && addGame + 1 < args.Length) _core.OpenAddApp(args[addGame + 1]);
         if (!atStart) _tray.ShowWindow();
         // Hidden only once shown: the window has to exist for the page to load behind it.
         else if (args.Contains("--tray")) BeginInvoke(Hide);

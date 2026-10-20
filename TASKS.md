@@ -5,15 +5,8 @@ says under **Done when** has been measured — against the real server where a s
 **Needs** names what only the owner can give.
 
 ## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
-1. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
-   and its loss policy as when an app had one; now an app is added to the profiles it goes through (D23–D24), from the
-   Overview's profile section or from Apps. Its look and its steps redesigned with that, for a person who is not
-   technical. Found on the way (2026-10-21): `--add-game <a program's path>` takes the program and also says "该文件夹不存在"
-   (it wants a folder); and a path typed by UI Automation is not looked up (the page reads its input event).
-   - **Done when:** an app added from each place lands where it was asked for, measured, and the page reviewed against
-     the rest of the window.
-2. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
-3. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+1. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
+2. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,
@@ -341,6 +334,8 @@ were seeded instead), Firefox and Electron launches, the dark theme of the new w
   first install on a machine without Sallyport, nor a removal to the end (the Start menu's Uninstall Sallyport, Settings'
   Uninstall Sallyport… and Windows' installed apps each open setup's removal, cancelled there), nor with UAC on. A clean
   machine or VM is where those are measured (§2's install item).
+- **Add an app with more than one VPN (2026-10-21):** the owner has one profile, so an app ticked into two at once is
+  measured only as far as the code and its test go.
 - **Done when:** each is measured, or recorded as could-not-be-checked with the reason.
 
 ## 5. Phase 4 — the long run (the library)

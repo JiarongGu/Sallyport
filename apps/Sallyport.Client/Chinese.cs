@@ -500,6 +500,9 @@ internal static class Chinese
         ["Not measured yet"] = "尚未测得",
         ["Sent through the VPN"] = "经由 VPN 发送",
         ["Its round trip through the VPN"] = "经由 VPN 的往返延迟",
+        ["Finish or cancel what you are editing first, then add the app."] = "请先完成或取消正在编辑的内容，然后再添加应用。",
+        ["Added {0}. Use VPN is on in {1}: it goes through the first of them that is connected."] = "已添加 {0}。已在 {1} 中打开“使用 VPN”：它会经由其中第一个已连接的 VPN。",
+        ["Added {0}. Put it in a VPN on the Overview, and it goes through it."] = "已添加 {0}。在“总览”中把它加入一个 VPN，它就会经由那个 VPN。",
         // The router service's reasons (RouterWords).
         ["The service is stopping."] = "Sallyport 服务正在停止。",
         ["Stopped by the client."] = "已由本窗口停止。",
