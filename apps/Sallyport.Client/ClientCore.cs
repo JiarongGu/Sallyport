@@ -812,6 +812,7 @@ internal sealed class ClientCore
                 var next = new OpenEditor(NewToken(), "new-app", "", values with
                 {
                     Path = preview.Path, Name = name, Included = [.. preview.Programs.Where(p => p.Included).Select(p => p.Path)],
+                    IconPath = AppSetup.IconPathOf(preview),
                 }, Empty);
                 _editor = next;
                 _setup = (next.Token, preview);
@@ -867,7 +868,10 @@ internal sealed class ClientCore
                     foreach (var program in made.Programs.Where(p => p.Included != included.Contains(p.Path)).ToList())
                         if (preview.Kind == SetupKind.Folder) made = _items.Choose(made.Id, program.Path, included.Contains(program.Path));
                     // Added to use the VPN: in its profile's section with its switch on, so it goes through it whenever that is connected.
-                    made = made with { Loss = values.Loss, DirectAfterSeconds = directAfter };
+                    // Its icon, the program's the person chose; one not among what the place has now is let go, and the
+                    // app takes its own.
+                    var icon = made.Programs.FirstOrDefault(p => string.Equals(p.Path, values.IconPath, StringComparison.OrdinalIgnoreCase));
+                    made = made with { Loss = values.Loss, DirectAfterSeconds = directAfter, IconProgramId = icon?.Id };
                     _items.Put(made);
                     _editor = null;
                     _setup = null;
@@ -1723,10 +1727,11 @@ internal sealed class ClientCore
                                 : Path.GetRelativePath(Directory.Exists(found.Path) ? found.Path : Path.GetDirectoryName(found.Path)!, Path.GetDirectoryName(p.Path)!)
                                     is var where && where != "." ? where : null))]
                             : null,
-                // The icons it may take, one per look: a game's programs often carry the same one.
+                // The icons it may take: an app's programs by id; one being added, the place's by path.
                 editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } iconed
-                    ? [.. iconed.Programs.Select(p => (Program: p, Url: _icons.Of(p.Path))).Where(c => c.Url is not null).DistinctBy(c => c.Url)
-                        .Select(c => new IconChoice(c.Program.Id, Path.GetFileName(c.Program.Path), c.Url!))]
+                    ? IconChoices(iconed.Programs.Select(p => (p.Id, p.Path)), (editor.Values as AppEditValues)?.IconProgramId)
+                    : editor.Kind == "new-app" && setup is { } adding
+                        ? IconChoices(AppSetup.ProgramsOf(adding.Preview).Select(p => (p.Path, p.Path)), (editor.Values as NewAppValues)?.IconPath)
                     : null,
                 // What was read, as OpenVPN Connect's Imported Profile shows it: its servers, locked, whose it is, and where it
                 // came from; an edited profile's, which no edit changes. One that signs in names its account in its own field.
@@ -1750,6 +1755,15 @@ internal sealed class ClientCore
                 : null,
             TextSize.Factor);
     }
+
+    /// <summary>One choice per look — a game's programs often carry the same icon — each standing for the program that has
+    /// it, <paramref name="current"/> where that is one of them, so the one chosen shows as chosen.</summary>
+    private IReadOnlyList<IconChoice> IconChoices(IEnumerable<(string Id, string Path)> programs, string? current) =>
+    [
+        .. programs.Select(p => (p.Id, p.Path, Url: _icons.Of(p.Path))).Where(c => c.Url is not null).GroupBy(c => c.Url)
+            .Select(look => look.FirstOrDefault(c => c.Id == current) is { Url: not null } chosen ? chosen : look.First())
+            .Select(c => new IconChoice(c.Id, Path.GetFileName(c.Path), c.Url!)),
+    ];
 
     private static IReadOnlyList<EditorOption> MoveParts(int profiles, int apps, bool connection) =>
     [

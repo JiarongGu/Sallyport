@@ -52,6 +52,18 @@ public sealed class AppSetupTests : IDisposable
         Assert.Single(found.Programs);
     }
 
+    [Fact]
+    public void The_icon_chosen_first_is_the_one_the_made_app_would_take_by_itself()
+    {
+        var game = Path.Combine(_folder, "Game");
+
+        // A folder's: the program named for it, what Launch starts. A program picked in its folder: that one, even an
+        // uninstaller, since it is what Launch starts.
+        Assert.Equal(Path.Combine(game, "Game.exe"), AppSetup.IconPathOf(AppSetup.Preview(game, _ => true, out _)!));
+        Assert.Equal(Path.Combine(game, "unins000.exe"), AppSetup.IconPathOf(AppSetup.Preview(Path.Combine(game, "unins000.exe"), _ => true, out _)!));
+        Assert.Equal(Path.Combine(game, "Game.exe"), AppSetup.IconPathOf(AppSetup.Preview(Path.Combine(game, "Game.exe"), _ => false, out _)!));
+    }
+
     [Theory]
     [InlineData("", "Choose a game's folder or a program.")]
     [InlineData("Empty", "There is no program in that folder. Choose the folder the game is installed in.")]

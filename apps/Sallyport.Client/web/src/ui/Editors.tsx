@@ -82,17 +82,8 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, name: event.target.value } })} />
         {error('name')}
       </div>
-      {/* Its icon, picked by sight from its programs' own (the owner: "set app icon from app exe"). */}
-      {editor.icons && editor.icons.length > 0 && <fieldset className="field full-field icon-choices">
-        <legend>{t('Icon')}</legend>
-        {editor.icons.map((icon) => <label key={icon.id} className="icon-choice" title={icon.label}>
-          <input type="radio" name={`${prefix}-icon`} value={icon.id} disabled={saving}
-            checked={draft.values.iconProgramId === icon.id || (!editor.icons!.some((i) => i.id === draft.values.iconProgramId) && icon === editor.icons![0])}
-            onChange={() => onChange({ ...draft, values: { ...draft.values, iconProgramId: icon.id } })} />
-          <img src={icon.url} alt="" aria-hidden="true" draggable={false} />
-          <span>{icon.label}</span>
-        </label>)}
-      </fieldset>}
+      <IconChoices icons={editor.icons} chosen={draft.values.iconProgramId} name={`${prefix}-icon`} disabled={saving}
+        onChoose={(id) => onChange({ ...draft, values: { ...draft.values, iconProgramId: id } })} />
       {editor.options && editor.options.length > 0 && <div className="field">
         <label htmlFor={`${prefix}-launch`}>{t('Launch starts')}</label>
         <select id={`${prefix}-launch`} value={draft.values.launchProgramId ?? ''} disabled={saving}
@@ -305,6 +296,23 @@ function MoveFields({ editor, draft, onChange, prefix, saving, error, descriptio
   </div>;
 }
 
+/** An app's icon, picked by sight from its programs' own (the owner: "set app icon from app exe"), on Edit and on Add an
+ *  app alike; the first stands for the one chosen when that is not among them. */
+function IconChoices({ icons, chosen, name, disabled = false, onChoose }: {
+  icons: Editor['icons']; chosen: string | null; name: string; disabled?: boolean; onChoose: (id: string) => void;
+}) {
+  if (!icons || icons.length === 0) return null;
+  const shown = icons.some((icon) => icon.id === chosen) ? chosen : icons[0].id;
+  return <fieldset className="field full-field icon-choices">
+    <legend>{t('Icon')}</legend>
+    {icons.map((icon) => <label key={icon.id} className="icon-choice" title={icon.label}>
+      <input type="radio" name={name} value={icon.id} disabled={disabled} checked={icon.id === shown} onChange={() => onChoose(icon.id)} />
+      <img src={icon.url} alt="" aria-hidden="true" draggable={false} />
+      <span>{icon.label}</span>
+    </label>)}
+  </fieldset>;
+}
+
 export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoices }: {
   editor: Editor;
   draft: Draft;
@@ -376,6 +384,7 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
             onChange={(event) => update({ name: event.target.value })} />
           {error('name')}
         </div>
+        <IconChoices icons={editor.icons} chosen={values.iconPath} name={`${prefix}-icon`} onChoose={(id) => update({ iconPath: id })} />
         {/* What its traffic does when the VPN drops: the safe choice is already made, so it is folded under what it is. */}
         <div className="field full-field more-toggle">
           <Disclosure open={lossOpen} controls={`${prefix}-loss`} onClick={() => setLossAsked(!lossOpen)}>

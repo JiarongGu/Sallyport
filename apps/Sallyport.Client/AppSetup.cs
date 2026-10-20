@@ -7,8 +7,10 @@ namespace Sallyport.Client;
 /// <summary>What "Add an app" holds while the person sets an app up: where it is, its name, its VPN profile, what its
 /// traffic does when the VPN drops, and which of its programs go through the VPN (by path; a folder's).</summary>
 /// <summary>"Add an app": where it is, its name, the profiles it goes through — each one ticked puts it in that profile's
-/// section with its Use VPN on (D24) — what its traffic does when the VPN drops, and, for a folder, which programs.</summary>
-internal sealed record NewAppValues(string Path, string Name, IReadOnlyList<string> ProfileIds, LossMode Loss, string DirectAfterText, IReadOnlyList<string> Included);
+/// section with its Use VPN on (D24) — what its traffic does when the VPN drops, and, for a folder, which programs.
+/// <see cref="IconPath"/>: the program, by path, whose icon the app takes.</summary>
+internal sealed record NewAppValues(string Path, string Name, IReadOnlyList<string> ProfileIds, LossMode Loss, string DirectAfterText, IReadOnlyList<string> Included,
+    string? IconPath = null);
 
 /// <summary>How an app at a place would be made: a folder of programs, a program on its own, or a browser launched with
 /// proxy settings.</summary>
@@ -68,6 +70,24 @@ internal static class AppSetup
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { why = L.T("That place could not be read ({0}).", e.GetType().Name); return null; }
         why = L.T("Nothing is there. Check the path, or use Browse.");
         return null;
+    }
+
+    /// <summary>The programs an app made from <paramref name="preview"/> would have, by path: a browser's or a lone
+    /// program's is the place itself.</summary>
+    public static IReadOnlyList<GameExecutable> ProgramsOf(SetupPreview preview) =>
+        preview.Programs.Count > 0 ? preview.Programs : [new GameExecutable(preview.Path, true)];
+
+    /// <summary>The program whose icon the app made from <paramref name="preview"/> would take by itself — what Launch
+    /// starts, else the first it includes (<see cref="AppViews.IconProgram"/>) — by path.</summary>
+    public static string? IconPathOf(SetupPreview preview)
+    {
+        // The app as it would be made, its programs known by their paths: the rule is the made app's own.
+        var file = File.Exists(preview.Path) ? preview.Path : null;
+        var folder = preview.Kind != SetupKind.Folder ? null : file is null ? preview.Path : System.IO.Path.GetDirectoryName(file);
+        var made = new RoutedItem("", "", folder, default, null, LossMode.Hold, null,
+            [.. ProgramsOf(preview).Select(p => new RoutedProgram(p.Path, p.Path, p.Included, p.Reason, false, Packets: true, Proxy: null))],
+            LaunchProgramId: file);
+        return AppViews.IconProgram(made)?.Path;
     }
 
     private static string FolderSummary(IReadOnlyList<GameExecutable> programs)

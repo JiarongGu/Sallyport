@@ -342,6 +342,8 @@ export interface NewAppValues {
   directAfterText: string;
   /** Paths of the programs (from the editor's options) that go through the VPN. */
   included: string[];
+  /** The program, by path, whose icon the app takes: one of the editor's `icons`. */
+  iconPath: string | null;
 }
 
 export type EditorField = 'form' | 'path' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
@@ -420,7 +422,8 @@ export type Editor = {
   /** The app editor's choices for what Launch starts; a profile's VPN protocols on its Edit page, null when it has
    *  servers of one only. */
   options: { id: string; label: string; help: string | null }[] | null;
-  /** For an app: the icons it may take, each a program's own (a data URL), one per look. */
+  /** For an app, or one being added: the icons it may take, each a program's own (a data URL), one per look; an id is
+   *  a program's id, or, for one being added, its path. */
   icons: { id: string; label: string; url: string }[] | null;
   /** For a profile being imported, once read: its server and where it came from. */
   facts: Fact[] | null;
