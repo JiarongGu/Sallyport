@@ -74,7 +74,7 @@
   --ease-out: cubic-bezier(0, 0, 0, 1);
   --ease-in-out: cubic-bezier(.33, 0, .67, 1);
 
-  --sidebar-width: 232px;
+  --sidebar-width: 240px;
 
   --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%239aa5b4' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%230b1220' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -155,29 +155,67 @@ pre { white-space: pre-wrap; min-width: 0; }
 
 /* the frame: the sidebar, and the page under its header */
 .shell { height: 100%; display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); min-width: 0; background: var(--background); }
-.shell.collapsed { --sidebar-width: 60px; }
 
-/* The splash draws the sidebar's head the same (Splash.cs): ☰ at 8–48, the mark 20 across at 56, the name at 86. */
-.sidebar { display: flex; flex-direction: column; min-width: 0; padding: 0 8px 12px; background: var(--sidebar); user-select: none; overflow: hidden; }
-.sidebar-head { display: flex; align-items: center; gap: 8px; height: 48px; flex: none; }
-.sidebar-head > button.icon { width: 40px; min-height: 40px; height: 40px; flex: none; }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; font: 600 15px/20px var(--font-ui); color: var(--text); white-space: nowrap; }
-.brand svg { width: 20px; height: 20px; flex: none; }
-.navigation { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
-.nav-item { position: relative; justify-content: flex-start; gap: 12px; width: 100%; height: 40px; min-height: 40px; padding: 0 12px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondary); }
+/* The splash draws the sidebar's head the same (Splash.cs): the mark 24 across at 20 — its centre, 32, is every page
+   icon's centre too, open or folded — the name at 56. */
+.sidebar { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 0 8px 12px; background: var(--sidebar); user-select: none; overflow: hidden; }
+.sidebar-head { display: flex; align-items: center; height: 48px; flex: none; padding-left: 12px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; font: 600 15px/20px var(--font-ui); color: var(--text); white-space: nowrap; }
+.brand svg { width: 24px; height: 24px; flex: none; }
+
+/* the connection now: its state, the profile and how long, the rates, its switch */
+.connection-card { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--stroke-card); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-card); min-width: 0; }
+.connection-card.connection-up { background: linear-gradient(180deg, color-mix(in srgb, var(--up) 10%, var(--surface)), var(--surface)); }
+.connection-card.connection-busy { background: linear-gradient(180deg, color-mix(in srgb, var(--busy) 10%, var(--surface)), var(--surface)); }
+.connection-card.connection-trouble { background: linear-gradient(180deg, color-mix(in srgb, var(--trouble) 10%, var(--surface)), var(--surface)); }
+.connection-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.connection-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 22%, transparent); }
+.connection-dot.tone-busy { animation: breathe 1.6s var(--ease-in-out) infinite; }
+.connection-state { flex: 1; min-width: 0; font: 600 11px/16px var(--font-ui); letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+:lang(zh) .connection-state { letter-spacing: 0; font-size: 12px; }
+.connection-up .connection-state { color: var(--up); }
+.connection-busy .connection-state { color: var(--busy); }
+.connection-trouble .connection-state { color: var(--trouble); }
+.connection-name { font: var(--font-body-strong); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.connection-name .secondary { font-weight: 400; font-variant-numeric: tabular-nums; }
+.connection-rates { display: flex; gap: 12px; font: var(--font-caption); font-variant-numeric: tabular-nums; }
+.connection-rates span { display: inline-flex; align-items: center; gap: 2px; }
+.connection-rates .glyph { width: 12px; height: 12px; }
+
+.navigation { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; }
+.nav-spacer { flex: 1; }
+.nav-item { position: relative; justify-content: flex-start; gap: 12px; width: 100%; height: 40px; min-height: 40px; padding: 0 12px 0 15px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--secondary); }
 .nav-item:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .nav-item:active:not(:disabled) { background: var(--pressed); }
 .nav-item.selected { background: var(--selected); color: var(--text); font-weight: 600; }
 .nav-item.selected::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 2px; background: var(--accent); }
 .nav-item .glyph { width: 18px; height: 18px; }
 .nav-item.selected .glyph { color: var(--accent); }
-.nav-item span { overflow: hidden; text-overflow: ellipsis; }
+.nav-label { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; }
 .nav-item:focus-visible { outline-offset: -2px; }
-.sidebar-foot { margin-top: auto; padding: 0 4px; min-width: 0; }
+.badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); display: inline-grid; place-items: center; font: 600 11px/1 var(--font-ui); font-variant-numeric: tabular-nums; background: var(--hover); color: var(--secondary); }
+.badge-up { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+.badge-busy { background: color-mix(in srgb, var(--busy) 18%, transparent); color: var(--busy); }
+.badge-trouble { background: color-mix(in srgb, var(--trouble) 18%, transparent); color: var(--trouble); }
+.sidebar-foot { padding: 0 4px 8px; min-width: 0; }
+.nav-item.fold { color: var(--secondary); }
 .sidebar-foot .status { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.shell.collapsed .brand, .shell.collapsed .nav-item span { display: none; }
-.shell.collapsed .nav-item { justify-content: center; padding: 0; }
-.shell.collapsed .sidebar-foot .status { padding: 0; width: 20px; justify-content: center; font-size: 0; background: none; }
+
+/* folded: 64 wide, ☰ and the icons on the same centre, the card a dot, a badge a dot on its icon */
+.shell.collapsed { --sidebar-width: 64px; }
+.shell.collapsed .brand span, .shell.collapsed .nav-label, .shell.collapsed .connection-state, .shell.collapsed .connection-name,
+.shell.collapsed .connection-rates, .shell.collapsed .connection-card .action { display: none; }
+.shell.collapsed .nav-item { justify-content: center; width: 48px; padding: 0; }
+.shell.collapsed .connection-card { width: 48px; height: 40px; padding: 0; place-items: center; box-shadow: none; }
+.shell.collapsed .connection-top { justify-content: center; }
+.shell.collapsed .badge { position: absolute; top: 7px; right: 9px; min-width: 8px; width: 8px; height: 8px; padding: 0; font-size: 0; background: var(--secondary); }
+.shell.collapsed .badge-up { background: var(--up); }
+.shell.collapsed .badge-busy { background: var(--busy); }
+.shell.collapsed .badge-trouble { background: var(--trouble); }
+.shell.collapsed .sidebar-foot { padding: 0; }
+.shell.collapsed .sidebar-foot .status { width: 48px; padding: 0; gap: 0; justify-content: center; font-size: 0; background: none; }
+/* Folded, a count says nothing without its number: only a state's (Network's) stays, as a dot. */
+.shell.collapsed .badge-off { display: none; }
 
 .main { display: grid; grid-template-rows: 48px auto minmax(0, 1fr); min-width: 0; min-height: 0; }
 .main-head { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 24px; user-select: none; }
@@ -496,12 +534,17 @@ legend { padding: 0; margin-bottom: 4px; }
 .confirmation .actions .action { display: grid; }
 .confirmation .actions button { width: 100%; }
 
-/* narrow (zoomed text): the menu keeps its icons only */
+/* narrow (zoomed text): the menu folds as ☰ folds it */
 @media (max-width: 700px) {
-  .shell { --sidebar-width: 60px; }
-  .shell .brand, .shell .nav-item span { display: none; }
-  .shell .nav-item { justify-content: center; padding: 0; }
-  .shell .sidebar-foot .status { padding: 0; width: 20px; justify-content: center; font-size: 0; background: none; }
+  .shell { --sidebar-width: 64px; }
+  .shell .brand span, .shell .nav-label, .shell .connection-state, .shell .connection-name, .shell .connection-rates,
+  .shell .connection-card .action { display: none; }
+  .shell .nav-item { justify-content: center; width: 48px; padding: 0; }
+  .shell .connection-card { width: 48px; height: 40px; padding: 0; place-items: center; box-shadow: none; }
+  .shell .badge { position: absolute; top: 7px; right: 9px; min-width: 8px; width: 8px; height: 8px; padding: 0; font-size: 0; }
+  .shell .sidebar-foot { padding: 0; }
+  .shell .sidebar-foot .status { width: 48px; padding: 0; gap: 0; justify-content: center; font-size: 0; background: none; }
+  .shell .badge-off { display: none; }
 }
 
 @media (max-width: 860px) {

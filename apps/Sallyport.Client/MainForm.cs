@@ -57,7 +57,7 @@ internal sealed class MainForm : OptimizedForm
         MaximizeBox = false;
         MinimumSize = new Size(760, 520);
         Size = new Size(1000, 700);
-        _windowIcon = StatusTray.Draw(StatusTray.Brand, 32);
+        _windowIcon = BrandMark.Icon(32);
         Icon = _windowIcon;
         CaptionButtonColors = theme.Caption;
 

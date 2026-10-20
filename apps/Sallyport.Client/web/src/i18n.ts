@@ -65,7 +65,9 @@ const chinese: Record<string, string> = {
   'Exit location': '出口位置',
   'Previous result': '上一次的结果',
   // the window's frame and the Network page's connection
-  'Menu': '菜单',
+  'Collapse menu': '收起菜单',
+  'Expand menu': '展开菜单',
+  'Connection': '连接',
   'Profile': '配置',
   'Also connected': '其他连接',
   'Apps through it': '经由它的应用',

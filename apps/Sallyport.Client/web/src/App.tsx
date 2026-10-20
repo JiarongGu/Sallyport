@@ -9,7 +9,7 @@ import { Profiles } from './Profiles';
 import { Settings } from './Settings';
 import { EditorForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
-import { MainHeader, pages, Sidebar } from './ui/Chrome';
+import { featuredProfile, MainHeader, pages, Sidebar } from './ui/Chrome';
 import { ActionButton } from './ui/shared';
 import { post } from './commands';
 
@@ -105,7 +105,8 @@ export function App() {
   setLanguage(state?.language ?? 'en');
 
   return <div className={`shell${collapsed ? ' collapsed' : ''}`}>
-    <Sidebar shown={shown} go={setPage} summary={state?.summary} collapsed={collapsed} toggle={() => setCollapsed((c) => !c)} />
+    <Sidebar state={state} shown={shown} go={setPage} featured={state && featuredProfile(state, featured)} collapsed={collapsed}
+      toggle={() => setCollapsed((c) => !c)} now={now} />
     <div className="main">
       <MainHeader title={t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}>
         {state && shown === 'apps' && <>

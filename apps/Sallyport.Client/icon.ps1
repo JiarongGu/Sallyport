@@ -1,5 +1,6 @@
 # Draws Sallyport.ico, the client's and setup's icon (Explorer, the Start menu, Windows' installed apps), from the same
-# mark the tray and the window draw: an arched door - a sallyport is a gate - white on the brand blue.
+# mark the window, the tray and the page draw (BrandMark.cs, Chrome.tsx): a gateway - a sallyport is a fortress's gate -
+# with a way out rising through it, white on a rounded tile in the brand's gradient. Every number is that 32-unit grid.
 #   powershell -File apps\Sallyport.Client\icon.ps1
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -9,15 +10,20 @@ $frames = foreach ($size in $sizes) {
     $g = [System.Drawing.Graphics]::FromImage($bitmap)
     $g.SmoothingMode = 'AntiAlias'
     $g.Clear([System.Drawing.Color]::Transparent)
-    $disc = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(0x5B, 0x9D, 0xFF))
-    $g.FillEllipse($disc, 0.5, 0.5, $size - 1.5, $size - 1.5)
-    $w = $size * 0.38; $x = ($size - $w) / 2; $top = $size * 0.27; $bottom = $size * 0.78
-    $door = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $door.AddArc($x, $top, $w, $w, 180, 180)
-    $door.AddLine($x + $w, $top + $w / 2, $x + $w, $bottom)
-    $door.AddLine($x + $w, $bottom, $x, $bottom)
-    $door.CloseFigure()
-    $g.FillPath([System.Drawing.Brushes]::White, $door)
+    $g.ScaleTransform($size / 32, $size / 32)
+    $tile = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $tile.AddArc(1, 1, 16, 16, 180, 90); $tile.AddArc(15, 1, 16, 16, 270, 90)
+    $tile.AddArc(15, 15, 16, 16, 0, 90); $tile.AddArc(1, 15, 16, 16, 90, 90); $tile.CloseFigure()
+    $fill = New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.PointF 1, 1), (New-Object System.Drawing.PointF 31, 31),
+        ([System.Drawing.Color]::FromArgb(0x3D, 0x8B, 0xFF)), ([System.Drawing.Color]::FromArgb(0x5B, 0x4B, 0xE0))
+    $g.FillPath($fill, $tile)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 2.75
+    $pen.StartCap = 'Round'; $pen.EndCap = 'Round'; $pen.LineJoin = 'Round'
+    $gate = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $gate.AddLine(8.5, 24, 8.5, 15.5); $gate.AddArc(8.5, 8, 15, 15, 180, 180); $gate.AddLine(23.5, 15.5, 23.5, 24)
+    $g.DrawPath($pen, $gate)
+    $g.DrawLine($pen, 16, 24.5, 16, 15.5)
+    $g.DrawLines($pen, [System.Drawing.PointF[]]@((New-Object System.Drawing.PointF 13, 18.5), (New-Object System.Drawing.PointF 16, 15.5), (New-Object System.Drawing.PointF 19, 18.5)))
     $g.Dispose()
     $png = New-Object System.IO.MemoryStream
     $bitmap.Save($png, [System.Drawing.Imaging.ImageFormat]::Png)

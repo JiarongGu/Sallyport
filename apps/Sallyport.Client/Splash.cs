@@ -1,21 +1,21 @@
 using System.Diagnostics;
-using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 
 namespace Sallyport.Client;
 
 /// <summary>
-/// The window while its page loads: the page's sidebar with its menu button and the brand where the page puts them, so
-/// the window looks like itself rather than a bare strip of caption buttons, and a thin line in the accent where the
+/// The window while its page loads: the page's sidebar with the mark and the name where the page puts them, so the
+/// window looks like itself rather than a bare strip of caption buttons, and a thin line in the accent where the
 /// page's content begins, running while it waits. Its top moves the window, as the page's header and sidebar do.
 /// </summary>
 internal sealed class Splash : Control
 {
-    // The page's geometry in CSS pixels (styles.css): the sidebar 232 wide (60 when the window is under 700), its head
-    // 48 high with ☰ in a 40 button at 8 and the mark 20 across at 56, the name at 86 in 15 at weight 600; the page's
-    // header 48 high. Drawn where the page draws them, the page replaces this without anything moving.
-    private const float HeaderHeight = 48, Sidebar = 232, NarrowSidebar = 60, NarrowBelow = 700, MenuLeft = 8, MenuSize = 40,
-        MarkLeft = 56, MarkSize = 20, NameLeft = 86, NameSize = 15;
+    // The page's geometry in CSS pixels (styles.css): the sidebar 240 wide (64 when the window is under 700), its head
+    // 48 high with the mark 24 across at 20 — its centre, 32, is every page icon's, open or folded — and the name at 56
+    // in 15 at weight 600; the page's header 48 high. Drawn where the page draws them, the page replaces this without
+    // anything moving.
+    private const float HeaderHeight = 48, Sidebar = 240, NarrowSidebar = 64, NarrowBelow = 700, MarkLeft = 20, MarkSize = 24,
+        NameLeft = 56, NameSize = 15;
 
     /// <summary>The loading line: 2 CSS pixels where the content begins, a third of its width crossing in this long.</summary>
     private const float LineHeight = 2;
@@ -61,23 +61,14 @@ internal sealed class Splash : Control
         using (var background = new SolidBrush(_theme.Background)) g.FillRectangle(background, ClientRectangle);
         using (var sidebar = new SolidBrush(_theme.Sidebar)) g.FillRectangle(sidebar, 0, 0, SidebarWidth, Height);
 
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        // ☰: three strokes of the page's 16-unit icon, centred in its button.
-        var icon = (MenuLeft + (MenuSize - 16) / 2) * scale;
-        var iconTop = (HeaderHeight - 16) / 2 * scale;
-        using (var stroke = new Pen(_theme.Text, 1.5f * scale) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            foreach (var y in new[] { 4f, 8f, 12f })
-                g.DrawLine(stroke, icon + 2.5f * scale, iconTop + y * scale, icon + 13.5f * scale, iconTop + y * scale);
+        BrandMark.Paint(g, new RectangleF(MarkLeft * scale, (HeaderHeight - MarkSize) / 2 * scale, MarkSize * scale, MarkSize * scale));
         if (!Narrow)
         {
-            DrawMark(g, StatusTray.Brand, MarkLeft * scale, (HeaderHeight - MarkSize) / 2 * scale, MarkSize * scale);
-            g.SmoothingMode = SmoothingMode.None;
             using var font = NameFont(NameSize * scale);
             var name = new Rectangle(Scaled(NameLeft), 0, SidebarWidth - Scaled(NameLeft), Scaled(HeaderHeight));
             TextRenderer.DrawText(g, "Sallyport", font, name, _theme.Text,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         }
-        g.SmoothingMode = SmoothingMode.None;
 
         if (_frames.Enabled) DrawLine(g);
     }
@@ -90,9 +81,13 @@ internal sealed class Splash : Control
         var t = _since.Elapsed.TotalMilliseconds % Crossing.TotalMilliseconds / Crossing.TotalMilliseconds;
         var eased = (1 - Math.Cos(Math.PI * t)) / 2;
         var length = bounds.Width / 3f;
-        var x = (float)(-length + (bounds.Width + length) * eased);
+        var x = (float)(bounds.X - length + (bounds.Width + length) * eased);
         using var accent = new SolidBrush(_theme.Accent);
+        // Within the content's top edge: it never runs over the sidebar.
+        var clip = g.Clip;
+        g.SetClip(bounds);
         g.FillRectangle(accent, x, bounds.Y, length, bounds.Height);
+        g.Clip = clip;
     }
 
     /// <summary>The page's first choice of font where Windows has it (Segoe UI Variable, Windows 11), at its weight 600.</summary>
@@ -103,20 +98,6 @@ internal sealed class Splash : Control
         if (font.Name == "Segoe UI Variable Text Semibold") return font;
         font.Dispose();
         return new Font("Segoe UI Semibold", pixels, GraphicsUnit.Pixel);
-    }
-
-    /// <summary>The page's GateMark (a 32-unit view box): a disc in the brand's colour, an arched door in white.</summary>
-    private static void DrawMark(Graphics g, Color brand, float left, float top, float size)
-    {
-        var unit = size / 32;
-        using var disc = new SolidBrush(brand);
-        g.FillEllipse(disc, left + 0.5f * unit, top + 0.5f * unit, 31 * unit, 31 * unit);
-        using var door = new GraphicsPath();
-        door.AddArc(left + 10 * unit, top + 9 * unit, 12 * unit, 12 * unit, 180, 180);
-        door.AddLine(left + 22 * unit, top + 15 * unit, left + 22 * unit, top + 25 * unit);
-        door.AddLine(left + 22 * unit, top + 25 * unit, left + 10 * unit, top + 25 * unit);
-        door.CloseFigure();
-        g.FillPath(Brushes.White, door);
     }
 
     protected override void OnMouseDown(MouseEventArgs e)

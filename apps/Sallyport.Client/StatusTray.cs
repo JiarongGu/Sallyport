@@ -12,15 +12,13 @@ namespace Sallyport.Client;
 /// </summary>
 internal sealed class StatusTray : IDisposable
 {
-    public static readonly Color Brand = Color.FromArgb(0x5B, 0x9D, 0xFF);
-
     private static readonly Dictionary<Tone, Color> Colours = new()
     {
         [Tone.Off] = Color.FromArgb(0x6B, 0x72, 0x80),
         [Tone.Busy] = Color.FromArgb(0xF2, 0xB8, 0x4B),
         [Tone.Up] = Color.FromArgb(0x3C, 0xCF, 0x8E),
         [Tone.Trouble] = Color.FromArgb(0xF0, 0x6A, 0x6A),
-        [Tone.Info] = Brand,
+        [Tone.Info] = BrandMark.Top,
     };
 
     private readonly Form _window;
@@ -70,29 +68,6 @@ internal sealed class StatusTray : IDisposable
 
     public void Tell(string text, ToolTipIcon kind = ToolTipIcon.Info) => _icon.ShowBalloonTip(5000, "Sallyport", text, kind);
 
-    public static Icon Draw(Color fill, int size)
-    {
-        using var bitmap = new Bitmap(size, size);
-        using (var g = Graphics.FromImage(bitmap))
-        {
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Transparent);
-            using var disc = new SolidBrush(fill);
-            g.FillEllipse(disc, 0.5f, 0.5f, size - 1.5f, size - 1.5f);
-            // A sallyport is a gate: an arched door, white on the state's colour.
-            float w = size * 0.38f, x = (size - w) / 2, top = size * 0.27f, bottom = size * 0.78f;
-            using var door = new GraphicsPath();
-            door.AddArc(x, top, w, w, 180, 180);
-            door.AddLine(x + w, top + w / 2, x + w, bottom);
-            door.AddLine(x + w, bottom, x, bottom);
-            door.CloseFigure();
-            g.FillPath(Brushes.White, door);
-        }
-        var handle = bitmap.GetHicon();
-        try { return (Icon)Icon.FromHandle(handle).Clone(); }
-        finally { DestroyIcon(handle); }
-    }
-
     private void OnChanged()
     {
         if (_window.IsDisposed || !_window.IsHandleCreated) return;
@@ -119,7 +94,7 @@ internal sealed class StatusTray : IDisposable
     {
         var summary = _core.Snapshot().Summary;
         if (!_icons.TryGetValue(summary.Tone, out var icon))
-            _icons[summary.Tone] = icon = Draw(Colours[summary.Tone], SystemInformation.SmallIconSize.Width);
+            _icons[summary.Tone] = icon = BrandMark.Icon(SystemInformation.SmallIconSize.Width, Colours[summary.Tone]);
         _icon.Icon = icon;
         _icon.Text = TrayMenu.Tooltip(summary.Text);
     }
@@ -132,11 +107,33 @@ internal sealed class StatusTray : IDisposable
         var state = _core.Snapshot();
         Style(_menu, Theme.Current());
         foreach (var entry in TrayMenu.Build(state.Profiles, state.Apps, state.Network.StatusText)) _menu.Items.Add(Item(entry, (MenuRenderer)_menu.Renderer));
+        Fit(_menu);
+    }
+
+    /// <summary>Every entry as wide as the longest one where the renderer puts the text, with room for a chevron: WinForms
+    /// would size them from where it puts the text itself, and draws nothing of an entry outside its own width.</summary>
+    private static void Fit(ToolStripDropDownMenu menu, bool submenu = false)
+    {
+        var renderer = (MenuRenderer)menu.Renderer;
+        var widest = submenu ? renderer.MinimumSubmenuWidth : renderer.MinimumWidth;
+        foreach (ToolStripItem item in menu.Items)
+            if (item is ToolStripMenuItem entry)
+                widest = Math.Max(widest, renderer.TextLeft + TextRenderer.MeasureText(entry.Text, entry.Font).Width
+                    + (entry.HasDropDownItems ? renderer.ChevronRoom : renderer.EndRoom));
+        // The layout gives every entry the widest one's preferred width, which the right padding raises to the width wanted;
+        // the window is held to it, as WinForms would size the window by its own measure.
+        var preferred = menu.Items.OfType<ToolStripMenuItem>().Select(i => i.GetPreferredSize(Size.Empty).Width).DefaultIfEmpty(0).Max();
+        var extra = Math.Max(0, widest - preferred);
+        foreach (var entry in menu.Items.OfType<ToolStripMenuItem>())
+            entry.Padding = new Padding(entry.Padding.Left, entry.Padding.Top, entry.Padding.Right + extra, entry.Padding.Bottom);
+        var window = widest + menu.Padding.Horizontal + 2;
+        menu.MinimumSize = new Size(window, 0);
+        menu.MaximumSize = new Size(window, 0);
     }
 
     private ToolStripItem Item(TrayEntry entry, MenuRenderer renderer)
     {
-        if (entry.Kind == TrayEntryKind.Separator) return new ToolStripSeparator();
+        if (entry.Kind == TrayEntryKind.Separator) return new ToolStripSeparator { AutoSize = false, Height = renderer.SeparatorHeight };
         var item = new ToolStripMenuItem(entry.Text) { Enabled = entry.Enabled, ToolTipText = entry.Tip ?? "", Padding = renderer.ItemPadding };
         if (entry.Default) item.Font = _bold ??= new Font(item.Font, FontStyle.Bold);
         if (entry.Kind == TrayEntryKind.Command) item.Click += (_, _) => Do(entry);
@@ -144,6 +141,7 @@ internal sealed class StatusTray : IDisposable
         {
             Style((ToolStripDropDownMenu)item.DropDown, renderer.Theme);
             foreach (var child in items) item.DropDownItems.Add(Item(child, renderer));
+            Fit((ToolStripDropDownMenu)item.DropDown, submenu: true);
         }
         return item;
     }
@@ -155,7 +153,8 @@ internal sealed class StatusTray : IDisposable
         menu.ShowImageMargin = false;
         menu.ShowCheckMargin = false;
         menu.ShowItemToolTips = true;
-        menu.Padding = new Padding(0, 4, 0, 4);
+        var scale = menu.DeviceDpi / 96f;
+        menu.Padding = new Padding(0, (int)(4 * scale), 0, (int)(4 * scale));
         if (menu.IsHandleCreated) Round(menu);
         else menu.HandleCreated += (_, _) => Round(menu);
     }
@@ -220,9 +219,6 @@ internal sealed class StatusTray : IDisposable
         foreach (var icon in _icons.Values) icon.Dispose();
     }
 
-    [DllImport("user32.dll")]
-    private static extern bool DestroyIcon(IntPtr handle);
-
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUNDSMALL = 3;
 
     [DllImport("dwmapi.dll")]
@@ -232,14 +228,28 @@ internal sealed class StatusTray : IDisposable
     /// own menus show it; thin separators. Sizes in device pixels at the menu's DPI.</summary>
     private sealed class MenuRenderer(Theme theme, float scale) : ToolStripRenderer
     {
-        private readonly Dictionary<ToolStripItem, float> _textMiddle = [];
-
         public Theme Theme { get; } = theme;
 
         /// <summary>Windows draws the rounded border; drawn here too, its square corners would show outside it.</summary>
         public bool SystemDrawsBorder { get; set; }
 
-        public Padding ItemPadding { get; } = new((int)(8 * scale), (int)(5 * scale), (int)(8 * scale), (int)(5 * scale));
+        // Windows 11's own menus: an entry 32 high, its text 16 from the menu's edge, the submenu chevron 16 from the other
+        // edge with 24 before it; a separator 9 high. The text is placed here (TextLeft), not where WinForms would put it,
+        // so the menu's width is set here too (Fit).
+        public Padding ItemPadding { get; } = new((int)(4 * scale), (int)(8 * scale), (int)(8 * scale), (int)(8 * scale));
+
+        public int TextLeft { get; } = (int)Math.Round(16 * scale);
+
+        /// <summary>After an entry's text: 24 and the chevron's 16 when it opens a submenu, else 24.</summary>
+        public int ChevronRoom { get; } = (int)Math.Round(40 * scale);
+
+        public int EndRoom { get; } = (int)Math.Round(24 * scale);
+
+        public int MinimumWidth { get; } = (int)Math.Round(180 * scale);
+
+        public int MinimumSubmenuWidth { get; } = (int)Math.Round(120 * scale);
+
+        public int SeparatorHeight { get; } = (int)Math.Round(9 * scale);
 
         /// <summary>The page's --hover on a card: the text's colour at 6% over the surface.</summary>
         private Color Hover => Color.FromArgb(
@@ -264,27 +274,31 @@ internal sealed class StatusTray : IDisposable
         {
             if (!e.Item.Selected || !e.Item.Enabled) return;
             var inset = (int)(4 * scale);
-            var bounds = new Rectangle(inset, 1, e.Item.Width - 2 * inset, e.Item.Height - 2);
+            var bounds = new Rectangle(inset, 1, VisibleWidth(e.Item) - 2 * inset, e.Item.Height - 2);
             using var path = Rounded(bounds, 4 * scale);
             using var hover = new SolidBrush(Hover);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.FillPath(hover, path);
         }
 
+        /// <summary>The text centred on the entry's whole height, not on WinForms' own box for it (which sits high), and cut
+        /// with an ellipsis rather than under the chevron.</summary>
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
             e.TextColor = e.Item.Enabled ? Theme.Text : Theme.Secondary;
-            _textMiddle[e.Item] = e.TextRectangle.Top + e.TextRectangle.Height / 2f;
+            // From the menu's edges: the entry starts a pixel or two in, and may run past the window's right edge.
+            var left = TextLeft - e.Item.Bounds.Left;
+            e.TextRectangle = new Rectangle(left, 0, Math.Max(0, VisibleWidth(e.Item) - left - (int)(40 * scale)), e.Item.Height);
+            e.TextFormat = (e.TextFormat & ~(TextFormatFlags.Top | TextFormatFlags.Bottom)) | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
             base.OnRenderItemText(e);
         }
 
-        /// <summary>A chevron, as Windows 11's menus draw it: on the line of the entry's text (drawn before it), which
-        /// sits above the middle of the entry and of the arrow's own box, and clear of the edge.</summary>
+        /// <summary>A chevron, as Windows 11's menus draw it: on the entry's middle, as its text now is, 16 from the edge.</summary>
         protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
         {
             var half = 3.5f * scale;
-            var x = e.ArrowRectangle.Left + e.ArrowRectangle.Width / 2f - 4 * scale;
-            var y = e.Item is { } item && _textMiddle.TryGetValue(item, out var middle) ? middle : e.ArrowRectangle.Top + e.ArrowRectangle.Height / 2f;
+            var x = (e.Item is { } item ? VisibleWidth(item) : e.ArrowRectangle.Right) - 16 * scale;
+            var y = (e.Item?.Height ?? e.ArrowRectangle.Bottom) / 2f;
             using var pen = new Pen(e.Item?.Enabled == false ? Theme.Secondary : Theme.Text, Math.Max(1, scale));
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.DrawLines(pen, [new PointF(x - half / 2, y - half), new PointF(x + half / 2, y), new PointF(x - half / 2, y + half)]);
@@ -292,11 +306,15 @@ internal sealed class StatusTray : IDisposable
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
         {
-            var inset = (int)(12 * scale);
+            var inset = (int)(4 * scale);
             var y = e.Item.Height / 2;
             using var line = new Pen(Theme.Rule);
-            e.Graphics.DrawLine(line, inset, y, e.Item.Width - inset, y);
+            e.Graphics.DrawLine(line, inset, y, VisibleWidth(e.Item) - inset, y);
         }
+
+        /// <summary>The entry's width, within the menu's window (Fit makes the two one).</summary>
+        private static int VisibleWidth(ToolStripItem item) =>
+            item.Owner is { } menu ? Math.Min(item.Width, menu.ClientSize.Width - item.Bounds.Left) : item.Width;
 
         private static GraphicsPath Rounded(Rectangle r, float radius)
         {

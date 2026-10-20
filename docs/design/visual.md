@@ -1,0 +1,65 @@
+# The window's look — a frameless frame after OpenVPN Connect (2026-10-20)
+
+**Why it exists.** The owner, 2026-10-20: *"we should also polish the ui/ux to make it more like a modern application"*;
+of a first polish in Windows Settings' manner, *"i dont think this is a better ui/ux design rn? and you probably better
+use frameless logic to optimize the looking and we propbably dont need the window max button and you can take example
+of how the latest openvpn client looks"*; of a Connect-style layout, *"we can have a little difference since we have
+more options"* and *"keep the current window looking and do not change to a portrit looking but taking the idea as
+reference"*; then *"polish the left menu (currenly its too empty? and the top does not really match when its
+collapsed), also the right click menu for the tray need a better ui"*, *"just make it simple … the tray menu we have
+issue is the spacing and padding"*, *"the collapse toggle probbaly can be at the line of the menu as a button so that
+when it collapse we still can see the icon (and I think we need a better icon design for this app)"*. It sets the look
+of `window.md`'s structure; it changes no page, word or intent there.
+
+**How it was made.** Codex (`local/codex/ui-polish-design.md`, `codex exec -s read-only`) and Claude Fable answered one
+brief (`local/codex/ui-polish-brief.md`) with a polish in Windows Settings' manner; Claude kept from them the tokens'
+form, the icons as inline strokes, the status dot drawn by CSS, editors as inset panels, notices as tinted bars, the
+caption buttons dimmed with a dialog, and `Fact.Figure`, and set their look aside on the owner's word. OpenVPN Connect
+served as the reference from its public release notes and tutorials only — 3.8 shows one profile with one switch; 3.7's
+list of quick toggles is what its users asked back for — never from code of theirs (AGENTS.md, rule 1).
+
+## The frame
+
+- **Frameless, no maximize.** No title bar and no tab strip: a sidebar, and a page under a 48px header that is the title
+  bar (the page's title, its actions, minimize and close). `MainForm` strips `WS_MAXIMIZEBOX` (Shenora's frameless frame
+  keeps it whatever `MaximizeBox` says) and refuses `SC_MAXIMIZE`; the window stays resizable (`WS_THICKFRAME`).
+- **The sidebar** (240 wide, 64 folded): the mark and the name; the connection now (its state, the profile and how long,
+  ↓/↑ rates, its switch — the profile the Network page puts first); the pages with how many each holds; then whether
+  packet routing is ready, Settings, and folding as a row of its own. The mark and every page icon share one centre,
+  32 from the edge, open or folded, so folding moves nothing but the words. Folded, a count shows only when it carries a
+  state (Network's), as a dot. Below 700 CSS pixels it folds by itself.
+- **The splash** (`Splash.cs`) draws the sidebar's head at the page's geometry and a loading line where the content
+  begins; the page lifts it (`CLOSE_SPLASH`) once its first state is painted.
+
+## The pages
+
+- **Network** shows one connection first, as Connect does: a profile picker, a large switch, its state in capitals with
+  its time and proxy, received and sent as figures with the rate now over a minute's graph of both (`Connections`
+  samples each channel once a second and publishes when a rate moves), round trips as figures (`"19 ms"` over `"4 of 4
+  answered"`), the routed app with Stop, the apps through it with Launch and a route switch; other open channels after.
+- **Profiles**: a switch per profile, the address under the name with a copy icon. **Apps**: a tile, Launch, a route
+  switch, the chevron. **Settings**: General as rows — Language, Start with Windows as a switch.
+
+## Tokens
+
+Light and dark, every colour a token on `:root` (`styles.css`); `Theme.cs` carries the same values for what the form
+draws. Light: base `#f5f7fa`, sidebar `#e9edf3`, cards white, text `#18202c`, secondary `#5a6575`, accent `#185fc7`,
+connected `#137347` (its switch `#1f9d55`). Dark: base `#14181e`, sidebar `#0f1216`, cards `#1c2129`, text `#e8ecf2`,
+secondary `#9aa5b4`, accent `#5b9dff`, connected `#3ccf8e`. Controls 32 high with 6px corners, cards 10, the connection
+14. Contrast was computed for the pairs used as text (4.5:1) and control boundaries (3:1); not measured on the build.
+
+## The mark
+
+A gateway — a sallyport is a fortress's gate — with a way out rising through it, white strokes on a rounded tile in a
+blue-to-indigo gradient (`#3d8bff` → `#5b4be0`), on a 32-unit grid: tile 1–31 with corners of 8; arch legs at 8.5 and
+23.5 from 24 up to 15.5 under a half circle of radius 7.5; arrow from 24.5 to 15.5 with its head from 13 and 19 at 18.5;
+strokes 2.75, round. `BrandMark.cs` draws it for the window, the taskbar, the tray (its tile in the state's colour) and
+the splash; `Chrome.tsx` (`GateMark`) for the page; `icon.ps1` writes `Sallyport.ico` for Explorer and setup.
+
+## The tray's menu
+
+Kept simple, as before — Open Sallyport, Open Network, each profile, the routed app or the Apps, Settings, Exit —
+spaced as Windows 11's own menus: entries 32 high, the text 16 from the edge and centred on the entry, the submenu
+chevron 16 from the other edge with 24 before it, separators 9 high, a rounded selection inset 4, rounded corners on
+Windows 11. The renderer places the text and sizes each menu (`StatusTray.Fit`): WinForms would size the window and its
+entries by two different measures of where it puts the text itself.

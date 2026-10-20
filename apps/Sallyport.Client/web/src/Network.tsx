@@ -6,6 +6,7 @@ import { clock, countdown, duration } from './format';
 import { RunDetails } from './Run';
 import { ActionButton, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { RoutingCard } from './Settings';
+import { featuredProfile } from './ui/Chrome';
 
 /**
  * What is connected and what goes through it, as OpenVPN Connect shows a connection: one profile first, with its
@@ -16,10 +17,7 @@ export function Network({ state, now, go, featured, feature }: {
 }) {
   const network = state.network;
   const profiles = state.profiles;
-  // The one chosen, else the first with a connection open (trouble first, as the host orders them), else the first.
-  const first = profiles.find((p) => p.id === featured)
-    ?? profiles.find((p) => network.channels.some((c) => c.profileId === p.id))
-    ?? profiles[0];
+  const first = featuredProfile(state, featured);
   const others = network.channels.filter((c) => c.profileId !== first?.id);
   return <section className="page network" aria-label={t('Network')}>
     <p className="page-intro secondary">{t('What is connected, and what goes through it now.')}</p>
