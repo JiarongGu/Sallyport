@@ -50,7 +50,7 @@ internal sealed record DefaultsView(IReadOnlyList<Fact> Facts, UiAction Edit);
 internal sealed record LanguageView(string Setting, IReadOnlyList<EditorOption> Choices);
 
 internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About, DefaultsView Defaults,
-    LanguageView Language, ConnectionSettingsView Connection);
+    LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null);
 
 /// <summary>Settings' connection choices, each applied the moment it is chosen: SET_PROTOCOL, SET_RETRY.</summary>
 internal sealed record ConnectionSettingsView(LanguageView Protocol, LanguageView Retry);
@@ -72,7 +72,7 @@ internal static class WindowViews
         var channels = new List<ChannelView>();
         var routedGame = run is { Ended: null } ? games.FirstOrDefault(g => g.Id == run.GameId) : null;
         // What never changes is on the Profiles page; who routes through it is said by the apps the channel carries.
-        string[] notHere = [L.T("Transport"), L.T("Imported"), L.T("SOCKS5 port"), L.T("Connection settings"), L.T("Routing through it")];
+        string[] notHere = [L.T("Transport"), L.T("Imported"), L.T("SOCKS5 port"), L.T("Connection settings"), L.T("Used by")];
         foreach (var p in profiles)
         {
             if (p.Phase is ProfilePhase.Idle or ProfilePhase.Unsupported or ProfilePhase.Removing) continue;
@@ -130,8 +130,8 @@ internal static class WindowViews
             .MinBy(t => t switch { Tone.Trouble => 0, Tone.Busy => 1, Tone.Up => 2, _ => 3 });
         var connections = L.Count(channels.Count, "1 connection", "{0} connections");
         var status = channels.Count == 0 ? L.T("Nothing is connected")
-            : routedApps > 0 ? L.T("{0} · {1} routed", connections, L.Count(routedApps, "1 app", "{0} apps")) : connections;
-        return new NetworkView(status, worst, channels.Count == 0 ? new(L.T("Nothing is connected"), L.T("Route an app or connect a profile to begin.")) : null,
+            : routedApps > 0 ? L.T("{0} · {1} using the VPN", connections, L.Count(routedApps, "1 app", "{0} apps")) : connections;
+        return new NetworkView(status, worst, channels.Count == 0 ? new(L.T("Nothing is connected"), L.T("Turn on an app's VPN, or connect a profile, to begin.")) : null,
             channels, routing);
     }
 
@@ -182,15 +182,16 @@ internal static class WindowViews
         AppDefaults defaults, StoredProfile? defaultProfile, bool editing, string? languageSetting = null, PolicyOverride? connection = null)
     {
         // The driver and the service are said once, under Packet routing.
-        var about = new List<Fact>
-        {
-            new(L.T("Version"), Version),
+        var about = new List<Fact> { new(L.T("Version"), Version) };
+        // Where it lives: long paths only some look for, folded on the page.
+        List<Fact> places =
+        [
             new(L.T("Installed in"), installedIn ?? L.T("Not installed (a development build in {0})", AppContext.BaseDirectory.TrimEnd('\\'))),
             new(L.T("Your data"), dataFolder),
-        };
+        ];
         return new SettingsView(routing,
             new StartupView(startsWithWindows, L.T("Start Sallyport with Windows"),
-                L.T("Opens Sallyport in the notification area when you sign in. Connections and routing start only when you start them."),
+                L.T("Opens Sallyport beside the clock when you sign in. Your apps use the VPN only when you turn it on."),
                 UiAction.Shown(startsWithWindows ? L.T("Turn off") : L.T("Turn on"))),
             guide, about,
             new DefaultsView(
@@ -201,7 +202,8 @@ internal static class WindowViews
             Language(languageSetting),
             // Never given "keep trying" stands until something else is chosen.
             new ConnectionSettingsView(new(connection?.Protocol ?? "", GameViews.ProtocolChoices()),
-                new((connection?.RoundsMax ?? 0).ToString(CultureInfo.InvariantCulture), GameViews.RetryChoices(connection?.RoundsMax ?? 0))));
+                new((connection?.RoundsMax ?? 0).ToString(CultureInfo.InvariantCulture), GameViews.RetryChoices(connection?.RoundsMax ?? 0))),
+            places);
     }
 
     /// <summary>The language choice, each named in itself; until the person picks one, the one setup ran in, or Windows'.</summary>

@@ -60,7 +60,7 @@ internal static class AppSetup
                     return new(SetupKind.Folder, full, name, kind, programs, FolderSummary(programs));
                 }
                 return new(SetupKind.Program, full, name, kind, [new GameExecutable(full, true)],
-                    L.T("A program. All its traffic goes through your VPN while it is routed."));
+                    L.T("A program. All its traffic goes through your VPN while its VPN is on."));
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { why = L.T("That place could not be read ({0}).", e.GetType().Name); return null; }
@@ -71,9 +71,9 @@ internal static class AppSetup
     private static string FolderSummary(IReadOnlyList<GameExecutable> programs)
     {
         var included = programs.Count(p => p.Included);
-        return programs.Count == 1 ? L.T("A folder with one program. All its traffic goes through your VPN while it is routed.")
-            : included == programs.Count ? L.T("A folder with {0} programs. All of them go through your VPN while it is routed. You can change this below.", programs.Count)
-            : L.T("A folder with {0} programs. {1} go through your VPN while it is routed; the rest (installers, crash reporters) keep your own connection. You can change this below.",
+        return programs.Count == 1 ? L.T("A folder with one program. All its traffic goes through your VPN while its VPN is on.")
+            : included == programs.Count ? L.T("A folder with {0} programs. All of them go through your VPN while its VPN is on. You can change this below.", programs.Count)
+            : L.T("A folder with {0} programs. {1} go through your VPN while its VPN is on; the rest (installers, crash reporters) keep your own connection. You can change this below.",
                 programs.Count, included);
     }
 

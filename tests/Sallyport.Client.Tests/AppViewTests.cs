@@ -29,11 +29,10 @@ public class AppViewTests
     [Fact]
     public void Its_page_says_its_setup_label_by_label()
     {
-        // No launch target chosen in this one: nothing said of what Launch starts.
+        // No Launch for what is routed by packets, so nothing said of what Launch starts; its folder is the page's own line.
         Assert.Equal(
-            [new Fact("VPN profile", "jp"), new Fact("Routes", "All traffic of 1 program"), new Fact("If the VPN drops", GameViews.LossShort(new GameChoice(null, LossMode.Hold, null))),
-             new Fact("Folder", @"E:\Games\ZZZ")],
-            View().Setup!.Take(4));
+            [new Fact("VPN profile", "jp"), new Fact("Uses the VPN", "All traffic of 1 program"), new Fact("If the VPN drops", GameViews.LossShort(new GameChoice(null, LossMode.Hold, null)))],
+            View().Setup!);
         var none = AppViews.Item(new ItemFacts(Zenless() with { ProfileId = null }, null, null, false, true, false, null, _ => []));
         Assert.Equal(new Fact("VPN profile", "None chosen"), none.Setup![0]);
     }
@@ -43,11 +42,11 @@ public class AppViewTests
     {
         var view = View();
 
-        Assert.Equal("Not routing", view.StatusText);
+        Assert.Equal("VPN off", view.StatusText);
         Assert.Equal("Through jp", view.ThroughText);
         Assert.Equal("All traffic of 1 program", view.MethodText);
-        Assert.Equal("Through the VPN: 1 program of 2.", view.ProgramsText);
-        Assert.True(view.Actions.Route is { Visible: true, Enabled: true, Label: "Route" });
+        Assert.Equal("Using the VPN: 1 program of 2.", view.ProgramsText);
+        Assert.True(view.Actions.Route is { Visible: true, Enabled: true, Label: "Turn on VPN" });
         Assert.False(view.Actions.Stop.Visible);
         Assert.Equal("Left out — installs or removes software", view.Programs[1].StatusText);
         Assert.Equal("All traffic", view.Programs[0].StatusText);
@@ -59,8 +58,8 @@ public class AppViewTests
     }
 
     [Theory]
-    [InlineData(true, true, "Another app is being routed. Stop it first.")]
-    [InlineData(false, false, "Packet routing needs the driver and the Sallyport service. Open Settings to see what is missing.")]
+    [InlineData(true, true, "Another app is using the VPN. Turn its VPN off first.")]
+    [InlineData(false, false, "Turning on an app's VPN needs the driver and the Sallyport service. Open Settings to see what is missing.")]
     public void An_app_that_cannot_be_routed_says_why(bool another, bool driverReady, string reason)
     {
         var route = View(another: another, driverReady: driverReady).Actions.Route;
@@ -78,7 +77,7 @@ public class AppViewTests
     {
         var view = View(Facts(Route(RoutePhase.Routing), phaseSince: At));
 
-        Assert.Equal("Routed through jp", view.StatusText);
+        Assert.Equal("VPN on · jp", view.StatusText);
         Assert.Equal(Tone.Up, view.Tone);
         Assert.Equal(RunPhase.Routing, view.Run!.Phase);
         Assert.Equal(At, view.Run.Since);
@@ -87,7 +86,7 @@ public class AppViewTests
         Assert.False(view.Actions.Edit.Enabled);
         Assert.False(view.Programs[0].Actions.Toggle.Enabled);
         Assert.False(view.Programs[0].Actions.Edit.Enabled);
-        Assert.Contains(view.Run.Facts, f => f.Label == "Connections routed" && f.Value == "7");
+        Assert.Contains(view.Run.Facts, f => f.Label == "Connections through the VPN" && f.Value == "7");
     }
 
     [Fact]
@@ -97,9 +96,9 @@ public class AppViewTests
             phaseSince: DateTimeOffset.Now));
         var direct = GameViews.Run(Zenless().AsGame(), Jp, Facts(Route(RoutePhase.Direct)));
 
-        Assert.Equal("Reconnecting — its traffic is held", held.StatusText);
+        Assert.Equal("Reconnecting — its internet is blocked meanwhile", held.StatusText);
         Assert.Matches(@"Your own connection in (59|60) s if it is not back\.", held.DetailText);
-        Assert.Equal("Reconnecting — it uses your own connection", direct.StatusText);
+        Assert.Equal("Reconnecting — on your own connection meanwhile", direct.StatusText);
     }
 
     [Fact]
@@ -107,10 +106,10 @@ public class AppViewTests
     {
         var view = View(Facts(Route(RoutePhase.Stopped), ended: "The network stopped answering, so routing stopped to let it recover."));
 
-        Assert.Equal("Routing stopped", view.StatusText);
+        Assert.Equal("VPN turned off", view.StatusText);
         Assert.Equal(Tone.Trouble, view.Tone);
         Assert.Equal("The network stopped answering, so routing stopped to let it recover.", view.Run!.DetailText);
-        Assert.True(view.Actions.Route is { Visible: true, Label: "Route again" });
+        Assert.True(view.Actions.Route is { Visible: true, Label: "Turn on VPN again" });
     }
 
     [Fact]
@@ -118,7 +117,7 @@ public class AppViewTests
     {
         var view = View(Facts(Route(RoutePhase.Stopped), ended: GameRunner.StoppedByPerson));
 
-        Assert.Equal(("Stopped", Tone.Off), (view.StatusText, view.Tone));
+        Assert.Equal(("VPN off", Tone.Off), (view.StatusText, view.Tone));
         Assert.Null(view.Run!.DetailText);
     }
 
@@ -154,7 +153,7 @@ public class AppViewTests
 
         Assert.Equal("All traffic of 1 program · 1 launched with proxy settings", view.MethodText);
         Assert.Equal("All traffic · launched with proxy settings (Proxy environment)", view.Programs[0].StatusText);
-        Assert.Equal("Routing it before launch…", view.StatusText);
+        Assert.Equal("Turning on its VPN…", view.StatusText);
         // Its own Launch, on its row: the app routes its packets, so the app has none of its own.
         Assert.False(view.Actions.Launch.Visible);
         Assert.True(view.Programs[0].Actions.Launch is { Visible: true, Enabled: false });
@@ -183,10 +182,10 @@ public class AppViewTests
     }
 
     [Theory]
-    [InlineData(LossMode.Hold, null, "If the VPN drops: its traffic is held")]
-    [InlineData(LossMode.Hold, 30, "If the VPN drops: held, then your own connection after 30 s")]
+    [InlineData(LossMode.Hold, null, "If the VPN drops: its internet is blocked until it is back")]
+    [InlineData(LossMode.Hold, 30, "If the VPN drops: blocked, then your own connection after 30 s")]
     [InlineData(LossMode.Direct, null, "If the VPN drops: your own connection until it is back")]
-    [InlineData(LossMode.Stop, null, "If the VPN drops: routing stops")]
+    [InlineData(LossMode.Stop, null, "If the VPN drops: its VPN turns off")]
     public void The_loss_policy_reads_as_a_sentence(LossMode mode, int? after, string text) =>
         Assert.Equal(text, GameViews.LossText(new GameChoice(Jp.Id, mode, after)));
 
@@ -198,8 +197,8 @@ public class AppViewTests
 
         Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Reason: null });
         Assert.False(view.Actions.Remove.Enabled);
-        Assert.Equal("Stop routing what goes through it first.", view.Actions.Remove.Reason);
-        Assert.Contains(view.Facts, f => f.Label == "Routing through it" && f.Value == "Zenless Zone Zero");
+        Assert.Equal("Turn off the VPN of the app that uses it first.", view.Actions.Remove.Reason);
+        Assert.Contains(view.Facts, f => f.Label == "Used by" && f.Value == "Zenless Zone Zero");
     }
 
     [Fact]

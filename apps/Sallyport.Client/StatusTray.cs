@@ -202,7 +202,7 @@ internal sealed class StatusTray : IDisposable
         _window.Hide();
         if (_toldHidden) return;
         _toldHidden = true;
-        Tell(L.T("Sallyport is still running in the notification area. Connections and routing stay on."));
+        Tell(L.T("Sallyport is still running, here beside the clock. Your apps stay on the VPN; right-click here to exit."));
     }
 
     public void Dispose()

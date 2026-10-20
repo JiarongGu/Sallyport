@@ -43,7 +43,8 @@ list of quick toggles is what its users asked back for — never from code of th
 - **Profiles**: a switch per profile, the address under the name with a copy icon once its proxy has a port ("a free
   port when it connects" in plain text until then), the details' chevron centred in its square; Connection settings…
   opens the profile's own view. **Apps**: one "Add an app…"; a tile, Launch, a route switch, the routing check, and an
-  arrow (the chevron turned to point on) that opens the app's page — Monitoring, Setup, Programs. **Settings**: rows of
+  arrow (the chevron turned to point on) that opens the app's page — Monitoring once it has something to show, Programs
+  (those it uses first, the others folded), Setup. Every app's switch has its word beside it, *Use VPN*. **Settings**: rows of
   what acts the moment it changes — General (Language, Start with Windows as a switch) and Connection (VPN protocol, If
   it cannot connect) — each a word, a line under it, and its control on the right.
 

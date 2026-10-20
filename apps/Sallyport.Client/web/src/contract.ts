@@ -183,8 +183,10 @@ export interface SettingsView {
   /** Toggle posts SET_START_WITH_WINDOWS with the opposite of `on`. */
   startup: { on: boolean; label: string; text: string; toggle: Action };
   guide: { endpointText: string; curlExample: string; copyExample: Action };
-  /** Version, where it is installed, where its data is. */
+  /** Its version. */
   about: Fact[];
+  /** Where it is installed and where its data is: long paths, folded under Technical details. */
+  places: Fact[] | null;
   /** What a new app starts with; edit posts BEGIN_DEFAULTS_EDIT. */
   defaults: { facts: Fact[]; edit: Action };
   /** The language in force ("en", "zh-Hans") and the choices; choosing posts SET_LANGUAGE. */
@@ -221,6 +223,8 @@ export interface ProgramView {
   startupSettings: string[];
   /** toggle posts SET_APP_PROGRAM with the opposite of `included`; edit posts BEGIN_PROGRAM_EDIT; launch posts LAUNCH_APP with its id. */
   actions: Record<'toggle' | 'edit' | 'launch', Action>;
+  /** The folder it sits in under its app's, when not at the top ("APMCrashReporter"): two of one name tell apart. */
+  folder: string | null;
   /** What it is doing now — "Running · through jp", "Not running" — while its app's page is open (WATCH_APP); else null. */
   activity: { tone: Tone; text: string } | null;
   /** Its details: how it is routed, its connections now, what went through the VPN, its file. */

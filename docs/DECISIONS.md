@@ -517,3 +517,20 @@ named "childbin", jp chosen; Add app opened its page. Route on: "Routed through 
 answered, tcp 2 ok, 0 failed, the far end saw VPN". Stopped and removed after. Browse opened the dialog titled for
 both choices and was cancelled; a physical click on it could not be checked from this session (the window could not
 be brought forward), and UI Automation cannot see into the dialog from an elevated shell.
+
+**The words, after a review for a person who is not technical (2026-10-20).** Codex (`codex exec -s read-only`, the
+brief in `local/codex/ux-audit-brief.md`, twelve screenshots of the installed client and one of the tray menu attached)
+reviewed every page as that person would. Claude checked each point against the code and the owner's own words before
+adopting it; the owner's "not the 2 button" ruled out its two choosers for Add an app, and "VPNs" for Profiles was not
+taken (the owner and OpenVPN Connect both say profile). Adopted:
+- one vocabulary for an app: its VPN on or off — *Use VPN* beside every app's switch, *Turn on VPN* / *Turn off VPN*,
+  *VPN on · jp*, *VPN off*; "route" and "routing" are gone from what a person reads, kept in the experts' notes;
+- "held" said as what it does: *Block its internet until the VPN is back*;
+- after a first import, the window goes to Apps to add the game;
+- an app's page: its header without the loss policy (Setup has it), no empty Monitoring card — a next step instead —
+  the programs it uses first, the others folded under *Other programs (n)*, the folder on a line of its own;
+- the Overview says nothing of the proxy before it has a port, and shows the driver's card only when something needs
+  doing; Profiles likewise;
+- About folds its long paths under *Technical details*; the guide's steps say what to do now;
+- the title on the content's edge at the window's narrow width; heading buttons and *Open Apps* drawn as buttons; Add
+  app's reason under the pair rather than between them.

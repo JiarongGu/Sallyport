@@ -146,7 +146,7 @@ internal static class ClientView
             facts.Add(new(L.T("Uploaded"), Bytes(status.BytesUp)));
         }
 
-        if (f.UsedBy is { } game) facts.Add(new(L.T("Routing through it"), game));
+        if (f.UsedBy is { } game) facts.Add(new(L.T("Used by"), game));
         if (f.PolicyChanged) facts.Add(new(L.T("Connection settings"), L.T("Changed for this profile")));
 
         var location = Located(f, up);
@@ -164,7 +164,7 @@ internal static class ClientView
                     busy: f.Locating)
                 : UiAction.Hidden,
             Remove: UiAction.Shown(L.T("Remove profile"), !running && !busy && f.UsedBy is null,
-                f.UsedBy is not null ? L.T("Stop routing what goes through it first.") : running ? L.T("Disconnect before removing it.") : null),
+                f.UsedBy is not null ? L.T("Turn off the VPN of the app that uses it first.") : running ? L.T("Disconnect before removing it.") : null),
             Settings: UiAction.Shown(L.T("Connection settings…"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")));
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.

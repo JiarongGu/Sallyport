@@ -148,7 +148,7 @@ export function App() {
       <main className="content" id="main-content">
         {!state ? <div className="loading" role="status"><span className="spinner" aria-hidden="true" />{t('Loading…')}</div> :
           newApp && currentDraft ? <section className="page" aria-label={t('Add an app')}>
-            <p className="page-intro secondary">{t('Pick a game or a program. While it is routed, its traffic goes through your VPN; everything else keeps your own connection.')}</p>
+            <p className="page-intro secondary">{t('Pick a game or a program. When its VPN is on, only it goes through your VPN; everything else keeps your own connection.')}</p>
             <NewAppForm key={newApp.token} editor={newApp} draft={currentDraft} onChange={setDraft}
               profileChoices={state.profileChoices} lossChoices={state.lossChoices} />
           </section> :

@@ -112,8 +112,8 @@ public sealed partial class LanguageTests
         {
             L.Current = Language.Chinese;
             Assert.Equal("已连接", L.T("Connected"));
-            Assert.Equal("正在经由 jp 分流 Zenless。如果它已在运行，可能需要重新连接。",
-                L.T("Routing {0} through {1}. If it is running already, it may need to reconnect.", "Zenless", "jp"));
+            Assert.Equal("jp 现在为 Zenless 提供 VPN。如果它已在运行，可能需要重新连接。",
+                L.T("{0} now uses {1}. If it is running already, it may need to reconnect.", "Zenless", "jp"));
             Assert.Equal("已尝试 3 次。", L.Count(3, "1 attempt so far.", "{0} attempts so far."));
             Assert.Equal("连接中断。上次尝试：timeout", L.Join("连接中断。", L.T("Last attempt: {0}", "timeout")));
             Assert.Equal("2026年10月20日", L.Date(new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero)));

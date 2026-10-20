@@ -48,7 +48,7 @@ public class TrayMenuTests
         Assert.True(menu[0] is { Text: "Open Sallyport", Verb: TrayVerb.OpenWindow, Default: true, Tip: "Nothing is connected" });
         Assert.True(menu[2] is { Text: "No profiles yet — open Sallyport to import one", Enabled: false });
         Assert.True(menu[4] is { Text: "Settings", Verb: TrayVerb.OpenSettings });
-        Assert.True(menu[5] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Tip: "Stops routing, disconnects every profile, then quits." });
+        Assert.True(menu[5] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Tip: "Turns off every app's VPN, disconnects, then quits." });
         // Only one entry is the default (what a double click would do), and it is opening the window.
         Assert.Single(menu, e => e.Default);
     }
@@ -94,7 +94,7 @@ public class TrayMenuTests
         var apps = Assert.Single(menu, e => e is { Kind: TrayEntryKind.Submenu, Text: "Apps" });
         var zenless = apps.Items![0];
         Assert.Equal("Zenless  ·  Through jp", zenless.Text);
-        Assert.True(Assert.Single(zenless.Items!, e => e.Verb == TrayVerb.Route) is { Text: "Route", Enabled: true, Target: "0123456789abcdef" });
+        Assert.True(Assert.Single(zenless.Items!, e => e.Verb == TrayVerb.Route) is { Text: "Turn on VPN", Enabled: true, Target: "0123456789abcdef" });
         // A game is started as the person always starts it: no Launch for it here either.
         Assert.DoesNotContain(zenless.Items!, e => e.Verb == TrayVerb.Launch);
         // A browser is launched with its proxy settings; its program is not on this machine, so Launch is off and says why.
@@ -110,8 +110,8 @@ public class TrayMenuTests
         var menu = TrayMenu.Build([Profile(null)], [Item(Zenless, run), Item(Genshin, anotherRunning: true)], "");
 
         var routed = Assert.Single(menu, e => e.Text.StartsWith("Zenless — ", StringComparison.Ordinal));
-        Assert.Equal("Zenless — Routed through jp", routed.Text);
-        Assert.True(Assert.Single(routed.Items!, e => e.Verb == TrayVerb.StopRun) is { Text: "Stop routing", Enabled: true });
+        Assert.Equal("Zenless — VPN on · jp", routed.Text);
+        Assert.True(Assert.Single(routed.Items!, e => e.Verb == TrayVerb.StopRun) is { Text: "Turn off VPN", Enabled: true });
         Assert.DoesNotContain(routed.Items!, e => e.Verb == TrayVerb.Route);
 
         var apps = Assert.Single(menu, e => e.Text == "Apps");
@@ -119,7 +119,7 @@ public class TrayMenuTests
         Assert.StartsWith("Genshin", genshin.Text);
         var route = Assert.Single(genshin.Items!, e => e.Verb == TrayVerb.Route);
         Assert.False(route.Enabled);
-        Assert.Equal("Another app is being routed. Stop it first.", route.Tip);
+        Assert.Equal("Another app is using the VPN. Turn its VPN off first.", route.Tip);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class TrayMenuTests
 
         Assert.DoesNotContain(menu, e => e.Text.StartsWith("Zenless — ", StringComparison.Ordinal));
         var zenless = Assert.Single(Assert.Single(menu, e => e.Text == "Apps").Items!);
-        Assert.Contains(zenless.Items!, e => e is { Verb: TrayVerb.Route, Text: "Route again" });
+        Assert.Contains(zenless.Items!, e => e is { Verb: TrayVerb.Route, Text: "Turn on VPN again" });
     }
 
     [Fact]

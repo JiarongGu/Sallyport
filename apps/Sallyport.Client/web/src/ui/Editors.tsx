@@ -141,7 +141,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         <label className="check-field">
           <input type="checkbox" checked={draft.values.packets} disabled={saving}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, packets: event.target.checked } })} />
-          <span><span>{t('All traffic — packet driver')}</span><span className="secondary metadata">{t('Everything it sends, TCP and UDP, while the app is routed.')}</span></span>
+          <span><span>{t('All traffic — packet driver')}</span><span className="secondary metadata">{t('Everything it sends, TCP and UDP, while the app’s VPN is on.')}</span></span>
         </label>
         <label className="check-field">
           <input type="checkbox" checked={draft.values.proxy} disabled={saving}
@@ -235,9 +235,10 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           {check('randomOrder', 'Try the servers in random order')}
           {check('retryAfterAuthFailure', 'Keep trying after the server refuses the login')}
         </div>
+        {editor.hint && <p className="secondary full-field" id={`${prefix}-hint`}>{editor.hint}</p>}
       </div>
     </div> : null}
-    {editor.hint && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
+    {editor.hint && editor.kind !== 'policy' && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
     {error('form')}
     <div className="actions">
       <ActionButton action={editor.save} primary type="submit" />
@@ -275,17 +276,17 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
     if (editor.save.enabled) post('SAVE_NEW_APP', { token: editor.token, values });
   }}>
     <section className="card setup-step" aria-labelledby={`${prefix}-where`}>
-      <h2 id={`${prefix}-where`}>{t('Where is it?')}</h2>
-      <p className="secondary">{t('A game’s folder, or a program (.exe). With a game’s folder, everything in it goes through your VPN together.')}</p>
+      <h2 id={`${prefix}-where`}>{t('Choose your game or program')}</h2>
+      <p className="secondary">{t('Its folder or its .exe. For a folder, Sallyport picks which of its programs use the VPN; you can change that below.')}</p>
       <div className="path-field">
-        <input id={`${prefix}-path`} type="text" autoComplete="off" spellCheck={false} value={values.path} aria-label={t('Where is it?')}
+        <input id={`${prefix}-path`} type="text" autoComplete="off" spellCheck={false} value={values.path} aria-label={t('Choose your game or program')}
           placeholder={t('For example D:\\Games\\MyGame')} aria-invalid={!!editor.errors.path}
           aria-describedby={editor.errors.path ? `${prefix}-path-error` : undefined}
           onChange={(event) => update({ path: event.target.value })} onBlur={locate}
           onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); locate(); } }} />
         {/* Pressed without taking the focus: leaving the field would look at the place typed and renew the form under it. */}
         <button type="button" onMouseDown={(event) => event.preventDefault()}
-          onClick={() => post('NEW_APP_BROWSE', { token: editor.token, values })}>{t('Browse…')}</button>
+          onClick={() => post('NEW_APP_BROWSE', { token: editor.token, values })}>{t('Choose…')}</button>
       </div>
       {error('path')}
       {found && editor.hint && <p className="found"><Icon name="check" /><span>{editor.hint}</span></p>}
@@ -333,8 +334,8 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
 
     {found && editor.options && <section className="card setup-step" aria-labelledby={`${prefix}-programs`}>
       <h2 id={`${prefix}-programs`}>{t('Its programs')}</h2>
-      <p className="secondary">{t('On: its traffic goes through your VPN while the app is routed. Off: it keeps your own connection.')}</p>
-      <div className="program-list-head" aria-hidden="true"><span>{t('Program')}</span><span>{t('Through the VPN')}</span></div>
+      <p className="secondary">{t('On: its traffic goes through your VPN while the app’s VPN is on. Off: it keeps your own connection.')}</p>
+      <div className="program-list-head" aria-hidden="true"><span>{t('Program')}</span><span>{t('Use VPN')}</span></div>
       <ul className="program-list">
         {editor.options.map((option) => <li key={option.id} className={included.has(option.id) ? 'included' : 'left-out'}>
           <div className="program-head setup-program">
@@ -352,10 +353,12 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
     </section>}
 
     {error('form')}
-    <div className="actions">
+    <div className="actions setup-actions">
       <ActionButton action={editor.save} primary type="submit" />
       <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
     </div>
+    {/* Why Add app waits, under the pair rather than between them. */}
+    {!editor.save.enabled && editor.save.reason && <p className="secondary metadata">{editor.save.reason}</p>}
   </form>;
 }
 

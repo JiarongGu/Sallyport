@@ -42,7 +42,7 @@ public class WindowViewTests
 
         Assert.Equal("Nothing is connected", view.StatusText);
         Assert.Equal(Tone.Off, view.Tone);
-        Assert.Equal(new NetworkEmpty("Nothing is connected", "Route an app or connect a profile to begin."), view.Empty);
+        Assert.Equal(new NetworkEmpty("Nothing is connected", "Turn on an app's VPN, or connect a profile, to begin."), view.Empty);
         Assert.Empty(view.Channels);
         Assert.Equal(Ready, view.Routing);
     }
@@ -112,11 +112,11 @@ public class WindowViewTests
         Assert.False(channel.Actions.Disconnect.Visible);
         var selection = Assert.Single(channel.Selections);
         Assert.Equal("Zenless Zone Zero", selection.Name);
-        Assert.Equal("Routed through us", selection.Run.StatusText);
-        Assert.True(selection.Stop is { Visible: true, Label: "Stop routing" });
+        Assert.Equal("VPN on · us", selection.Run.StatusText);
+        Assert.True(selection.Stop is { Visible: true, Label: "Turn off VPN" });
         Assert.DoesNotContain(selection.Run.Facts, f => f.Label is "Connected over" or "Tunnel address");
         Assert.Contains(channel.Facts, f => f.Label == "Tunnel address" && f.Value == "10.8.0.6");
-        Assert.Equal("1 connection · 1 app routed", view.StatusText);
+        Assert.Equal("1 connection · 1 app using the VPN", view.StatusText);
     }
 
     [Fact]
@@ -128,7 +128,7 @@ public class WindowViewTests
         Assert.Equal(Tone.Busy, channel.Tone);
         Assert.Equal("Reconnecting…", channel.StatusText);
         Assert.Null(channel.ConnectedSince);
-        Assert.Equal("Reconnecting — its traffic is held", channel.Selections[0].Run.StatusText);
+        Assert.Equal("Reconnecting — its internet is blocked meanwhile", channel.Selections[0].Run.StatusText);
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public class WindowViewTests
         Assert.Equal("SOCKS5 proxy on 127.0.0.1:1088", channel.ProxyText);
         Assert.Equal("Zenless Zone Zero", Assert.Single(channel.Selections).Name);
         Assert.True(channel.Actions.Disconnect is { Visible: true, Label: "Disconnect" });
-        Assert.Equal("1 connection · 1 app routed", view.StatusText);
+        Assert.Equal("1 connection · 1 app using the VPN", view.StatusText);
     }
 
     [Fact]
@@ -209,10 +209,10 @@ public class WindowViewTests
         Assert.Equal(on, view.Startup.On);
         Assert.Equal("Start Sallyport with Windows", view.Startup.Label);
         Assert.Equal(toggle, view.Startup.Toggle.Label);
-        Assert.Contains(view.About, f => f.Label == "Version");
-        Assert.StartsWith("Not installed (a development build in ", view.About.Single(f => f.Label == "Installed in").Value);
-        Assert.Equal(@"D:\Program Files\Sallyport\data\users\S-1-5-21-1", view.About.Single(f => f.Label == "Your data").Value);
-        Assert.Equal(["Version", "Installed in", "Your data"], view.About.Select(f => f.Label));
+        // The version plainly; where it lives folded away (Places), for those who look.
+        Assert.Equal(["Version"], view.About.Select(f => f.Label));
+        Assert.StartsWith("Not installed (a development build in ", view.Places!.Single(f => f.Label == "Installed in").Value);
+        Assert.Equal(@"D:\Program Files\Sallyport\data\users\S-1-5-21-1", view.Places!.Single(f => f.Label == "Your data").Value);
         Assert.Equal(["jp", "your own connection until it is back"], view.Defaults.Facts.Select(f => f.Value));
         Assert.True(view.Defaults.Edit is { Visible: true, Enabled: true, Label: "Change…" });
     }

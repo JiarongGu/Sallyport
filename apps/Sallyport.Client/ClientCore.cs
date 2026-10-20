@@ -217,7 +217,13 @@ internal sealed class ClientCore
         // The store's own reasons never quote the text, so they may cross to the page.
         try { stored = _store.Import(name, File.ReadAllText(file.FullName)); }
         catch (InvalidDataException e) { throw new ShenoraException("PROFILE_INVALID", "file", file.Name, L.T("{0} was not imported: {1}.", file.Name, e.Message)); }
-        Notify(NoticeKind.Info, L.T("Imported {0}. Its copy is encrypted for your Windows account.", stored.Name), new("profile", stored.Id));
+        // The next step is the app: with none yet, the window goes where one is added.
+        if (_items.List().Count == 0)
+        {
+            Notify(NoticeKind.Info, L.T("Imported {0}. Now add the game or program that should use it.", stored.Name), new("profile", stored.Id));
+            Navigate(Page.Apps);
+        }
+        else Notify(NoticeKind.Info, L.T("Imported {0}. Its copy is encrypted for your Windows account.", stored.Name), new("profile", stored.Id));
         return stored;
     }
 
@@ -236,7 +242,7 @@ internal sealed class ClientCore
         if (_runner.ProfileInUse == id && _runner.Facts() is { Ended: null } run && _items.Find(run.GameId) is { } routed)
         {
             Confirm("disconnect", id, L.T("Disconnect {0}?", Profile(id).Name),
-                L.T("{0} is routed through it. Its routing stops too, and it carries on over your own connection.", routed.Name), L.T("Disconnect"), L.T("Keep connected"));
+                L.T("{0} uses it. Its VPN turns off too, and it carries on over your own connection.", routed.Name), L.T("Disconnect"), L.T("Keep connected"));
             return;
         }
         await TakeDownAsync(id);
@@ -292,7 +298,7 @@ internal sealed class ClientCore
     {
         var profile = Profile(id);
         if (_connections.IsRunning(id)) throw new ShenoraException("CONNECTED", "id", id, L.T("Disconnect {0} before removing it.", profile.Name));
-        if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, L.T("Stop routing the app that uses it first."));
+        if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, L.T("Turn off the VPN of the app that uses it first."));
         var inUse = _items.List().Count(i => i.ProfileId == id || i.Programs.Any(p => p.ProfileId == id));
         var text = L.Join(L.T("Deletes Sallyport's encrypted copy. The original file stays unchanged."),
             inUse == 0 ? null : L.Count(inUse, "1 app will need another profile.", "{0} apps will need another profile."));
@@ -532,7 +538,7 @@ internal sealed class ClientCore
     public async Task AddProgramToAppAsync(string id)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Stop routing before changing its programs."));
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing its programs."));
         var path = await PickProgramAsync("add-program", L.T("Choose another program for {0}", item.Name));
         if (path is null) return;
         try { _items.AddProgram(id, path); }
@@ -603,7 +609,7 @@ internal sealed class ClientCore
     public void RescanApp(string id)
     {
         var before = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Stop routing before scanning again."));
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before scanning again."));
         RoutedItem after;
         try { after = _items.Rescan(id); }
         catch (DirectoryNotFoundException) { throw new ShenoraException("APP_FOLDER", "id", id, L.T("{0}'s folder is not there any more.", before.Name)); }
@@ -617,7 +623,7 @@ internal sealed class ClientCore
     public void SetAppProgram(string id, string programId, bool included)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Stop routing before changing its programs."));
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing its programs."));
         var program = item.Programs.FirstOrDefault(p => p.Id == programId)
             ?? throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That program is not one of this app's."));
         _items.Choose(id, program.Path, included);
@@ -627,7 +633,7 @@ internal sealed class ClientCore
     public void BeginAppEdit(string id)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Stop routing before changing it."));
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing it."));
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, L.T("Wait for the launch to finish."));
         lock (_gate)
             _editor = new OpenEditor(NewToken(), "app", id, new AppEditValues(item.Name, _store.Find(item.ProfileId ?? "") is null ? null : item.ProfileId,
@@ -653,7 +659,7 @@ internal sealed class ClientCore
         }
         if (values.LaunchProgramId is { } launch && !item.Programs.Any(p => p.Id == launch && p.Included))
             errors["launchProgramId"] = L.T("Choose one of its included programs.");
-        if (IsLive(item.Id)) errors["form"] = L.T("Stop routing before changing it.");
+        if (IsLive(item.Id)) errors["form"] = L.T("Turn its VPN off before changing it.");
 
         lock (_gate)
         {
@@ -671,7 +677,7 @@ internal sealed class ClientCore
     public void BeginProgramEdit(string id, string programId)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Stop routing before changing its methods."));
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing its methods."));
         var program = item.Programs.FirstOrDefault(p => p.Id == programId)
             ?? throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That program is not one of this app's."));
         lock (_gate)
@@ -690,7 +696,7 @@ internal sealed class ClientCore
         if (!values.Packets && !values.Proxy) errors["form"] = L.T("Choose at least one way for its traffic to reach the VPN, or leave the program out instead.");
         if (values.Proxy && !Enum.IsDefined(values.Kind)) errors["kind"] = L.T("Choose how the program is told about the proxy.");
         if (arguments.Length > LongestArguments) errors["arguments"] = L.T("Use at most {0:N0} characters.", LongestArguments);
-        if (IsLive(id)) errors["form"] = L.T("Stop routing before changing its methods.");
+        if (IsLive(id)) errors["form"] = L.T("Turn its VPN off before changing its methods.");
 
         lock (_gate)
         {
@@ -727,7 +733,7 @@ internal sealed class ClientCore
     public void RequestRemoveApp(string id)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Stop routing before removing it."));
+        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before removing it."));
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, L.T("Wait for the launch to finish."));
         Confirm("remove-app", id, L.T("Remove {0}?", item.Name), L.T("Removes it from Sallyport. Its programs and files are not touched; a running copy keeps running."),
             L.T("Remove app"), L.T("Keep app"));
@@ -755,12 +761,12 @@ internal sealed class ClientCore
         if (choice.ProfileId is null || _store.Find(choice.ProfileId) is not { } stored)
             throw new ShenoraException("APP_NO_PROFILE", "id", id, L.T("Choose a VPN profile for {0} first (Edit).", item.Name));
         if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}.", stored.Name, why));
-        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, L.T("Another app is being routed. Stop it first."));
+        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, L.T("Another app is using the VPN. Turn its VPN off first."));
         if (item.PacketPrograms.Count == 0) throw new ShenoraException("APP_EMPTY", "id", id, L.T("Include at least one of {0}'s programs sending all its traffic.", item.Name));
 
         // Through the profile's channel: the same login as its proxy, if that is connected (docs/design/window.md).
         _runner.Start(game, stored.Id, choice.Policy);
-        Notify(NoticeKind.Info, L.T("Routing {0} through {1}. If it is running already, it may need to reconnect.", item.Name, stored.Name), new("app", id));
+        Notify(NoticeKind.Info, L.T("{0} now uses {1}. If it is running already, it may need to reconnect.", item.Name, stored.Name), new("app", id));
     }
 
     public Task StopRunAsync() => _runner.StopAsync();
@@ -828,10 +834,10 @@ internal sealed class ClientCore
         while (true)
         {
             var run = _runner.Facts();
-            if (run is null || run.GameId != id) throw new ShenoraException("NOT_ROUTED", "id", id, L.T("routing did not start"));
-            if (run.Ended is { } why) throw new ShenoraException("NOT_ROUTED", "id", id, L.T("routing stopped: {0}", why));
+            if (run is null || run.GameId != id) throw new ShenoraException("NOT_ROUTED", "id", id, L.T("its VPN did not turn on"));
+            if (run.Ended is { } why) throw new ShenoraException("NOT_ROUTED", "id", id, L.T("its VPN turned off: {0}", why));
             if (run.Route?.Phase == RoutePhase.Routing) return;
-            if (DateTime.UtcNow > deadline) throw new ShenoraException("ROUTE_TIMEOUT", "id", id, L.T("its routing was not ready within {0:0} s", within.TotalSeconds));
+            if (DateTime.UtcNow > deadline) throw new ShenoraException("ROUTE_TIMEOUT", "id", id, L.T("its VPN was not ready within {0:0} s", within.TotalSeconds));
             await Task.Delay(200, ct);
         }
     }
@@ -921,7 +927,7 @@ internal sealed class ClientCore
 
     public void RequestDriverRemove()
     {
-        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "driver", "", L.T("Stop routing first."));
+        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "driver", "", L.T("Turn its VPN off first."));
         Confirm("driver-remove", "", L.T("Remove the packet driver?"), GameViews.DriverRemoveText, L.T("Remove"), L.T("Keep it"));
     }
 

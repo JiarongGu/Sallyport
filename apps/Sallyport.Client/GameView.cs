@@ -41,18 +41,18 @@ internal static class GameViews
 
     public static IReadOnlyList<LossChoice> LossChoices =>
     [
-        new(LossMode.Hold, L.T("Hold its traffic"), L.T("Nothing of the app leaves outside the VPN while it reconnects. The app may lag or disconnect meanwhile.")),
-        new(LossMode.Direct, L.T("Use my own connection"), L.T("The app keeps going over your own connection while the VPN reconnects, and goes back through it once it is up.")),
-        new(LossMode.Stop, L.T("Stop routing"), L.T("Routing ends when the connection is lost; the app carries on over your own connection.")),
+        new(LossMode.Hold, L.T("Block its internet until the VPN is back"), L.T("Nothing of the app goes out without the VPN. Your game may lag or disconnect while it reconnects.")),
+        new(LossMode.Direct, L.T("Use my own connection meanwhile"), L.T("The app keeps going over your own connection while the VPN reconnects, then goes back through the VPN.")),
+        new(LossMode.Stop, L.T("Turn the VPN off for it"), L.T("The app carries on over your own connection until you turn its VPN on again.")),
     ];
 
     /// <summary>What a loss policy does, as the end of a sentence: "your own connection until it is back".</summary>
     public static string LossShort(GameChoice choice) => choice.Loss switch
     {
         LossMode.Direct => L.T("your own connection until it is back"),
-        LossMode.Stop => L.T("routing stops"),
-        _ when choice.DirectAfterSeconds is > 0 and var s => L.T("held, then your own connection after {0} s", s),
-        _ => L.T("its traffic is held"),
+        LossMode.Stop => L.T("its VPN turns off"),
+        _ when choice.DirectAfterSeconds is > 0 and var s => L.T("blocked, then your own connection after {0} s", s),
+        _ => L.T("its internet is blocked until it is back"),
     };
 
     public static string LossText(GameChoice choice) => L.T("If the VPN drops: {0}", LossShort(choice));
@@ -64,17 +64,17 @@ internal static class GameViews
         var tunnel = run.Tunnel;
         var (phase, tone, text, detail) = run switch
         {
-            { Ended: GameRunner.StoppedByPerson } => (RunPhase.Ended, Tone.Off, L.T("Stopped"), (string?)null),
-            { Ended: { } why } => (RunPhase.Ended, Tone.Trouble, L.T("Routing stopped"), why),
-            { Preparing: true } => (RunPhase.Preparing, Tone.Busy, L.T("Preparing…"), L.T("Asking the Sallyport service to route the app's programs.")),
+            { Ended: GameRunner.StoppedByPerson } => (RunPhase.Ended, Tone.Off, L.T("VPN off"), (string?)null),
+            { Ended: { } why } => (RunPhase.Ended, Tone.Trouble, L.T("VPN turned off"), why),
+            { Preparing: true } => (RunPhase.Preparing, Tone.Busy, L.T("Preparing…"), L.T("Asking the Sallyport service to send the app's programs through the VPN.")),
             _ => route?.Phase switch
             {
-                RoutePhase.Routing => (RunPhase.Routing, Tone.Up, L.T("Routed through {0}", name), L.T("Every connection of the app's programs goes through the VPN.")),
-                RoutePhase.Held => (RunPhase.Held, Tone.Busy, L.T("Reconnecting — its traffic is held"),
+                RoutePhase.Routing => (RunPhase.Routing, Tone.Up, L.T("VPN on · {0}", name), L.T("Every connection of the app's programs goes through the VPN.")),
+                RoutePhase.Held => (RunPhase.Held, Tone.Busy, L.T("Reconnecting — its internet is blocked meanwhile"),
                     Join(Attempts(tunnel), DirectAfter(run))),
-                RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, L.T("Reconnecting — it uses your own connection"),
+                RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, L.T("Reconnecting — on your own connection meanwhile"),
                     Join(Attempts(tunnel), L.T("It goes back through the VPN once it is up."))),
-                _ => (RunPhase.Connecting, Tone.Busy, L.T("Connecting {0}…", name), L.T("Its traffic is held until the VPN is up.")),
+                _ => (RunPhase.Connecting, Tone.Busy, L.T("Connecting {0}…", name), L.T("Its internet is blocked until the VPN is up.")),
             },
         };
 
@@ -82,9 +82,9 @@ internal static class GameViews
         if (route is { } s)
         {
             facts.Add(new(L.T("Its processes"), s.Selected.ToString("N0", English)));
-            facts.Add(new(L.T("Connections routed"), s.RoutedFlows.ToString("N0", English)));
+            facts.Add(new(L.T("Connections through the VPN"), s.RoutedFlows.ToString("N0", English)));
             facts.Add(new(L.T("Packets out / in"), $"{s.Routed:N0} / {s.HandedUp:N0}"));
-            if (s.HeldWhileDown > 0) facts.Add(new(L.T("Held while reconnecting"), s.HeldWhileDown.ToString("N0", English)));
+            if (s.HeldWhileDown > 0) facts.Add(new(L.T("Blocked while reconnecting"), s.HeldWhileDown.ToString("N0", English)));
             if (s.DirectWhileDown > 0) facts.Add(new(L.T("Sent directly while reconnecting"), s.DirectWhileDown.ToString("N0", English)));
             if (s.Blocked > 0) facts.Add(new(L.T("Blocked (IPv6, local network)"), s.Blocked.ToString("N0", English)));
         }

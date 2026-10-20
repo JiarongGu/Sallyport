@@ -9,7 +9,7 @@ export function Profiles({ state, now, expanded, toggle }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void;
 }) {
   return <section className="page" aria-label={t('Profiles')}>
-    <p className="page-intro secondary">{t('Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.')}</p>
+    <p className="page-intro secondary">{t('Your VPN connections, from the .ovpn files you import. Turning on an app connects its own; you can also turn one on here.')}</p>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}
     <div className="rows">
       {state.profiles.map((profile) => <ProfileRow key={profile.id} profile={profile} now={now}
@@ -43,12 +43,12 @@ function ProfileRow({ profile, now, expanded, toggle }: {
           <StatusPill tone={profile.tone} announce>{profile.statusText}</StatusPill>
           {profile.connectedSince && <span className="duration">{t('Connected for {0}', duration(profile.connectedSince, now))}</span>}
         </div>
-        <span className="endpoint">
-          <span className="metadata secondary">{t('SOCKS5')}</span>
-          {/* An address to copy only once the proxy has its port; until then, that it takes one. */}
-          {profile.port !== null ? <code>{profile.endpointText}</code> : <span className="metadata secondary">{profile.endpointText}</span>}
+        {/* The proxy for other programs, once it has a port: nothing to say of it before. */}
+        {profile.port !== null && <span className="endpoint">
+          <span className="metadata secondary">{t('Proxy for other programs')}</span>
+          <code>{profile.endpointText}</code>
           <ActionButton action={profile.actions.copy} icon="copy" onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
-        </span>
+        </span>}
       </div>
       <Disclosure open={expanded} controls={detailsId} onClick={toggle} icon />
     </div>

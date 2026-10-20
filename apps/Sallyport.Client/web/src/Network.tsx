@@ -28,10 +28,11 @@ export function Network({ state, now, go, featured, feature }: {
       <h2 id="also-connected">{t('Also connected')}</h2>
       <div className="rows">{others.map((channel) => <OtherChannel key={channel.id} channel={channel} now={now} feature={feature} />)}</div>
     </section>}
-    <section className="network-routing" aria-label={t('Routing on this computer')}>
-      <h2>{t('Routing on this computer')}</h2>
+    {/* Said here only when it needs doing something: all is well is Settings' to show. */}
+    {network.routing.phase !== 'ready' && <section className="network-routing" aria-label={t('App VPN on this computer')}>
+      <h2>{t('App VPN on this computer')}</h2>
       <RoutingCard routing={network.routing} manage={false} openSettings={() => go('settings')} />
-    </section>
+    </section>}
   </section>;
 }
 
@@ -54,8 +55,9 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
             </select></>
           : <h2>{profile.name}</h2>}
         <p className={`hero-status tone-text-${profile.tone}`} role="status">{profile.statusText}</p>
-        <p className="secondary metadata">{[since && t('Connected for {0}', duration(since, now)), channel?.proxyText ?? `${t('SOCKS5')} ${profile.endpointText}`]
+        {on || since ? <p className="secondary metadata">{[since && t('Connected for {0}', duration(since, now)), profile.port !== null && channel?.proxyText]
           .filter(Boolean).join(' · ')}</p>
+          : apps.length > 0 && <p className="secondary metadata">{t('Turn on an app below and this connects by itself.')}</p>}
       </div>
       <Switch large on={on} action={on ? profile.actions.disconnect : profile.actions.connect}
         onFlip={() => post(on ? 'DISCONNECT' : 'CONNECT', { id: profile.id })} />
@@ -92,11 +94,12 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
 
     {/* The apps through this profile not being routed now, to route or launch from here. */}
     {apps.some((a) => !channel?.selections.some((s) => s.id === a.id)) && <section className="hero-apps" aria-label={t('Apps')}>
-      <div className="hero-apps-head"><h3>{t('Apps through it')}</h3><button type="button" className="subtle" onClick={() => go('apps')}>{t('Open Apps')}</button></div>
+      <div className="hero-apps-head"><h3>{t('Apps through it')}</h3><button type="button" onClick={() => go('apps')}>{t('Open Apps')}</button></div>
       <ul>{apps.filter((a) => !channel?.selections.some((s) => s.id === a.id)).map((app) => <li key={app.id}>
         <Monogram name={app.name} />
         <span className="app-line"><span className="app-name">{app.name}</span><StatusPill tone={app.tone}>{app.statusText}</StatusPill></span>
         <ActionButton action={app.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id })} />
+        {(app.actions.stop.visible || app.actions.route.visible) && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
         <Switch on={app.actions.stop.visible} action={app.actions.stop.visible ? app.actions.stop : app.actions.route}
           onFlip={() => app.actions.stop.visible ? post('STOP_RUN', {}) : post('ROUTE_APP', { id: app.id })} />
       </li>)}</ul>

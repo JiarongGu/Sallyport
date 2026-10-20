@@ -12,6 +12,7 @@ export function Settings({ state, expanded, toggle, editorForm }: {
   const generalId = useId();
   const languageId = useId();
   const connectionId = useId();
+  const placesId = useId();
   const protocolId = useId();
   const retryId = useId();
   const connection = settings.connection;
@@ -46,8 +47,8 @@ export function Settings({ state, expanded, toggle, editorForm }: {
         <div className="setting-row">
           <span className="setting-text">
             <span id={protocolId}>{t('VPN protocol')}</span>
-            <span>{protocolHelp ? t('{0} {1}', t('How it reaches the VPN server. Apps’ TCP and UDP go through the VPN either way.'), protocolHelp)
-              : t('How it reaches the VPN server. Apps’ TCP and UDP go through the VPN either way.')}</span>
+            <span>{protocolHelp ? t('{0} {1}', t('How Sallyport talks to your VPN server; your apps’ traffic goes through it either way.'), protocolHelp)
+              : t('How Sallyport talks to your VPN server; your apps’ traffic goes through it either way.')}</span>
           </span>
           <select className="setting-choice" aria-labelledby={protocolId} value={connection.protocol.setting}
             onChange={(event) => post('SET_PROTOCOL', { protocol: event.target.value })}>
@@ -67,9 +68,9 @@ export function Settings({ state, expanded, toggle, editorForm }: {
       </div>
     </section>
 
-    <section className="settings-group" aria-label={t('Packet routing')}>
-      <h2>{t('Packet routing')}</h2>
-      <p className="secondary">{t('Routing a program’s every packet needs NT Kernel’s free Windows Packet Filter driver and the Sallyport service.')}</p>
+    <section className="settings-group" aria-label={t('Driver')}>
+      <h2>{t('Driver')}</h2>
+      <p className="secondary">{t('Sending a whole app through your VPN needs a free driver (Windows Packet Filter, by NT Kernel) and the Sallyport service.')}</p>
       <RoutingCard routing={settings.routing} manage />
     </section>
 
@@ -92,7 +93,15 @@ export function Settings({ state, expanded, toggle, editorForm }: {
 
     <section className="settings-group" aria-label={t('About')}>
       <h2>{t('About')}</h2>
-      <div className="card"><Facts facts={settings.about} /></div>
+      <div className="card about">
+        <Facts facts={settings.about} />
+        {settings.places && <div className="manual-setup">
+          <Disclosure open={expanded.has('places')} controls={placesId} onClick={() => toggle('places')}>{t('Technical details')}</Disclosure>
+          <div id={placesId} hidden={!expanded.has('places')} className="manual-content">
+            {settings.places.map((fact) => <div key={fact.label} className="wide-fact"><span className="secondary metadata">{fact.label}</span><span className="program-path">{fact.value}</span></div>)}
+          </div>
+        </div>}
+      </div>
     </section>
   </section>;
 }
@@ -122,13 +131,15 @@ function Guide({ guide, manualOpen, toggleManual }: {
   const manualId = useId();
   return <div className="guide">
     <ol className="steps">
-      <li><h3>{t('Import a profile.')}</h3><p>{t('Choose the OpenVPN profile supplied by your VPN provider (Profiles).')}</p></li>
-      <li><h3>{t('Add an app.')}</h3><p>{t('A game or program by its folder, routed by its packets; or a browser or proxy-aware program, launched with proxy settings (Apps).')}</p></li>
-      <li><h3>{t('Run or launch it.')}</h3><p>{t('Sallyport connects the profile. Everything else on this computer keeps its own connection. Network shows what goes through it.')}</p></li>
+      <li><h3>{t('Import your VPN profile.')}</h3><p>{t('The .ovpn file you were given: Profiles, then Import profile.')}</p></li>
+      <li><h3>{t('Add your game or program.')}</h3><p>{t('Apps, then Add an app: choose its folder or its .exe.')}</p></li>
+      <li><h3>{t('Turn it on.')}</h3><p>{t('Flip its switch, then start it as you always do. Only it goes through your VPN; the Overview shows what does.')}</p></li>
     </ol>
     <div className="manual-setup">
-      <Disclosure open={manualOpen} controls={manualId} onClick={toggleManual}>{t('Manual proxy setup')}</Disclosure>
+      <Disclosure open={manualOpen} controls={manualId} onClick={toggleManual}>{t('For experts')}</Disclosure>
       <div id={manualId} hidden={!manualOpen} className="manual-content">
+        <p>{t('Programs routed by their packets go through the VPN from their first packet when routed before they start, TCP and UDP alike. Their IPv6 and their traffic to this computer’s own network are blocked, not routed. Programs launched with proxy settings carry TCP only.')}</p>
+        <h3>{t('Manual proxy setup')}</h3>
         <p>{t('Choose SOCKS5, host 127.0.0.1, the profile’s port, and remote DNS where available.')}</p>
         <p><code>{guide.endpointText}</code></p>
         <pre>{guide.curlExample}</pre>
@@ -136,8 +147,7 @@ function Guide({ guide, manualOpen, toggleManual }: {
       </div>
     </div>
     <aside className="guide-notes">
-      <p>{t('Programs routed by their packets go through the VPN from their first packet when routed before they start, TCP and UDP alike. Their IPv6 and their traffic to this computer’s own network are blocked, not routed. Programs launched with proxy settings carry TCP only.')}</p>
-      <p>{t('Closing this window keeps connections and routing running in the notification area. Choose ‘Exit Sallyport’ there to stop routing, disconnect and quit.')}</p>
+      <p>{t('Closing this window keeps Sallyport running beside the clock, and your apps on the VPN. To stop everything, right-click its icon there and choose Exit Sallyport.')}</p>
     </aside>
   </div>;
 }

@@ -72,7 +72,7 @@ internal static class TrayMenu
 
         menu.Add(TrayEntry.Separator);
         menu.Add(new(TrayEntryKind.Command, L.T("Settings"), TrayVerb.OpenSettings));
-        menu.Add(new(TrayEntryKind.Command, L.T("Exit Sallyport"), TrayVerb.Exit, Tip: L.T("Stops routing, disconnects every profile, then quits.")));
+        menu.Add(new(TrayEntryKind.Command, L.T("Exit Sallyport"), TrayVerb.Exit, Tip: L.T("Turns off every app's VPN, disconnects, then quits.")));
         return menu;
     }
 

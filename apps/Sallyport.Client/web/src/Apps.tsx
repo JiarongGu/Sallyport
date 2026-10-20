@@ -14,7 +14,7 @@ export function Apps({ state, now, open, editorForm }: {
   const editing = state.editor;
   const subject = editing?.kind === 'program' ? editing.subjectId.split('/')[0] : editing?.subjectId;
   return <section className="page" aria-label={t('Apps')}>
-    <p className="page-intro secondary">{t('Programs and games routed through a VPN profile, by all their traffic or by proxy settings at launch. Everything else keeps your own connection.')}</p>
+    <p className="page-intro secondary">{t('Your games and programs. Turn on Use VPN and only that app goes through your VPN; everything else keeps your own connection.')}</p>
     {state.appsEmpty && <EmptyView empty={state.appsEmpty} actions={state.actions} />}
     {editorForm && !state.apps.some((app) => app.id === subject) && editorForm}
     <div className="rows">
@@ -31,12 +31,13 @@ function AppHead({ app, now, headingId, children }: { app: AppItemView; now: num
       <div className="profile-status">
         <StatusPill tone={app.tone} announce>{app.statusText}</StatusPill>
         {app.run?.since && <span className="duration">{t('Routed for {0}', duration(app.run.since, now))}</span>}
-        <span className="summary">{[app.throughText, app.methodText, app.lossText].filter(Boolean).join(' · ')}</span>
+        <span className="summary">{[app.throughText, app.methodText].filter(Boolean).join(' · ')}</span>
       </div>
     </div>
     <div className="actions row-primary">
       <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
-      {/* Routed or not, as a switch: Route turns it on, Stop routing off. */}
+      {/* Its VPN on or off, as a switch with its word beside it: Route turns it on, Stop routing off. */}
+      {(app.actions.stop.visible || app.actions.route.visible) && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
       <Switch on={app.actions.stop.visible} action={app.actions.stop.visible ? app.actions.stop : app.actions.route}
         onFlip={() => app.actions.stop.visible ? post('STOP_RUN', {}) : post('ROUTE_APP', { id: app.id })} />
     </div>
@@ -66,39 +67,47 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
   const editing = state.editor;
   const appEditor = editing?.kind === 'app' && editing.subjectId === app.id ? editorForm : null;
   const programEditing = editing?.kind === 'program' && editing.subjectId.split('/')[0] === app.id ? editing.subjectId.split('/')[1] : null;
+  const othersId = useId();
+  const others = app.programs.filter((program) => !program.included);
+  const othersOpen = expanded.has(`others:${app.id}`) || others.some((program) => program.id === programEditing);
+  const row = (program: ProgramView) => <ProgramRow key={program.id} app={app} program={program}
+    expanded={expanded.has(`program:${program.id}`) || programEditing === program.id} toggle={() => toggle(`program:${program.id}`)}
+    editorForm={programEditing === program.id ? editorForm : null} />;
   // The tunnel's traffic while the app is routed through it: all of it, this app's and whatever else goes that way.
   const channel = app.profileId && app.run && app.run.phase !== 'ended'
     ? state.network.channels.find((candidate) => candidate.profileId === app.profileId) : undefined;
   return <section className="page app-page" aria-label={app.name}>
     <article className={`card tone-border-${app.tone}`}><AppHead app={app} now={now} /></article>
 
-    <section className="settings-group" aria-labelledby={monitorId}>
+    {app.run ? <section className="settings-group" aria-labelledby={monitorId}>
       <h2 id={monitorId}>{t('Monitoring')}</h2>
       <div className="card">
-        {app.run ? <RunDetails run={app.run} /> : <p className="secondary">{t('Not routed since Sallyport started. Its routing shows here while it is on.')}</p>}
+        <RunDetails run={app.run} />
         {channel?.traffic && <div className="app-traffic">
           <p className="secondary">{t('Through {0}: everything routed through it, this app’s and any other’s.', channel.name)}</p>
           <Traffic traffic={channel.traffic} />
         </div>}
       </div>
-    </section>
+    </section> : app.actions.route.visible && <p className="next-step">{t('Turn on Use VPN above, then start it as you always do.')}</p>}
 
     <section className="settings-group" aria-labelledby={programsId}>
       <div className="group-head">
         <h2 id={programsId}>{t('Programs')}</h2>
         <div className="actions">
-          <ActionButton action={app.actions.addProgram} subtle glyph="plus" onClick={() => post('ADD_APP_PROGRAM', { id: app.id })} />
-          <ActionButton action={app.actions.rescan} subtle glyph="refresh" onClick={() => post('RESCAN_APP', { id: app.id })} />
+          <ActionButton action={app.actions.addProgram} glyph="plus" onClick={() => post('ADD_APP_PROGRAM', { id: app.id })} />
+          <ActionButton action={app.actions.rescan} glyph="refresh" onClick={() => post('RESCAN_APP', { id: app.id })} />
         </div>
       </div>
       {app.programsText && <p className="secondary">{app.programsText}</p>}
       <div className="card program-card">
-        <div className="program-list-head" aria-hidden="true"><span>{t('Program')}</span><span>{t('Through the VPN')}</span></div>
+        <div className="program-list-head" aria-hidden="true"><span>{t('Program')}</span><span>{t('Use VPN')}</span></div>
         <ul className="program-list">
-          {app.programs.map((program) => <ProgramRow key={program.id} app={app} program={program}
-            expanded={expanded.has(`program:${program.id}`) || programEditing === program.id} toggle={() => toggle(`program:${program.id}`)}
-            editorForm={programEditing === program.id ? editorForm : null} />)}
+          {app.programs.filter((program) => program.included).map(row)}
         </ul>
+        {others.length > 0 && <div className="other-programs">
+          <Disclosure open={othersOpen} controls={othersId} onClick={() => toggle(`others:${app.id}`)}>{t('Other programs ({0})', others.length)}</Disclosure>
+          <ul id={othersId} hidden={!othersOpen} className="program-list">{others.map(row)}</ul>
+        </div>}
       </div>
     </section>
 
@@ -109,6 +118,7 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
       </div>
       <div className="card">
         <Facts facts={app.setup} />
+        {app.folder && <div className="wide-fact"><span className="secondary metadata">{t('Folder')}</span><span className="program-path">{app.folder}</span></div>}
         {appEditor}
       </div>
     </section>
@@ -129,7 +139,8 @@ function ProgramRow({ app, program, expanded, toggle, editorForm }: {
   return <li className={program.included ? 'included' : 'left-out'}>
     <div className="program-head">
       <div className="program-name">
-        <span className="program-title">{program.name}{program.launchTarget && <span className="metadata secondary">{t(' · Launch starts this')}</span>}</span>
+        <span className="program-title">{program.name}{program.folder && <span className="metadata secondary"> · {program.folder}</span>}
+          {program.launchTarget && <span className="metadata secondary">{t(' · Launch starts this')}</span>}</span>
         {program.missing ? <span className="metadata tone-trouble">{t('Not found where it was added from')}</span>
           : program.activity ? <span className={`metadata activity tone-${program.activity.tone}`}>{program.activity.text}</span>
           : <span className="metadata secondary">{program.statusText}</span>}

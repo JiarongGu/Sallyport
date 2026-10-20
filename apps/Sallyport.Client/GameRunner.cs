@@ -156,7 +156,7 @@ internal sealed class GameRunner(Connections connections) : IDisposable
             }
         }
         catch (OperationCanceledException) when (r.Stop.IsCancellationRequested) { }
-        catch (Exception e) { End(r, L.T("Routing stopped ({0}).", e.GetType().Name)); }
+        catch (Exception e) { End(r, L.T("VPN turned off ({0}).", e.GetType().Name)); }
         finally
         {
             if (client is not null) await client.DisposeAsync();
@@ -176,7 +176,7 @@ internal sealed class GameRunner(Connections connections) : IDisposable
         }
         // Under the Stop policy the route is over once its tunnel is lost, and its hold on the channel with it: the channel
         // goes on retrying only if the person connected it for its proxy.
-        if (state.Phase == RoutePhase.Stopped) End(r, L.T("The connection was lost, and this app stops routing when it is."));
+        if (state.Phase == RoutePhase.Stopped) End(r, L.T("The connection was lost, and this app's VPN turns off when it is."));
         Changed?.Invoke();
     }
 
