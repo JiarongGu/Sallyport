@@ -2,7 +2,8 @@
 # - published self-contained for win-x64 (no .NET to install first) as one file, named as the setup for its version,
 # with its SHA-256 beside it and the notes the GitHub release shows. Run under that name it installs itself.
 #   powershell -File apps\Sallyport.Setup\package.ps1 [-Out artifacts] [-Version 0.1.0]
-# artifacts\release\  Sallyport-<version>-win-x64-setup.exe and its .sha256: what is published
+# artifacts\release\  Sallyport-<version>-win-x64-setup.exe and its .sha256, the installed folder as
+#                     Sallyport-<version>-win-x64.zip, and manifest.json (each file's size and SHA-256): what is published
 # artifacts\release-notes.md                          what the release says
 # artifacts\build\    the program's publish, kept for a look and replaced by the next run
 param([string]$Out = "artifacts", [string]$Version)
@@ -68,6 +69,36 @@ $sha256 = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
 # sha256sum's own form, so `sha256sum -c` checks it where the file is downloaded.
 [IO.File]::WriteAllText("$setup.sha256", "$sha256  $name`n", (New-Object System.Text.UTF8Encoding $false))
 
+# The release as a folder too (D33; the owner: "a zip/folder bundle too with mainfest file for file hash check"): the
+# installed folder's own files under their installed names, zipped, and a manifest of each one's size and SHA-256 and of
+# the release's two assets, which an update checks every file against. The sibling repositories' shape
+# (D3dxSkinManager's build-manifest, Shenora's UpdateManifest): {version, generatedAt, files[{path, size, sha256}]}.
+$folder = Join-Path $build "folder"
+New-Item -ItemType Directory -Force $folder | Out-Null
+Copy-Item (Join-Path $program "Sallyport.Client.exe"), (Join-Path $program "WebView2Loader.dll"), (Join-Path $uninstaller "uninstall.exe") $folder
+$zipName = "Sallyport-$Version-win-x64.zip"
+$zip = Join-Path $release $zipName
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+[IO.Compression.ZipFile]::CreateFromDirectory($folder, $zip, [IO.Compression.CompressionLevel]::Optimal, $false)
+function Digest([string]$path) { (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant() }
+$files = @(Get-ChildItem $folder -File | Sort-Object Name | ForEach-Object {
+    [ordered]@{ path = $_.Name; size = $_.Length; sha256 = (Digest $_.FullName) } })
+$manifest = [ordered]@{
+    version = $Version
+    generatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    files = $files
+    assets = [ordered]@{
+        setup = [ordered]@{ name = $name; size = (Get-Item $setup).Length; sha256 = $sha256 }
+        zip = [ordered]@{ name = $zipName; size = (Get-Item $zip).Length; sha256 = (Digest $zip) }
+    }
+}
+$manifestPath = Join-Path $release "manifest.json"
+[IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5), (New-Object System.Text.UTF8Encoding $false))
+
+# Checked as a download would be, before anything is published (verify-release.ps1).
+& "$PSScriptRoot\verify-release.ps1" -Release $release
+$read = Get-Content $manifestPath -Raw | ConvertFrom-Json
+
 $body = $found.Groups['body'].Value.Trim()
 $text = @"
 # Sallyport $Version
@@ -95,6 +126,9 @@ $sha256  $name
 Unattended: ``$name /quiet [--folder "D:\Program Files\Sallyport"] [--no-driver] [--language en|zh-Hans]`` answers
 by its exit code (0 done, 1 failed, 2 bad arguments).
 
+Also here: **$zipName**, the installed folder's files as they are installed, and **manifest.json**, each file's size
+and SHA-256 and the two downloads', which Sallyport's updates check every file against.
+
 ## What's in $Version
 
 $body
@@ -102,4 +136,5 @@ $body
 [IO.File]::WriteAllText($notes, $text, (New-Object System.Text.UTF8Encoding $false))
 
 "release: {0} ({1:N1} MB), SHA-256 {2}" -f $name, ((Get-Item $setup).Length / 1MB), $sha256
+"folder:  {0} ({1:N1} MB, {2} files), checked against manifest.json" -f $zipName, ((Get-Item $zip).Length / 1MB), @($read.files).Count
 "notes:   $notes"

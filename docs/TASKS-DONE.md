@@ -9,6 +9,8 @@ names has the rest. What a record says could not be checked stays open in `TASKS
 Each was one item of TASKS §0, done in its own commit (newest first), whose message has its measurement on the
 installed copy.
 
+- D33 The release as a folder too: the installed files zipped, manifest.json of their sizes and SHA-256, checked before
+  publishing (verify-release.ps1); the format chosen from the sibling repositories.
 - D32 A small uninstaller beside the program: setup's removal compiled ahead of time, 4.4 MB, in Windows' own dialog.
 - D31 The release trimmed, .NET's own assemblies only: 27.5 MB from 53; setup's shortcuts, which trimming broke
   silently, fixed.

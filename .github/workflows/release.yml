@@ -138,8 +138,9 @@ jobs:
             git push origin $tag
           }
 
-      # The notes are the CHANGELOG section for this version under how to install it (package.ps1); the setup and its
-      # .sha256 are the assets, the digest a file beside the download as well as a line in the notes.
+      # The notes are the CHANGELOG section for this version under how to install it (package.ps1); the assets are the
+      # setup and its .sha256 (a file beside the download as well as a line in the notes), the installed folder as a
+      # zip, and manifest.json, each file's size and SHA-256 (D33), checked by verify-release.ps1 before this step.
       - name: GitHub release
         if: ${{ !inputs.dry_run && inputs.create_tag }}
         uses: softprops/action-gh-release@v2

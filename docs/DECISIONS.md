@@ -908,3 +908,44 @@ Sallyport…", then "Sallyport 已移除", "Sallyport 已移除，但有遗留�
 (exit 1). Found on the way: Windows' icon constants are a WORD (`MAKEINTRESOURCE(-2)`, 0xFFFE); passed wider, the dialog
 read a string's address there (an access violation). Not measured: a removal to the end (the owner's install stays;
 TASKS §4), a machine with UAC on (where its manifest's prompt is the one), and the release workflow's build of it.
+
+## D33 — The release as a folder too: a zip of the installed files and a manifest of each one's size and SHA-256 (2026-10-21; measured)
+
+The owner: "instead bundle we will need a zip/folder bundle too with mainfest file for file hash check (and this is been
+widely used in sibling repo you can check and pick the best one you think)". The sibling repositories were read for it
+(an agent's survey, checked against their code where Sallyport leans on it):
+
+- **Shenora** (`Shenora.Engine.Update`, in the package Sallyport already takes, D9): a manifest `{version, generatedAt?,
+  files[{path, size, sha256}]}`, paths forward-slashed and never rooted nor `..`, staged and committed only when every
+  file is there, its digest the manifest's and nothing else beside them, a marker written last; no downloader and no
+  host, and its apply copies over an install from outside it — a launcher Sallyport does not have.
+- **Yaorin**: the most complete — the manifest a release asset of its own beside a full zip and an app-tier zip, the
+  release endpoint layered (environment, the person's file, the shipped file, a constant), an asset's host allowed only
+  with the API's own, redirects followed by hand, and `verify-release.ps1` failing the release when its parts disagree.
+- **D3dxSkinManager and Gatherlight**: the same manifest shape as Shenora's, written by a script and kept inside the zip
+  too; an endpoint file outside the window; weaker checks (no file beside the listed ones refused, the download taken
+  from `releases/latest/download/`, which can be another release than the one just read).
+- **Aurelia** (a content digest per bundle decides, not the version), **Daoris** (a journalled folder swap that rolls
+  back when the new build does not confirm), **Vidora** (a stub).
+
+Chosen: **Shenora's and D3dxSkinManager's manifest, as a release asset of its own as Yaorin's is, with Yaorin's check
+before publishing.** `package.ps1` writes, beside the setup and its `.sha256`:
+
+- `Sallyport-<version>-win-x64.zip`: the installed folder's files under their installed names — the program (the
+  setup's very bytes, D30), WebView2's loader and the uninstaller (D32); what setup's payload is.
+- `manifest.json`: `{version, generatedAt, files[{path, size, sha256}], assets{setup{name, size, sha256},
+  zip{name, size, sha256}}}`, files sorted by name. The `assets` part is Sallyport's own: the update (next) downloads
+  the setup, which is the program, and checks it against both its asset and its file.
+- `verify-release.ps1`: the manifest read back; each asset there, its size and digest; every file in the zip there, its
+  size and SHA-256, nothing else; no path outside its folder; the setup the program the manifest lists. `package.ps1`
+  stops on the first that does not hold; it runs as well on a release downloaded into a folder.
+
+Not chosen: a tier per part (Yaorin's, for 100 MB bundles; this one is three files), a manifest inside the zip (an
+install writes from setup's payload, which is checked by setup), a signature (no app among them signs; Sallyport's trust
+is HTTPS, a host allowed by the address the person cannot change without administrator, and the person's own UAC
+consent — the update, D34, says so).
+
+Measured 2026-10-21 (a 0.1.1 rehearsal): `Sallyport-0.1.1-win-x64.zip`, 27,807,653 bytes, three files; manifest.json
+1,462 bytes; `verify-release.ps1` "verified: Sallyport 0.1.1, 3 files …", and, on a copy whose manifest had
+`WebView2Loader.dll`'s digest changed, "WebView2Loader.dll's SHA-256 in the zip is not the manifest's" (thrown). Not
+measured: the workflow publishing them (it publishes everything `artifacts/release` holds; its next run is the owner's).

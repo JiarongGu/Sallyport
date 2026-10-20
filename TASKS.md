@@ -10,11 +10,6 @@ The owner, 2026-10-21: "next session will be a full code review + perpare for nu
 library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, After 0.1.0.
 
 The owner's reports since, each first:
-- **A folder release with a manifest.** "instead bundle we will need a zip/folder bundle too with mainfest file for file
-  hash check (and this is been widely used in sibling repo you can check and pick the best one you think)". **Done
-  when:** the release has, beside the setup exe, a zip of the installed folder and a manifest (each file's size and
-  SHA-256, the version), its choice from the sibling repositories recorded in DECISIONS; a rehearsal's zip checked
-  against its manifest.
 - **App updates, from GitHub for now, the address in config.** "we will need to support app update (via github for now)
   and the address should be able to change in config (so we might use other host in future)". **Done when:** Settings
   says whether a newer version is out, and updates with one press (download, every file checked against the manifest,
