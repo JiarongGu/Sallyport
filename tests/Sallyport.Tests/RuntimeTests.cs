@@ -608,6 +608,18 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_profiles_account_is_the_username_it_carries_else_the_name_on_its_own_certificate()
+    {
+        var carried = ProfileStore.Preview("# OVPN_ACCESS_SERVER_USERNAME=alex\n" + _pki.Profile(_key));
+        var certificate = ProfileStore.Preview(_pki.Profile(_key));
+        var neither = ProfileStore.Preview(WithoutBlock(WithoutBlock(_pki.Profile(_key), "cert"), "key") + "\nauth-user-pass\n");
+
+        Assert.Equal("alex", carried.Account);
+        Assert.Equal("client", certificate.Account);
+        Assert.Null(neither.Account);
+    }
+
+    [Fact]
     public void AProfileThisVersionCannotServeIsKeptWithTheReason()
     {
         var store = new ProfileStore(_directory, new FakeProtector(1));

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using Sallyport.Profile;
@@ -20,10 +21,11 @@ public sealed record StoredProfile(string Id, string Name, IReadOnlyList<string>
 
 /// <summary>A profile's text as <see cref="ProfileStore.Preview"/> reads it: its servers' names in the order it lists them
 /// (said to the person while it is imported; never written beside its sealed copy), its transports ("udp", "tcp"), why
-/// this version cannot connect it or null, whether it signs in with a username and password, and the username it carries
-/// (OpenVPN Access Server writes the person's into the profiles it makes).</summary>
+/// this version cannot connect it or null, whether it signs in with a username and password, the username it carries to
+/// sign in with (OpenVPN Access Server writes the person's into the profiles it makes), and <see cref="Account"/>: whose
+/// it is, as OpenVPN Connect shows under every profile — that username, else the name on its own certificate.</summary>
 public sealed record ProfilePreview(IReadOnlyList<string> Servers, IReadOnlyList<string> Transports, string? Unsupported,
-    bool NeedsLogin = false, string? Username = null);
+    bool NeedsLogin = false, string? Username = null, string? Account = null);
 
 /// <summary>What is kept of a profile's sign-in, as the window may show it: the username, and whether a password is
 /// kept — never the password itself.</summary>
@@ -95,9 +97,24 @@ public sealed class ProfileStore
     public static ProfilePreview Preview(string text)
     {
         var profile = Read(text);
+        var carried = CarriedUsername.Match(text) is { Success: true } found ? found.Groups[1].Value.Trim() : null;
         return new ProfilePreview([.. profile.Remotes.Select(r => r.Host).Distinct(StringComparer.OrdinalIgnoreCase)],
             [.. profile.Remotes.Select(r => r.Proto).Distinct()], Tunnel.Unsupported(profile), profile.AuthUserPass,
-            profile.AuthUserPass && CarriedUsername.Match(text) is { Success: true } carried ? carried.Groups[1].Value.Trim() : null);
+            profile.AuthUserPass ? carried : null, carried ?? CertificateName(profile.CertPem));
+    }
+
+    // The name a profile's own certificate gives its holder: OpenVPN Access Server makes it the person's username, and
+    // other servers name the client by it.
+    private static string? CertificateName(string? pem)
+    {
+        if (pem is null) return null;
+        try
+        {
+            using var certificate = X509Certificate2.CreateFromPem(pem);
+            var name = certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+        catch (Exception e) when (e is CryptographicException or ArgumentException) { return null; }
     }
 
     // The comment OpenVPN Access Server puts in a person's profile: their username, to sign in with.

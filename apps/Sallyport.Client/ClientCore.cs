@@ -392,7 +392,7 @@ internal sealed class ClientCore
             if (_editor?.Token == token) _editor = null;
             _reading = null;
         }
-        _servers[stored.Id] = preview.Servers;
+        _looks[stored.Id] = preview;
         // The next step is the app: with none yet, the window goes where one is added.
         if (_items.List().Count == 0)
         {
@@ -404,15 +404,18 @@ internal sealed class ClientCore
         Publish();
     }
 
-    // Each profile's servers, read from its sealed copy once and kept in memory only: its row shows them, as OpenVPN
-    // Connect's list does, and the description beside the copy never names them.
-    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _servers = new();
+    // What each profile says of itself — its servers, whose it is — read from its sealed copy once and kept in memory
+    // only: its row shows them, as OpenVPN Connect's list does, and the description beside the copy never names them.
+    private readonly ConcurrentDictionary<string, ProfilePreview> _looks = new();
 
-    private IReadOnlyList<string> ServersOf(string id) => _servers.GetOrAdd(id, key =>
+    private ProfilePreview LookOf(string id) => _looks.GetOrAdd(id, key =>
     {
-        try { return [.. _store.Load(key).Remotes.Select(r => r.Host).Distinct(StringComparer.OrdinalIgnoreCase)]; }
-        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException or FileNotFoundException or IOException) { return []; }
+        try { return ProfileStore.Preview(_store.Text(key)); }
+        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or InvalidDataException or FileNotFoundException or IOException)
+        { return new ProfilePreview([], [], null); }
     });
+
+    private IReadOnlyList<string> ServersOf(string id) => LookOf(id).Servers;
 
     // ---- Signing in (D29): a profile that asks for a username and password connects with one the person remembered,
     // or one typed for this connection alone — kept in memory until they disconnect or Sallyport quits.
@@ -683,7 +686,7 @@ internal sealed class ClientCore
         {
             await _connections.DisconnectAsync(id);
             if (!_store.Remove(id)) return;
-            _servers.TryRemove(id, out _);
+            _looks.TryRemove(id, out _);
             _logins.TryRemove(id, out _);
             _sessionLogins.TryRemove(id, out _);
             _settings.Forget(id);
@@ -1625,7 +1628,7 @@ internal sealed class ClientCore
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
                 live?.LaneFor(p.Id) is { } lane ? L.List(lane.Apps.Keys.Select(a => items.FirstOrDefault(g => g.Id == a)?.Name).OfType<string>()) : null,
                 _connections.NextAttemptOf(p.Id), _settings.ChoicesFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)), ServersOf(p.Id),
-                p.NeedsLogin ? LoginStateOf(p.Id) : null)))
+                p.NeedsLogin ? LoginStateOf(p.Id) : null, LookOf(p.Id).Account)))
             .ToList();
         var driver = GameViews.Driver(Driver());
         var dialog = Volatile.Read(ref _dialog);
@@ -1742,11 +1745,15 @@ internal sealed class ClientCore
                     ? [.. iconed.Programs.Select(p => (Program: p, Url: _icons.Of(p.Path))).Where(c => c.Url is not null).DistinctBy(c => c.Url)
                         .Select(c => new IconChoice(c.Program.Id, Path.GetFileName(c.Program.Path), c.Url!))]
                     : null,
-                // What was read, as OpenVPN Connect's Imported Profile shows it: its servers, locked, and where it came from;
-                // an edited profile's servers, which no edit changes.
+                // What was read, as OpenVPN Connect's Imported Profile shows it: its servers, locked, whose it is, and where it
+                // came from; an edited profile's, which no edit changes. One that signs in names its account in its own field.
                 editor.Kind == "new-profile" && profileRead is { } got
-                    ? [new Fact(L.T("Server"), string.Join(", ", got.Preview.Servers)), new Fact(L.T("From"), got.Origin)]
-                    : editor.Kind == "profile-edit" ? [new Fact(L.T("Server"), string.Join(", ", ServersOf(editor.SubjectId)))]
+                    ? [new Fact(L.T("Server"), string.Join(", ", got.Preview.Servers)),
+                        .. !got.Preview.NeedsLogin && got.Preview.Account is { } whose ? [new Fact(L.T("Account"), whose)] : Array.Empty<Fact>(),
+                        new Fact(L.T("From"), got.Origin)]
+                    : editor.Kind == "profile-edit" && stored.FirstOrDefault(p => p.Id == editor.SubjectId) is { } editing
+                        ? [new Fact(L.T("Server"), string.Join(", ", ServersOf(editing.Id))),
+                            .. !editing.NeedsLogin && LookOf(editing.Id).Account is { } owner ? [new Fact(L.T("Account"), owner)] : Array.Empty<Fact>()]
                     : null),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),

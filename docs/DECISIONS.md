@@ -781,8 +781,11 @@ a good ui/ux design for this not just copy/paste from openvpn client". The desig
   not tried again on its own.
 - **The library** sends `TunnelOptions.Login` in the key-method-2 message (a class that never prints itself); a profile
   that signs in by password needs no client certificate; one that asks and is given nothing is refused before a packet.
-- **A profile's row**: its server (the first, and how many more), its username for one that signs in ("Not set" when
-  none is kept), how it connects, when it was imported; one action, Edit…. **Its Edit page**: its name; its username;
+- **A profile's row**: its server (the first, and how many more), its account — as OpenVPN Connect shows under every
+  profile (the owner: "imported profile should also show its account name"): the username one that signs in uses ("Not
+  set" when none is kept), else the username the profile carries or the name on its own certificate, read from its
+  sealed copy into memory only — how it connects, when it was imported; one action, Edit…. The review and the Edit page
+  name the account too. **Its Edit page**: its name; its username;
   its password as Saved or Not saved, Change password…, Forget password (a new username forgets the old one's); then
   Connection settings… and Remove profile.
 

@@ -15,8 +15,9 @@ follows it except where this says otherwise:
 
 - **Another edit open:** a profile opened or dropped then is refused with "Finish or cancel what you are editing first,
   then import the profile." rather than a discard confirmation — simpler, and nothing is lost.
-- **Username on a Profiles row:** shown only for a profile that signs in with one ("Not set" when none is kept), not
-  "Not required" on every other row.
+- **Account on a Profiles row** (the owner, after: "imported profile should also show its account name"): every
+  profile names whose it is — the username it signs in with ("Not set" when none is kept), else the username it carries
+  or the name on its certificate — not "Not required"; one that names none says nothing of it.
 - **No "Reading profile…" state:** a local file is read at once.
 - **An app's Use VPN never connects** (D23), so it never asks for a sign-in; Connect on the Overview and the tray do.
 - **A profile this version cannot connect** keeps the phase "Unavailable in this version" with one of three plain

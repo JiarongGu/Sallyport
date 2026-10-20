@@ -491,5 +491,6 @@ internal static class Chinese
         ["Username"] = "用户名",
         ["Not set"] = "未填写",
         ["Use an https:// address or link."] = "请使用 https:// 地址或链接。",
+        ["Account"] = "账户",
     };
 }

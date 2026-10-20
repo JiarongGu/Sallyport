@@ -94,11 +94,12 @@ internal sealed record ClientState(
 /// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>. <see cref="Port"/>: the one its
 /// proxy listens on now, none while it does not. <see cref="UsedBy"/>: the app being routed through it. <see cref="Choices"/>:
 /// how it connects, Settings' and its own (none: Settings' as they are by default). <see cref="Servers"/>: its servers'
-/// names, read from its sealed copy (D29).</summary>
+/// names, and <see cref="Account"/> whose it is (the username it carries, else its certificate's name), both read from its
+/// sealed copy (D29); for one that signs in, <see cref="Login"/>'s username is its account instead.</summary>
 internal sealed record ProfileFacts(
     StoredProfile Stored, int? Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
     int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, DateTimeOffset? NextAttemptAt = null,
-    ProfileChoices? Choices = null, IReadOnlyList<string>? Servers = null, LoginState? Login = null);
+    ProfileChoices? Choices = null, IReadOnlyList<string>? Servers = null, LoginState? Login = null, string? Account = null);
 
 internal static class ClientView
 {
@@ -183,7 +184,7 @@ internal static class ClientView
             f.Port is { } port ? Endpoint(port) : L.T("a free port when it connects"), f.Port,
             facts, location, actions, next,
             Details(f.Choices ?? new([.. f.Stored.Remotes.Select(r => r.Split('/')[0]).Distinct()], null, false, 0, false, false), f.Stored.Imported,
-                f.Servers ?? [], f.Stored.NeedsLogin ? f.Login ?? new LoginState(null, false) : null));
+                f.Servers ?? [], f.Stored.NeedsLogin ? (f.Login ?? new LoginState(null, false)).Username ?? L.T("Not set") : f.Account));
     }
 
     /// <summary>Why this version cannot connect a profile, in the person's words (D29): the library's reason names the
@@ -203,10 +204,10 @@ internal static class ClientView
         _ => L.T("{0} and {1} more", servers[0], servers.Count - 1),
     };
 
-    /// <summary>Its row on Profiles: its server, how it connects, in Settings' words, each said to follow Settings or to
-    /// be its own, then when it was imported. Not its servers' "udp/1194, tcp/443": they read as the only traffic it carries (the
+    /// <summary>Its row on Profiles: its server, its account, how it connects, in Settings' words, each said to follow
+    /// Settings or to be its own, then when it was imported. Not its servers' "udp/1194, tcp/443": they read as the only traffic it carries (the
     /// owner: "currently still showing udp/1194, tcp/443"), and are the server's business, not the person's.</summary>
-    private static IReadOnlyList<Fact> Details(ProfileChoices c, DateTimeOffset imported, IReadOnlyList<string> servers, LoginState? login)
+    private static IReadOnlyList<Fact> Details(ProfileChoices c, DateTimeOffset imported, IReadOnlyList<string> servers, string? account)
     {
         string From(string value, bool own) => own ? L.T("{0} (this profile only)", value) : L.T("{0} (as in Settings)", value);
         var protocol = c.Protocols.Count == 1
@@ -217,8 +218,9 @@ internal static class ClientView
         [
             // Its server first, as OpenVPN Connect's list has it under each profile's name (D29).
             .. servers.Count > 0 ? [new Fact(L.T("Server"), ServerText(servers))] : Array.Empty<Fact>(),
-            // Its username, for one that signs in with one; nothing said of it for one that does not.
-            .. login is not null ? [new Fact(L.T("Username"), login.Username ?? L.T("Not set"))] : Array.Empty<Fact>(),
+            // Whose it is, as OpenVPN Connect shows under every profile: the username it signs in with, else the one it
+            // carries or the name on its certificate; nothing when it names none.
+            .. account is not null ? [new Fact(L.T("Account"), account)] : Array.Empty<Fact>(),
             new(L.T("VPN protocol"), protocol),
             new(L.T("If it cannot connect"), retry),
             .. c.OtherOwn ? [new Fact(L.T("More settings"), L.T("Changed for this profile"))] : Array.Empty<Fact>(),

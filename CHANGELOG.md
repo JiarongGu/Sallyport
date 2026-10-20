@@ -10,7 +10,7 @@
   window, or a link (https only; a provider's server address, signed in to when it asks), then the profile looked at
   before it is kept — its servers, its name, its sign-in. A profile may sign in with a username and password, with or
   without a certificate of its own: the password remembered (sealed, like the profile) or asked when it connects, and
-  asked again when the server does not accept it. Each profile's row shows its server and username; Edit renames it,
+  asked again when the server does not accept it. Each profile's row shows its server and account; Edit renames it,
   changes its username and kept password, and holds its connection settings and removal. Not yet measured against a
   server that asks for a username and password.
 - Moving to another computer (2026-10-20, D26). Settings exports VPN profiles, apps and connection settings to one

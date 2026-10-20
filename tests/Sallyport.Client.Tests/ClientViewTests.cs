@@ -107,17 +107,20 @@ public class ClientViewTests
     }
 
     [Fact]
-    public void A_profile_that_signs_in_names_its_username_or_says_none_is_set_and_one_that_does_not_says_nothing_of_it()
+    public void Every_profile_names_its_account_the_one_that_signs_in_by_its_username_or_says_none_is_set()
     {
         var signs = new StoredProfile("ad50a53b0da826ad", "work", ["udp/1194"], At, null, NeedsLogin: true);
 
-        var named = ClientView.Profile(new ProfileFacts(signs, null, null, null, false, false, null, false, false, Login: new LoginState("alex", true)));
+        var named = ClientView.Profile(new ProfileFacts(signs, null, null, null, false, false, null, false, false, Login: new LoginState("alex", true), Account: "client"));
         var unnamed = ClientView.Profile(new ProfileFacts(signs, null, null, null, false, false, null, false, false));
-        var plain = View();
+        var certified = ClientView.Profile(new ProfileFacts(Stored(), null, null, null, false, false, null, false, false, Account: "client"));
+        var nameless = View();
 
-        Assert.Contains(new Fact("Username", "alex"), named.Details!);
-        Assert.Contains(new Fact("Username", "Not set"), unnamed.Details!);
-        Assert.DoesNotContain(plain.Details!, f => f.Label == "Username");
+        // The username it signs in with outranks the name on its certificate.
+        Assert.Contains(new Fact("Account", "alex"), named.Details!);
+        Assert.Contains(new Fact("Account", "Not set"), unnamed.Details!);
+        Assert.Contains(new Fact("Account", "client"), certified.Details!);
+        Assert.DoesNotContain(nameless.Details!, f => f.Label == "Account");
         Assert.True(named.Actions.Edit is { Visible: true, Enabled: true, Label: "Edit…" });
     }
 
