@@ -246,7 +246,7 @@ sealed class Installer
         WriteRecord(new SetupRecord(version, installedDriver, DateTimeOffset.Now));
 
         say(L.T("Adding Sallyport to the Start menu…"), 0.95);
-        ShellLink.Create(Shortcut, Client, "", L.T("Route your games and apps through your VPN"));
+        ShellLink.Create(Shortcut, Client, "", L.T("Send your games and apps through your VPN"));
         RegisterOpenWith();
         RegisterUninstall(version);
         say(L.T("Done."), 1);

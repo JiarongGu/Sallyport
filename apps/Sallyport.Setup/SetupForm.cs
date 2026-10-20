@@ -207,14 +207,14 @@ sealed class SetupForm : Form
             _ => L.T("Install Sallyport {0}", _version),
         };
         _chooseIntro.Text = !_installed
-            ? L.T("Sallyport routes the games and apps you choose through your OpenVPN server; everything else keeps your normal connection. A small Windows service does the routing, idle until you use it.")
+            ? L.T("Sallyport sends only the games and apps you choose through your OpenVPN server; everything else keeps your normal connection. A small Windows service does the work, idle until you use it.")
             : verb == "Update" ? L.T("Sallyport is updated where it is. Your VPN profiles, apps and settings are kept.")
             : L.T("Sallyport is reinstalled where it is. Your VPN profiles, apps and settings are kept.");
         _where.Box.ReadOnly = _installed;
         _browse.Visible = !_installed;
         if (_installed) _where.Width = Width96;
         _option.Text = L.T("Install the packet driver");
-        _option.Description = L.T("Routes games without any setting in them: NT Kernel's free Windows Packet Filter, fetched from NT Kernel. The network pauses for a few seconds while it goes in. Without it, apps can still use Sallyport's proxy.");
+        _option.Description = L.T("Sends a whole game through your VPN, with no setting to change in it: NT Kernel's free Windows Packet Filter, fetched from NT Kernel. The network pauses for a few seconds while it goes in. Without it, apps can still use Sallyport's proxy.");
         _option.Checked = choices.Driver;
         _missingNote.Text = _missing ?? "";
         _missingNote.Visible = _missing is not null;
@@ -249,7 +249,7 @@ sealed class SetupForm : Form
     {
         var installer = new Installer(_ => { }, _where.Box.Text);
         _chooseHeading.Text = L.T("Remove Sallyport");
-        _chooseIntro.Text = L.Join(L.T("Stops any routing, then removes the Sallyport service, its Start menu entry and its files from {0}.", installer.Folder),
+        _chooseIntro.Text = L.Join(L.T("Turns off every app's VPN, then removes the Sallyport service, its Start menu entry and its files from {0}.", installer.Folder),
             installer.RemovesDriver
                 ? L.T("The packet driver Sallyport installed goes too; the network pauses for a few seconds while it does.")
                 : L.T("The packet driver stays: Sallyport did not install it."));
@@ -479,7 +479,7 @@ sealed class SetupForm : Form
         Draw.Gate(g, new RectangleF(24 * s, 18 * s, 40 * s, 40 * s));
         var x = (int)(78 * s);
         TextRenderer.DrawText(g, "Sallyport", _titleFont, new Point(x, (int)(15 * s)), _theme.Text, TextFormatFlags.NoPrefix);
-        TextRenderer.DrawText(g, L.T("Version {0} · routes the games and apps you choose through your VPN", _version), Font,
+        TextRenderer.DrawText(g, L.T("Version {0} · sends the games and apps you choose through your VPN", _version), Font,
             new Point(x, (int)(41 * s)), _theme.Secondary, TextFormatFlags.NoPrefix);
         using var line = new Pen(_theme.Divider);
         g.DrawLine(line, 0, _header.Height - 1, _header.Width, _header.Height - 1);
