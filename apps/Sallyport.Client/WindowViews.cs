@@ -89,7 +89,7 @@ internal static class WindowViews
             var (last, checking) = latencies?.GetValueOrDefault(p.Id) ?? (null, false);
             channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy, selections,
                 new ChannelActions(p.Actions.Disconnect,
-                    p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? L.T("Check latency") : L.T("Check again"), busy: checking) : UiAction.Hidden),
+                    p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? L.T("Check ping") : L.T("Check again"), busy: checking) : UiAction.Hidden),
                 p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null, flow));
         }
         // A run whose channel is not up yet (the service still preparing it) is shown on its own until it is.
@@ -145,14 +145,14 @@ internal static class WindowViews
     public static LatencyView Latency(Latency? last, bool checking)
     {
         if (last is null) return new(checking ? ProbePhase.Checking : ProbePhase.Unchecked,
-            checking ? L.T("Checking latency…") : L.T("Round trips to {0}: from this computer, through the VPN, and to the VPN server.", Connections.LatencyTarget), [], null);
+            checking ? L.T("Checking ping…") : L.T("Ping to {0}: straight from this computer, through the VPN, and to the VPN server itself.", Connections.LatencyTarget), [], null);
         // The round trip is the figure; how many answered, and from where, qualifies it.
         Fact Path(string label, PathSample s) => s.MedianMs is { } ms
             ? new(label, s.FromDestination
                     ? L.T("{0} of {1} answered", s.Answered, s.Sent)
                     : L.T("{0} of {1} answered; farthest responding hop {2} — estimate", s.Answered, s.Sent, s.Responder),
                 L.T("{0} ms", ms.ToString("F0", English)))
-            : new(label, L.T("No reply — latency unavailable"));
+            : new(label, L.T("No reply — no ping"));
         Fact ToServer()
         {
             if (last.ToGateway is not { } g || last.Gateway is not { } gateway) return new(L.T("To the VPN server"), L.T("The server named no tunnel gateway."));
@@ -167,8 +167,8 @@ internal static class WindowViews
         };
         var any = last.Direct.Answered + last.Vpn.Answered + (last.ToGateway?.Answered ?? 0) > 0;
         return new(checking ? ProbePhase.Checking : any ? ProbePhase.Available : ProbePhase.Unavailable,
-            checking ? L.T("Checking latency…") : any ? L.T("Latency")
-                : L.T("No echo was answered, so latency could not be checked. The tunnel itself may still work."), paths, last.Checked);
+            checking ? L.T("Checking ping…") : any ? L.T("Ping")
+                : L.T("Nothing answered, so ping could not be checked. The VPN itself may still work."), paths, last.Checked);
     }
 
     // The tunnel's own facts are the channel's, said once above the apps it carries.

@@ -282,7 +282,7 @@ internal sealed class ClientCore
         try { await _connections.CheckLatencyAsync(id, ct); }
         // A check that could not be made is said as that, and changes nothing about the channel (rule 6).
         catch (Exception e) when (e is System.Net.NetworkInformation.PingException or TunnelEnded or ObjectDisposedException)
-        { Notify(NoticeKind.Warning, L.T("Latency could not be checked: the channel changed while it was being measured."), new("profile", id)); }
+        { Notify(NoticeKind.Warning, L.T("Ping could not be checked: the connection changed while it was being measured."), new("profile", id)); }
     }
 
     public void CopyEndpoint(string id)

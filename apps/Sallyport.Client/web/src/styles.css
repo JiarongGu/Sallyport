@@ -390,6 +390,10 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 /* a switch's word beside it, where the switch alone would not say what it turns on */
 .switch-caption { font: var(--font-caption); color: var(--secondary); white-space: nowrap; }
 .row-primary .switch-caption { margin-right: -2px; }
+/* the hero's how-it-is-connected, folded: its words line up with the hero's */
+.hero-details { margin-top: 12px; }
+.hero-details > .disclosure { margin-left: -12px; }
+.hero-details .facts { margin-top: 8px; }
 /* what to do next, where a section would otherwise stand empty */
 .next-step { margin: -12px 0 28px; color: var(--secondary); }
 /* a fact too long for a column: its own line */

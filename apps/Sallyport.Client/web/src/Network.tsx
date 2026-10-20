@@ -1,10 +1,10 @@
 import { t } from './i18n';
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import type { AppItemView, ChannelView, ClientState, Page, ProfileView, TrafficView } from './contract';
 import { post } from './commands';
 import { clock, countdown, duration } from './format';
 import { RunDetails } from './Run';
-import { ActionButton, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
+import { ActionButton, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { RoutingCard } from './Settings';
 import { featuredProfile } from './ui/Chrome';
 
@@ -41,6 +41,8 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
   feature: (id: string) => void; go: (page: Page) => void;
 }) {
   const pickerId = useId();
+  const detailsId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const on = profile.actions.disconnect.visible;
   const since = profile.connectedSince ?? channel?.connectedSince;
   const wait = countdown(profile.nextAttemptAt ?? channel?.nextAttemptAt ?? null, now);
@@ -55,8 +57,7 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
             </select></>
           : <h2>{profile.name}</h2>}
         <p className={`hero-status tone-text-${profile.tone}`} role="status">{profile.statusText}</p>
-        {on || since ? <p className="secondary metadata">{[since && t('Connected for {0}', duration(since, now)), profile.port !== null && channel?.proxyText]
-          .filter(Boolean).join(' · ')}</p>
+        {on || since ? since && <p className="secondary metadata">{t('Connected for {0}', duration(since, now))}</p>
           : apps.length > 0 && <p className="secondary metadata">{t('Turn on an app below and this connects by itself.')}</p>}
       </div>
       <Switch large on={on} action={on ? profile.actions.disconnect : profile.actions.connect}
@@ -67,7 +68,7 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
 
     {channel?.traffic && <Traffic traffic={channel.traffic} />}
 
-    {channel?.latency && <section className="latency" aria-label={t('Latency')}>
+    {channel?.latency && <section className="latency" aria-label={t('Ping')}>
       <div className="latency-head">
         <p className={channel.latency.phase === 'unavailable' ? 'location-unavailable' : 'secondary'} role="status">{channel.latency.statusText}</p>
         <ActionButton action={channel.actions.checkLatency} glyph="refresh" onClick={() => post('CHECK_LATENCY', { id: channel.profileId })} />
@@ -76,7 +77,14 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
       {channel.latency.checkedAt && <p className="metadata secondary">{t('Checked')} <time dateTime={channel.latency.checkedAt}>{clock(channel.latency.checkedAt)}</time></p>}
     </section>}
 
-    {channel && channel.facts.length > 0 && <Facts facts={channel.facts} />}
+    {/* How it is connected, for those who look: folded, so the hero says what a person needs at a glance. */}
+    {channel && (channel.facts.length > 0 || channel.proxyText) && <div className="hero-details">
+      <Disclosure open={detailsOpen} controls={detailsId} onClick={() => setDetailsOpen(!detailsOpen)}>{t('Details')}</Disclosure>
+      <div id={detailsId} hidden={!detailsOpen}>
+        {channel.proxyText && <p className="secondary metadata">{channel.proxyText}</p>}
+        <Facts facts={channel.facts} />
+      </div>
+    </div>}
 
     {channel?.selections.map((selection) => <section key={selection.id} className="selection" aria-label={selection.name}>
       <div className="row-head">

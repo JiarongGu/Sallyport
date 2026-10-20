@@ -178,8 +178,8 @@ public class WindowViewTests
         var view = WindowViews.Latency(new Latency("1.1.1.1", none, none, null, null, At), checking: false);
 
         Assert.Equal(ProbePhase.Unavailable, view.Phase);
-        Assert.Equal("No echo was answered, so latency could not be checked. The tunnel itself may still work.", view.StatusText);
-        Assert.Equal("No reply — latency unavailable", view.Paths[0].Value);
+        Assert.Equal("Nothing answered, so ping could not be checked. The VPN itself may still work.", view.StatusText);
+        Assert.Equal("No reply — no ping", view.Paths[0].Value);
         // No number is not a number shown large.
         Assert.All(view.Paths, p => Assert.Null(p.Figure));
         Assert.Equal("The server named no tunnel gateway.", view.Paths[2].Value);

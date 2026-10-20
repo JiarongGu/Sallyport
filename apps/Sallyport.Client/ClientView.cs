@@ -194,8 +194,8 @@ internal static class ClientView
     }
 
     public static EmptyView? ProfilesEmpty(int profiles) => profiles > 0 ? null : new(
-        L.T("No profiles yet"),
-        L.T("Import an OpenVPN profile from your VPN provider. Sallyport keeps an encrypted copy for your Windows account."),
+        L.T("Start with your VPN file"),
+        L.T("Choose the .ovpn file you were given. Sallyport keeps an encrypted copy for your Windows account."),
         "IMPORT");
 
     public static string KindLabel(AppKind kind) => kind switch
