@@ -2,6 +2,35 @@
 
 ## 0.1.0 — unreleased
 
+- The release (2026-10-20, D28). One setup, `Sallyport-<version>-win-x64-setup.exe`, with its SHA-256 beside it and
+  notes from this file, built by `apps/Sallyport.Setup/package.ps1` and by the Release workflow (started by hand,
+  a rehearsal unless told otherwise; it tests, packages, then dates this section, tags and drafts the GitHub
+  release). Every program says what it is in Windows: Sallyport, Sallyport Service, Sallyport Setup, its version.
+- Moving to another computer (2026-10-20, D26). Settings exports VPN profiles, apps and connection settings to one
+  `.sallyport` file, the profiles sealed with a password if the person gives one (AES-GCM, PBKDF2-SHA256 600,000);
+  import adds and never overwrites. An imported app not where it was is looked for on the other drives, else says so
+  and offers Locate…. Profiles show how they connect, as in Settings or for that profile only, and are connected on
+  Overview (D27).
+- One data folder for the machine (2026-10-20, D25). Profiles, settings, apps and the cache in `data` beside the
+  programs, the profiles still sealed to the Windows account that imported them; the install folder is the client,
+  the service, the uninstaller, WebView2's loader and `data`.
+- Apps and profiles many to many (2026-10-20, D23–D24). The Overview is a section per VPN profile: its switch
+  connects it, and each app in it has its own Use VPN, which stands until the person turns it off; an app may be in
+  several. The service routes up to eight profiles at once, each a lane of its own that is held, lost or let go
+  alone. The tray connects and disconnects profiles.
+- The window (2026-10-20, D15, D20–D22). Overview, Apps (each app's page: its programs, what each is doing, its
+  icon, its settings), Profiles and Settings, in English or 中文简体; ping, the exit location, traffic and
+  reconnecting with a countdown; a profile's proxy on whatever port is free; connection settings for every profile,
+  one profile's own as a view of their own. Closing it keeps Sallyport beside the clock.
+- Games and apps through the VPN by their packets (2026-10-19–20, D10–D18). The Sallyport service (LocalSystem)
+  takes the chosen programs' TCP and UDP through NT Kernel's Windows Packet Filter driver into the profile's tunnel,
+  from their first packet; everything else keeps the person's own connection. A browser can instead be launched
+  with the profile's proxy. If the VPN drops, an app's traffic is held until it is back, goes direct meanwhile, or
+  the app is taken off the VPN, as chosen. Measured on the owner's machine with Zenless Zone Zero: all 116 of its
+  flows routed from their first packet.
+- Setup (2026-10-20, D19). One administrator prompt; the folder is the person's choice (`C:\Program Files\Sallyport`
+  unless they choose otherwise), nothing of Sallyport's left on C: when it is elsewhere; the packet driver on
+  request; English or 中文简体; removal keeps the person's profiles and settings unless asked.
 - The runtime (2026-10-19). `TunnelSession` keeps one profile's tunnel up — the remotes in turn, reconnecting with
   backoff — and reports `SessionStatus` on every change of state, with byte counts that survive a reconnect;
   `NetworkUp` lets a host attach a proxy (or, later, a packet router) before "up" is said. `TunnelService` is now that

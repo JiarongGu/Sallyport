@@ -190,8 +190,8 @@ sealed class Installer
         // service believes only clients that run from a folder ordinary users cannot change (product design change 2).
         Protect(staged);
         Unpack(payload, staged, 0.08, 0.70);
-        // The payload carries a light uninstaller of its own, on the runtime installed beside the client; a payload
-        // without one (a development folder) gets this setup instead.
+        // The payload carries an uninstaller of its own, this setup without the payload in it; a payload without one
+        // (a development folder) gets this setup instead.
         if (!File.Exists(Path.Combine(staged, "Sallyport.Setup.exe")))
             File.Copy(Environment.ProcessPath!, Path.Combine(staged, "Sallyport.Setup.exe"), overwrite: true);
         if (Directory.Exists(previous)) Directory.Delete(previous, recursive: true);

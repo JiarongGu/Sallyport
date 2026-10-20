@@ -1,0 +1,153 @@
+name: Release
+
+# Manual-trigger only, like the sibling repositories: a release is a deliberate act started from the Actions tab, never
+# a side effect of a push, and there is no push CI. It tests the exact commit, packages the setup
+# (apps/Sallyport.Setup/package.ps1: one installer exe and its .sha256) and keeps the package as the run's artifact;
+# only once all of that has passed does it commit the version, tag and create the GitHub release. A rehearsal
+# (`dry_run`, the default) stops after the package and touches no git state (docs/DECISIONS.md D28).
+#
+# Windows, deliberately: the client and setup are net10.0-windows (WinForms, WebView2) and so is every test project.
+# No test needs a VPN server, the packet driver or an account. What only a real server can show (AGENTS.md rule 3) is
+# measured on the owner's machine and written in TASKS.md and docs/DECISIONS.md, not here.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g. 0.2.0); empty to keep or bump the one in Directory.Build.props'
+        required: false
+        type: string
+        default: ''
+      bump:
+        description: 'Bump when no version is given (none releases the number already there)'
+        required: false
+        type: choice
+        default: none
+        options: [none, patch, minor, major]
+      create_tag:
+        description: 'Create and push the vX.Y.Z tag, and the GitHub release on it'
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: 'Create the GitHub release as a draft'
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: 'Mark the GitHub release as a pre-release'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'DRY RUN: test and package only; no commit, tag or release'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write   # the version commit, the tag, the release
+
+# One release at a time: two would race for the same version and tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Test · package · release
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the tag and the version's commit stand on the whole history
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/Sallyport.Client/web/package-lock.json
+
+      # Writes the working tree only: Directory.Build.props' <Version> and the CHANGELOG section, dated. Committed
+      # below, and only after the package exists, so a failed release burns no version and leaves no commit. It
+      # refuses a version whose section has nothing written under it. The inputs reach the script as environment,
+      # never pasted into it.
+      - name: Version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
+        run: ./apps/Sallyport.Setup/version.ps1 -Version $env:VERSION -Bump $env:BUMP
+
+      # Every test project, each on its own so a failure names it. The client's build makes the page first.
+      - name: Test
+        run: |
+          foreach ($project in Get-ChildItem tests -Directory) {
+            dotnet test $project.FullName -c Release --nologo
+            if ($LASTEXITCODE -ne 0) { throw "$($project.Name) failed" }
+          }
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./apps/Sallyport.Setup/package.ps1 -Version $env:VERSION
+
+      # Kept on every run, a rehearsal's above all: the setup it made is the thing to try before a real release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sallyport-${{ steps.version.outputs.version }}
+          path: |
+            artifacts/release/*
+            artifacts/release-notes.md
+          if-no-files-found: error
+
+      - name: Rehearsal summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          "DRY RUN: nothing committed, tagged or released."
+          "Version that would ship: ${{ steps.version.outputs.version }}"
+          Get-ChildItem artifacts/release | Format-Table Name, Length -AutoSize
+
+      # Only the two files version.ps1 writes, named: nothing else the job made can ride along.
+      - name: Commit the version
+        if: ${{ !inputs.dry_run && steps.version.outputs.changed == 'true' }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Directory.Build.props CHANGELOG.md
+          git commit -m "chore: release ${{ steps.version.outputs.tag }}"
+          git push
+
+      - name: Tag
+        if: ${{ !inputs.dry_run && inputs.create_tag }}
+        run: |
+          $tag = '${{ steps.version.outputs.tag }}'
+          git rev-parse -q --verify "refs/tags/$tag" | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            "Tag $tag already exists: a re-run, left where it is."
+          } else {
+            git config user.name 'github-actions[bot]'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git tag -a $tag -m "Sallyport $tag"
+            git push origin $tag
+          }
+
+      # The notes are the CHANGELOG section for this version under how to install it (package.ps1); the setup and its
+      # .sha256 are the assets, the digest a file beside the download as well as a line in the notes.
+      - name: GitHub release
+        if: ${{ !inputs.dry_run && inputs.create_tag }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Sallyport ${{ steps.version.outputs.version }}
+          body_path: artifacts/release-notes.md
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          files: artifacts/release/*
+          fail_on_unmatched_files: true

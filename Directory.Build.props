@@ -6,8 +6,12 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- The one place the version is written: the release workflow steps it (apps/Sallyport.Setup/version.ps1). -->
     <Version>0.1.0</Version>
     <Authors>Jiarong Gu</Authors>
+    <!-- What Windows shows of every program, beside each one's own AssemblyTitle (its "File description"). -->
+    <Product>Sallyport</Product>
+    <Copyright>Copyright © 2026 Jiarong Gu. MIT License.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 </Project>
