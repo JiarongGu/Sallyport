@@ -29,6 +29,9 @@ list of quick toggles is what its users asked back for — never from code of th
   its tone and the host's word for it. The connection's switch is the Overview's, not the menu's.
 - **The splash** (`Splash.cs`) draws the rail's head (the mark, centred) at the page's geometry and a loading line where the content
   begins; the page lifts it (`CLOSE_SPLASH`) once its first state is painted.
+- **A view inside a page** — an app's page, a profile's own connection settings — takes the page's place under a header
+  with a back arrow (the chevron turned to point back) before its title. Back, or another page from the rail, leaves it
+  and cancels an edit open there.
 
 ## The pages
 
@@ -37,8 +40,12 @@ list of quick toggles is what its users asked back for — never from code of th
   its time and proxy, received and sent as figures with the rate now over a minute's graph of both (`Connections`
   samples each channel once a second and publishes when a rate moves), round trips as figures (`"19 ms"` over `"4 of 4
   answered"`), the routed app with Stop, the apps through it with Launch and a route switch; other open channels after.
-- **Profiles**: a switch per profile, the address under the name with a copy icon. **Apps**: a tile, Launch, a route
-  switch, the chevron. **Settings**: General as rows — Language, Start with Windows as a switch.
+- **Profiles**: a switch per profile, the address under the name with a copy icon once its proxy has a port ("a free
+  port when it connects" in plain text until then), the details' chevron centred in its square; Connection settings…
+  opens the profile's own view. **Apps**: one "Add an app…"; a tile, Launch, a route switch, the routing check, and an
+  arrow (the chevron turned to point on) that opens the app's page — Monitoring, Setup, Programs. **Settings**: rows of
+  what acts the moment it changes — General (Language, Start with Windows as a switch) and Connection (VPN protocol, If
+  it cannot connect) — each a word, a line under it, and its control on the right.
 
 ## Tokens
 
@@ -58,7 +65,7 @@ the splash; `Chrome.tsx` (`GateMark`) for the page; `icon.ps1` writes `Sallyport
 
 ## The tray's menu
 
-Kept simple, as before — Open Sallyport, Open Network, each profile, the routed app or the Apps, Settings, Exit —
+Kept simple, as before — Open Sallyport (which opens the Overview), each profile, the routed app or the Apps, Settings, Exit —
 spaced as Windows 11's own menus: entries 32 high, the text 16 from the edge and centred on the entry, the submenu
 chevron 16 from the other edge with 24 before it, separators 9 high, a rounded selection inset 4, rounded corners on
 Windows 11. The renderer places the text and sizes each menu (`StatusTray.Fit`): WinForms would size the window and its
