@@ -17,7 +17,7 @@ internal enum Page { Apps, Network, Profiles, Settings }
 /// <summary>A page to show, once per request; <see cref="App"/>, an app's own page on Apps.</summary>
 internal sealed record NavigationView(Page Page, long Request, string? App = null);
 
-internal sealed record ChannelActions(UiAction Disconnect, UiAction CheckLatency);
+internal sealed record ChannelActions(UiAction Disconnect);
 
 internal enum ProbePhase { Unchecked, Checking, Available, Unavailable }
 
@@ -93,8 +93,7 @@ internal static class WindowViews
                 : L.T("SOCKS5 proxy on {0}", p.EndpointText);
             var (last, checking) = latencies?.GetValueOrDefault(p.Id) ?? (null, false);
             channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy,
-                new ChannelActions(p.Actions.Disconnect,
-                    p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? L.T("Check ping") : L.T("Check again"), busy: checking) : UiAction.Hidden),
+                new ChannelActions(p.Actions.Disconnect),
                 p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null, flow));
         }
 

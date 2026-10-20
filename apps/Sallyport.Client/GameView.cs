@@ -19,7 +19,11 @@ internal enum DriverPhase { Ready, NotInstalled, ServiceMissing, Working, Unknow
 internal sealed record CheckView(CheckResult Result, string Text);
 
 internal sealed record RunView(RunPhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? Since, IReadOnlyList<Fact> Facts,
-    CheckView Coverage);
+    CheckView Coverage, RunUsage? Usage = null);
+
+/// <summary>What one app has had through the VPN on this route, as the Overview shows it beside the app: received, sent,
+/// and its own round trip through the tunnel (null before the router has timed one).</summary>
+internal sealed record RunUsage(string Received, string Sent, string? Latency);
 
 internal sealed record DriverView(DriverPhase Phase, Tone Tone, string StatusText, string? DetailText, IReadOnlyList<Fact> Facts,
     UiAction Install, UiAction Remove);
@@ -83,9 +87,17 @@ internal static class GameViews
         };
 
         var facts = new List<Fact>();
+        RunUsage? usage = null;
         if (route is { } s)
         {
             var mine = (s.Programs ?? []).Where(p => app.PacketPrograms.Any(a => string.Equals(a.Path, p.Path, StringComparison.OrdinalIgnoreCase))).ToList();
+            // Its round trip is its busiest program's, as each program's is its busiest process's.
+            var trip = mine.Where(p => p.LatencyMs is not null).OrderByDescending(p => p.Packets).Select(p => p.LatencyMs).FirstOrDefault();
+            usage = new RunUsage(ClientView.Bytes(mine.Sum(p => p.BytesIn)), ClientView.Bytes(mine.Sum(p => p.BytesOut)),
+                trip is { } ms ? L.T("{0} ms", Math.Round(ms).ToString(English)) : null);
+            facts.Add(new(L.T("Received through the VPN"), usage.Received));
+            facts.Add(new(L.T("Sent through the VPN"), usage.Sent));
+            facts.Add(new(L.T("Its round trip through the VPN"), usage.Latency ?? L.T("Not measured yet")));
             // The route's own figures are every lane's and app's: said as this app's only when it is the route's one app.
             var alone = run.Lanes.Sum(l => l.Apps.Count) == 1;
             facts.Add(new(L.T("Its processes"), (alone ? s.Selected : mine.Sum(p => p.Processes)).ToString("N0", English)));
@@ -107,7 +119,7 @@ internal static class GameViews
         }
         // Since it joined, or since the route came back, whichever is later.
         var since = phase != RunPhase.Routing ? null : lane.Apps.GetValueOrDefault(app.Id) is var joined && joined > lane.PhaseSince ? joined : lane.PhaseSince;
-        return new RunView(phase, tone, text, detail, since, facts, Coverage(route, run.Lanes.Sum(l => l.Apps.Count)));
+        return new RunView(phase, tone, text, detail, since, facts, Coverage(route, run.Lanes.Sum(l => l.Apps.Count)), usage);
     }
 
     /// <summary>Whether everything of the app went through the VPN: holds, failed (with how many), or could not be
@@ -121,10 +133,24 @@ internal static class GameViews
         { LateFlows: > 0 and var late } => new(CheckResult.Failed,
             L.Count((int)late, "1 connection of the app left before it was routed.", "{0} connections of the app left before it was routed.")),
         { Selected: 0 } => new(CheckResult.Unavailable, L.T("No program of the app has run yet, so nothing could be checked.")),
-        { Unreadable: > 0 and var n } => new(CheckResult.Unavailable,
-            L.Count(n, "Every connection seen from the app went through the VPN, but 1 process could not be read, so whether it was the app could not be checked.",
-                "Every connection seen from the app went through the VPN, but {0} processes could not be read, so whether they were the app could not be checked.")),
+        // Processes on the whole computer whose executable could not be read at a connection's first packet, since the
+        // route began: whether one was the app's cannot be told (rule 6) — said on the app's own page, not the Overview,
+        // and how: most had closed already, a few refuse to be read (protected programs).
+        { Unreadable: > 0 and var n, UnreadableRunning: var running } => new(CheckResult.Unavailable,
+            L.Join(L.T("Every connection seen from the app went through the VPN."), n == 1
+                ? L.T("1 other program on this computer opened a connection but could not be identified ({0}); it is not known whether it was part of the app.", Unidentified(1 - running, running))
+                : L.T("{0} other programs on this computer opened connections but could not be identified ({1}); it is not known whether any was part of the app.",
+                    n.ToString("N0", English), Unidentified(n - running, running)))),
         _ => new(CheckResult.Holds, L.T("Every connection of the app's programs went through the VPN.")),
+    };
+
+    private static string Unidentified(int closed, int refused) => (closed, refused) switch
+    {
+        (> 0, > 0) => L.T("{0} had already closed, {1} refused to be read", closed.ToString(English), refused.ToString(English)),
+        (1, _) => L.T("it had closed before it could be read"),
+        (> 1, _) => L.T("they had closed before they could be read"),
+        (_, 1) => L.T("it refused to be read"),
+        _ => L.T("they refused to be read"),
     };
 
     public static DriverView Driver(DriverFacts f)

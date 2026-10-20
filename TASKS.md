@@ -5,24 +5,15 @@ says under **Done when** has been measured — against the real server where a s
 **Needs** names what only the owner can give.
 
 ## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
-1. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
-   "应用程序的每个连接都经由 VPN。" and its check, which says nothing new; show what that app has sent and received through
-   the VPN, and its own latency (its connections' round trip through the tunnel, as the router sees them). No "检测延迟"
-   button: the profile's monitoring shows its latency to the VPN server on its own, all the while it is connected.
-   The check's "but 24 processes could not be read" (the owner, toggling one game in a session) counts every process on
-   the machine whose executable the router could not read at a connection's first packet, for the run's whole life —
-   mostly, it seems, processes already gone; it reads as a fault of that app. Say it only where it could be the app's,
-   on the app's own page, and say what kind (gone, or refused) — never on the Overview.
-   - **Done when:** an app in use shows its traffic and latency, and the profile its latency, without a click, each
-     measured against the tunnel's own figures.
-2. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
+1. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
    and its loss policy as when an app had one; now an app is added to the profiles it goes through (D23–D24), from the
    Overview's profile section or from Apps. Its look and its steps redesigned with that, for a person who is not
-   technical.
+   technical. Found on the way (2026-10-21): `--add-game <a program's path>` takes the program and also says "该文件夹不存在"
+   (it wants a folder); and a path typed by UI Automation is not looked up (the page reads its input event).
    - **Done when:** an app added from each place lands where it was asked for, measured, and the page reviewed against
      the rest of the window.
-3. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
-4. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+2. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
+3. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,

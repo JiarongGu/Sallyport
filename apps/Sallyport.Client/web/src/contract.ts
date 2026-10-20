@@ -104,6 +104,8 @@ export interface RunView {
   facts: Fact[];
   /** Whether everything of the game went through the VPN. */
   coverage: CheckView;
+  /** What the app has had through the VPN on this route, for the Overview: "1.2 MB" each way, its round trip "45 ms". */
+  usage: { received: string; sent: string; latency: string | null } | null;
 }
 
 export interface DriverView {
@@ -162,8 +164,8 @@ export interface ChannelView {
   facts: Fact[];
   /** "SOCKS5 proxy on 127.0.0.1:1088", when the channel serves one. */
   proxyText: string | null;
-  /** Disconnect posts DISCONNECT with the channel's profileId; checkLatency posts CHECK_LATENCY with it. */
-  actions: { disconnect: Action; checkLatency: Action };
+  /** Disconnect posts DISCONNECT with the channel's profileId. Its latency is checked on its own while it is up. */
+  actions: { disconnect: Action };
   /** ISO time the next round of attempts starts, while the channel waits for it. */
   nextAttemptAt: string | null;
   /** Round trips, when the channel is up or was checked. */
@@ -493,7 +495,6 @@ export interface Commands {
   CONNECT: { id: string };
   DISCONNECT: { id: string };
   LOCATE: { id: string };
-  CHECK_LATENCY: { id: string };
   BEGIN_DEFAULTS_EDIT: Record<string, never>;
   BEGIN_EXPORT: Record<string, never>;
   SAVE_EXPORT: { token: string; values: MoveValues };

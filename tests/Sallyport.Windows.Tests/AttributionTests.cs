@@ -135,4 +135,38 @@ public sealed class AttributionTests
         OwnerTable.IndexUdp(table, index);
         Assert.Single(index);
     }
+
+    [Fact]
+    public void A_processes_round_trip_is_the_middle_of_its_latest_handshakes()
+    {
+        var routed = new ProcessRouted();
+        Assert.Null(routed.Latency);
+
+        foreach (var ms in new[] { 40.0, 300, 42, 41, 39 }) routed.Handshake(ms);
+
+        Assert.Equal(41, routed.Latency);
+    }
+
+    [Fact]
+    public void A_process_on_UDP_alone_takes_the_shortest_of_its_waits_for_a_reply()
+    {
+        var routed = new ProcessRouted();
+
+        foreach (var ms in new[] { 80.0, 46, 120, 55 }) routed.Reply(ms);
+        Assert.Equal(46, routed.Latency);
+
+        // A handshake, once there is one, says the round trip better than a wait that holds the server's own time.
+        routed.Handshake(44);
+        Assert.Equal(44, routed.Latency);
+    }
+
+    [Fact]
+    public void Only_a_processes_latest_round_trips_are_kept()
+    {
+        var routed = new ProcessRouted();
+        for (var i = 0; i < 32; i++) routed.Handshake(500);
+        for (var i = 0; i < 32; i++) routed.Handshake(30);
+
+        Assert.Equal(30, routed.Latency);
+    }
 }

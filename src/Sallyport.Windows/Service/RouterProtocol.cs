@@ -17,8 +17,9 @@ public static class RouterProtocol
 {
     // 2: a run's programs each with their own loss policy, and changed while it runs (D23). 3: lanes — each program
     // into its profile's tunnel, a generation saying its lane in its top byte (D24). 4: a run's worker named by its
-    // process, for a client that cannot open the system's processes to see who answered.
-    public const int Version = 4;
+    // process, for a client that cannot open the system's processes to see who answered. 5: each program's bytes both
+    // ways and its round trip through the tunnel.
+    public const int Version = 5;
     public const string ServiceName = "Sallyport";
     /// <summary>The argument that starts Sallyport's one program as the service (D30), as the service manager is told to.</summary>
     public const string ServiceArgument = "--service";
@@ -108,7 +109,7 @@ public sealed record SelectPrograms(ProgramRule[] Programs) : RouterMessage;
 /// counts so far.</summary>
 public sealed record RouteState(RoutePhase Phase, int Generation, long Routed, long HandedUp, long Direct, long Unowned, long HeldWhileDown,
     long DirectWhileDown, long LateFlows, long Blocked, long Stale, long RoutedFlows, int Selected, int Unreadable,
-    IReadOnlyList<ProgramRouted>? Programs = null, IReadOnlyList<LaneRoute>? Lanes = null) : RouterMessage
+    IReadOnlyList<ProgramRouted>? Programs = null, IReadOnlyList<LaneRoute>? Lanes = null, int UnreadableRunning = 0) : RouterMessage
 {
     /// <summary>A lane's phase; a lane the worker has not said is waiting for its first tunnel.</summary>
     public RoutePhase PhaseOf(int lane) => Lanes?.FirstOrDefault(l => l.Lane == lane)?.Phase ?? (lane == 0 ? Phase : RoutePhase.Armed);
@@ -118,8 +119,9 @@ public sealed record RouteState(RoutePhase Phase, int Generation, long Routed, l
 public sealed record LaneRoute(int Lane, RoutePhase Phase, int Generation);
 
 /// <summary>What one selected executable has had routed since the route began: the processes seen running it, the flows
-/// that went to the tunnel and the packets it sent into them. A path, never what was sent.</summary>
-public sealed record ProgramRouted(string Path, int Processes, long Flows, long Packets);
+/// that went to the tunnel, the packets it sent into them, the bytes each way, and its round trip through the tunnel
+/// (<see cref="Routing.ProcessRouted.Latency"/>, its busiest process's). A path and counts, never what was sent.</summary>
+public sealed record ProgramRouted(string Path, int Processes, long Flows, long Packets, long BytesOut = 0, long BytesIn = 0, double? LatencyMs = null);
 
 /// <summary>One frame read: its kind, and its payload (a control message's JSON, or a packet's generation and bytes).</summary>
 public readonly record struct Frame(byte Kind, byte[] Payload)

@@ -3,7 +3,7 @@ import { useId, useState } from 'react';
 import type { AppSectionView, ClientState, Page, SectionView, TrafficView } from './contract';
 import { post } from './commands';
 import { clock, countdown, duration } from './format';
-import { RunDetails } from './Run';
+import { RunLine } from './Run';
 import { ActionButton, AppIcon, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { RoutingCard } from './Settings';
 
@@ -54,7 +54,6 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
     {channel?.latency && <section className="latency" aria-label={t('Ping')}>
       <div className="latency-head">
         <p className={channel.latency.phase === 'unavailable' ? 'location-unavailable' : 'secondary'} role="status">{channel.latency.statusText}</p>
-        <ActionButton action={channel.actions.checkLatency} glyph="refresh" onClick={() => post('CHECK_LATENCY', { id: channel.profileId })} />
       </div>
       <Facts facts={channel.latency.paths} figures />
       {channel.latency.checkedAt && <p className="metadata secondary">{t('Checked')} <time dateTime={channel.latency.checkedAt}>{clock(channel.latency.checkedAt)}</time></p>}
@@ -85,8 +84,9 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
   </article>;
 }
 
-/** An app in a section: its icon and name, what it is doing through this profile, its switch here, and its route's
- *  detail while this profile carries it. */
+/** An app in a section: its icon and name, what it is doing through this profile, its switch here; while this profile
+ *  carries it, what it has had through the VPN and its own round trip (the owner: "its better we display its single app
+ *  usage and latency"), or, while the route is not up, why. Its check is on its own page. */
 function SectionApp({ app, now }: { app: AppSectionView; now: number }) {
   return <li className={app.run ? 'carried' : undefined}>
     <div className="section-app">
@@ -103,7 +103,7 @@ function SectionApp({ app, now }: { app: AppSectionView; now: number }) {
         onClick={() => post('REMOVE_APP_FROM_PROFILE', { id: app.appId, profileId: app.profileId })}><Icon name="dismiss" /></button>}
     </div>
     {app.detailText && !app.run && <p className="metadata secondary section-app-detail">{app.detailText}</p>}
-    {app.run && <RunDetails run={app.run} counts={false} />}
+    {app.run && <RunLine run={app.run} />}
   </li>;
 }
 

@@ -33,7 +33,6 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "CONNECT" => () => Done(() => core.Connect(Id())),
             "DISCONNECT" => () => core.DisconnectAsync(Id()),
             "LOCATE" => () => core.LocateAsync(Id(), cancellationToken),
-            "CHECK_LATENCY" => () => core.CheckLatencyAsync(Id(), cancellationToken),
             "BEGIN_DEFAULTS_EDIT" => () => Done(core.BeginDefaultsEdit),
             "BEGIN_EXPORT" => () => Done(core.BeginExport),
             "SAVE_EXPORT" => () => core.SaveExportAsync(Token(), PayloadHelper.GetRequiredValue<MoveValues>(request.Payload, "values")),

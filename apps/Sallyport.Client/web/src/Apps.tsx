@@ -3,7 +3,7 @@ import { useId, type ReactNode } from 'react';
 import type { AppItemView, ClientState, ProgramView } from './contract';
 import { post } from './commands';
 import { duration } from './format';
-import { RunDetails } from './Run';
+import { RunDetails, RunLine } from './Run';
 import { ActionButton, AppIcon, Disclosure, EmptyView, Facts, Icon, StatusPill, Switch } from './ui/shared';
 import { Traffic } from './Network';
 
@@ -50,7 +50,7 @@ function AppCard({ app, now, open }: { app: AppItemView; now: number; open: () =
       <button type="button" className="subtle icon open-page" data-focus-key={`open-app:${app.id}`} aria-label={t('Open {0}', app.name)}
         title={t('Open {0}', app.name)} onClick={open}><Icon name="chevron" /></button>
     </AppHead>
-    {app.run && <RunDetails run={app.run} counts={false} />}
+    {app.run && <RunLine run={app.run} />}
   </article>;
 }
 

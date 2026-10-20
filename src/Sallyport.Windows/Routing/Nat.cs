@@ -16,6 +16,9 @@ public sealed class NatMapping
         TunnelPort = tunnelPort;
     }
 
+    /// <summary>The process its socket's routed packets were last counted for, so what comes back is counted for it too.</summary>
+    internal ProcessRouted? Tally;
+
     public byte Protocol { get; }
     public uint LocalAddress { get; }
     public ushort LocalPort { get; }

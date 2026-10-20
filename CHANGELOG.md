@@ -19,6 +19,12 @@
   so the release carries one .NET runtime instead of four, and the install folder holds that program, WebView2's
   loader and `data`. An upgrade from 0.1.0 moves the service to the program; the Start menu, sign-in start and `.ovpn`
   association stay as they were.
+- Each app's own use and latency (2026-10-21): on the Overview and Apps, an app going through a VPN shows what it
+  has received and sent through it and its own round trip — its TCP handshakes through the tunnel, or for a program on
+  UDP alone its shortest wait for a reply; its check and its figures are on its own page. A connected profile's latency
+  is checked on its own every 30 seconds; there is no Check ping button. Processes on the computer that opened a
+  connection but could not be identified are said on the app's page only, as what they were (closed already, or
+  refusing to be read).
 - Uninstalling where a person looks (2026-10-21): the Start menu has a Sallyport folder with Sallyport and Uninstall
   Sallyport, and Settings → About has Uninstall Sallyport…; each opens setup's removal, as Windows' installed apps do.
 - The window and setup follow Windows' Text size (Settings → Accessibility → Text size; 2026-10-21): the window's

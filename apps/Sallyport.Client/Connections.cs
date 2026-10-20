@@ -470,9 +470,15 @@ internal sealed class Connections : IDisposable
         channel.Stop.Dispose();
     }
 
+    /// <summary>How often an up channel's latency is checked again on its own (the owner: "we dont really need this 检测延迟
+    /// button which we can directly display the latency to vpn server in the monitoring"): twelve echoes a check, over a
+    /// few seconds, against a minute's traffic of a game.</summary>
+    public static readonly TimeSpan LatencyEvery = TimeSpan.FromSeconds(30);
+
     private void Poll(bool force = false)
     {
         bool changed;
+        List<(string Id, CancellationToken Stop)> due = [];
         lock (_gate)
         {
             var now = new Dictionary<string, TunnelServiceStatus>(_ended);
@@ -492,6 +498,9 @@ internal sealed class Connections : IDisposable
                 }
                 var traffic = Rates(channel);
                 rates[id] = (traffic.InPerSecond.LastOrDefault(), traffic.OutPerSecond.LastOrDefault());
+                if (status.State == TunnelServiceStatus.Up && !channel.CheckingLatency && channel.Session.Dispatcher is not null
+                    && (channel.Latency is not { } last || at - last.Checked >= LatencyEvery))
+                    due.Add((id, channel.Stop.Token));
             }
             // Traffic that stops changes no count, but its graph has to fall to nothing: a rate that moved is a change too.
             changed = force || now.Count != _shown.Count || now.Any(p => !_shown.TryGetValue(p.Key, out var was) || was != p.Value)
@@ -500,6 +509,16 @@ internal sealed class Connections : IDisposable
             _shownRates = rates;
         }
         if (changed) Changed?.Invoke();
+        // Out of the lock: a check takes it, and polls when it starts and ends.
+        foreach (var (id, stop) in due) _ = CheckQuietlyAsync(id, stop);
+    }
+
+    // A check of its own accord: one that cannot run (the channel went down meanwhile) is simply not shown.
+    private async Task CheckQuietlyAsync(string id, CancellationToken stop)
+    {
+        try { await CheckLatencyAsync(id, stop); }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException or ShenoraException or InvalidOperationException
+            or SocketException or System.Net.NetworkInformation.PingException or TunnelEnded) { }
     }
 
     private static string Name(SessionState state) => state switch

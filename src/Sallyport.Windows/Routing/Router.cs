@@ -32,13 +32,49 @@ public sealed class FlowDecision(Verdict verdict, int pid, BlockReason reason = 
     internal int TallyPid;
 }
 
-/// <summary>What one process has had routed: the flows that went to the tunnel and the packets it sent into them.
-/// Written by the routing thread alone, read by any.</summary>
+/// <summary>What one process has had routed: the flows that went to the tunnel, the packets and bytes it sent into them,
+/// the bytes that came back to it, and its round trips through the tunnel. Its flows, packets and bytes out are written
+/// by the routing thread, its bytes in and round trips by the tunnel's; read by any.</summary>
 public sealed class ProcessRouted
 {
-    internal long _flows, _packets;
+    /// <summary>The round trips kept, the latest: enough for a middle that moves with the path, not with one slow one.</summary>
+    private const int Kept = 32;
+
+    internal long _flows, _packets, _bytesOut, _bytesIn;
+    private readonly Lock _times = new();
+    private readonly double[] _handshakes = new double[Kept], _replies = new double[Kept];
+    private int _handshakeCount, _replyCount;
+
     public long Flows => Interlocked.Read(ref _flows);
     public long Packets => Interlocked.Read(ref _packets);
+    public long BytesOut => Interlocked.Read(ref _bytesOut);
+    public long BytesIn => Interlocked.Read(ref _bytesIn);
+
+    internal void Handshake(double milliseconds)
+    {
+        lock (_times) _handshakes[_handshakeCount++ % Kept] = milliseconds;
+    }
+
+    internal void Reply(double milliseconds)
+    {
+        lock (_times) _replies[_replyCount++ % Kept] = milliseconds;
+    }
+
+    /// <summary>Its round trip through the tunnel now, in milliseconds: the middle of its latest TCP handshakes (a SYN to
+    /// its SYN-ACK — the network's own round trip); for a process that opened none, as a game on UDP alone, the shortest
+    /// of its latest waits for a reply (a request's round trip, plus however long its server took, which the shortest
+    /// holds least of). Null before either.</summary>
+    public double? Latency
+    {
+        get
+        {
+            lock (_times)
+            {
+                if (_handshakeCount > 0) return _handshakes.Take(Math.Min(_handshakeCount, Kept)).Order().ElementAt(Math.Min(_handshakeCount, Kept) / 2);
+                return _replyCount > 0 ? _replies.Take(Math.Min(_replyCount, Kept)).Min() : null;
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -92,8 +128,9 @@ public sealed class Router : IDisposable
     // When a routed SYN left, and when a routed UDP flow's datagram began waiting for its peer's next: the reply side
     // runs on the tunnel's thread.
     private readonly Lock _timing = new();
-    private readonly Dictionary<Flow, long> _synSent = [];
-    private readonly Dictionary<Flow, long> _udpWaiting = [];
+    // Each with the process it is counted for.
+    private readonly Dictionary<Flow, (long At, ProcessRouted? Tally)> _synSent = [];
+    private readonly Dictionary<Flow, (long At, ProcessRouted? Tally)> _udpWaiting = [];
     private long _lastRefresh;
     private long _lastRecheck;
     private long _lastSweep = Stopwatch.GetTimestamp();
@@ -313,6 +350,7 @@ public sealed class Router : IDisposable
             if (Inject(Nat.Frame(mapping!, packet)))
             {
                 HandedUp++;
+                if (Volatile.Read(ref mapping!.Tally) is { } owner) Interlocked.Add(ref owner._bytesIn, packet.Length);
                 if (packet[9] == 1)
                 {
                     ErrorsHandedUp++;
@@ -381,19 +419,22 @@ public sealed class Router : IDisposable
         }
         // The frame may be padded past the packet to Ethernet's 60-byte minimum.
         var copy = ip[..total].ToArray();
-        if (nat.Outbound(copy, frame[..link]) is null) { HeldBack++; return true; }
-        Asked(flow, ip);
+        if (nat.Outbound(copy, frame[..link]) is not { } mapping) { HeldBack++; return true; }
+        // What comes back on the mapping is counted for the process its socket is now.
+        Volatile.Write(ref mapping.Tally, decision.Tally);
+        if (decision.Tally is { } tally) Interlocked.Add(ref tally._bytesOut, total);
+        Asked(flow, ip, decision.Tally);
         ToTunnel(lane, copy, nat.Mtu);
         return true;
     }
 
-    private void Asked(in Flow flow, ReadOnlySpan<byte> ip)
+    private void Asked(in Flow flow, ReadOnlySpan<byte> ip, ProcessRouted? tally)
     {
         var now = Stopwatch.GetTimestamp();
         if (flow.Protocol == Flow.Udp)
-            lock (_timing) _udpWaiting.TryAdd(flow, now);
+            lock (_timing) _udpWaiting.TryAdd(flow, (now, tally));
         else if ((ip[(ip[0] & 0x0F) * 4 + 13] & 0x12) == 0x02)
-            lock (_timing) _synSent[flow] = now;
+            lock (_timing) _synSent[flow] = (now, tally);
     }
 
     // A whole TCP or UDP packet from the tunnel, already turned back to the program: whatever was waiting for it.
@@ -408,9 +449,19 @@ public sealed class Router : IDisposable
         {
             if (protocol == Flow.Udp)
             {
-                if (_udpWaiting.Remove(flow, out var asked)) UdpReplies.Add(Stopwatch.GetElapsedTime(asked).TotalMilliseconds);
+                if (_udpWaiting.Remove(flow, out var asked))
+                {
+                    var waited = Stopwatch.GetElapsedTime(asked.At).TotalMilliseconds;
+                    UdpReplies.Add(waited);
+                    asked.Tally?.Reply(waited);
+                }
             }
-            else if ((segment[13] & 0x12) == 0x12 && _synSent.Remove(flow, out var sent)) Handshakes.Add(Stopwatch.GetElapsedTime(sent).TotalMilliseconds);
+            else if ((segment[13] & 0x12) == 0x12 && _synSent.Remove(flow, out var sent))
+            {
+                var trip = Stopwatch.GetElapsedTime(sent.At).TotalMilliseconds;
+                Handshakes.Add(trip);
+                sent.Tally?.Handshake(trip);
+            }
         }
     }
 
@@ -435,6 +486,7 @@ public sealed class Router : IDisposable
         var copy = ip[..total].ToArray();
         nat.OutboundPiece(copy);
         PiecesRouted++;
+        if (set.Decision.Tally is { } tally) Interlocked.Add(ref tally._bytesOut, total);
         ToTunnel(lane, copy, nat.Mtu);
         return true;
     }
@@ -676,8 +728,8 @@ public sealed class Router : IDisposable
         var stale = Stopwatch.GetTimestamp() - Stopwatch.Frequency * 30;
         lock (_timing)
         {
-            foreach (var key in _synSent.Where(s => s.Value < stale).Select(s => s.Key).ToList()) _synSent.Remove(key);
-            foreach (var key in _udpWaiting.Where(s => s.Value < stale).Select(s => s.Key).ToList()) _udpWaiting.Remove(key);
+            foreach (var key in _synSent.Where(s => s.Value.At < stale).Select(s => s.Key).ToList()) _synSent.Remove(key);
+            foreach (var key in _udpWaiting.Where(s => s.Value.At < stale).Select(s => s.Key).ToList()) _udpWaiting.Remove(key);
         }
         for (var lane = 0; lane < Lanes; lane++)
             if (NatOf(lane) is { } nat) ExpiredMappings += nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));

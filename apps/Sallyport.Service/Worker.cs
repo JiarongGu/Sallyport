@@ -168,10 +168,25 @@ static class Worker
             .Select(p => (Path: selection.PathOf(p.Key), Routed: p.Value))
             .Where(p => p.Path is not null)
             .GroupBy(p => p.Path!, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new ProgramRouted(g.Key, g.Count(), g.Sum(p => p.Routed.Flows), g.Sum(p => p.Routed.Packets)))
+            // A program's round trip is its busiest process's: the one most of what it sends goes through.
+            .Select(g => new ProgramRouted(g.Key, g.Count(), g.Sum(p => p.Routed.Flows), g.Sum(p => p.Routed.Packets),
+                g.Sum(p => p.Routed.BytesOut), g.Sum(p => p.Routed.BytesIn),
+                g.Where(p => p.Routed.Latency is not null).OrderByDescending(p => p.Routed.Packets).Select(p => p.Routed.Latency).FirstOrDefault()))
             .ToList();
+        // Of the processes whose executable could not be read, those still running refused it (a protected process);
+        // the others had closed before their first packet was looked at.
+        var unreadable = selection.Unreadable.ToArray();
+        var running = unreadable.Length == 0 ? 0 : RunningOf(unreadable);
         return new RouteState(route.Phase, route.Generation, r.RoutedPackets, r.HandedUp, r.DirectPackets, r.UnownedPackets, r.HeldWhileDown,
-            r.DirectWhileDown, r.LateFlows, r.Blocked.Values.Sum(), route.Stale, r.RoutedFlows, selection.Selected.Count(), selection.Unreadable.Count(),
-            programs, [.. Enumerable.Range(0, Router.Lanes).Select(l => new LaneRoute(l, route.PhaseOf(l), route.GenerationOf(l)))]);
+            r.DirectWhileDown, r.LateFlows, r.Blocked.Values.Sum(), route.Stale, r.RoutedFlows, selection.Selected.Count(), unreadable.Length,
+            programs, [.. Enumerable.Range(0, Router.Lanes).Select(l => new LaneRoute(l, route.PhaseOf(l), route.GenerationOf(l)))], running);
+    }
+
+    private static int RunningOf(int[] pids)
+    {
+        var processes = System.Diagnostics.Process.GetProcesses();
+        var alive = processes.Select(p => p.Id).ToHashSet();
+        foreach (var process in processes) process.Dispose();
+        return pids.Count(alive.Contains);
     }
 }
