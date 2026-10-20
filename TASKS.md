@@ -338,5 +338,11 @@ reader).
   the same by hand from the Actions tab, then tags and drafts the GitHub release. Measured: the package, installed as an
   upgrade over the owner's install, and used. **Not run:** the workflow — the repository has no GitHub remote yet; its
   first dispatch should be a rehearsal (`dry_run`, the default), and its artifact installed before a real one.
+- **Ready to publish (2026-10-21):** every file version and commit message looked through for keys, certificates,
+  tokens, the owner's addresses (IPv4 and IPv6), accounts, host names, user and computer names, SIDs, MAC addresses and
+  profile paths — none; the history is published as it is. README (and README.zh-CN), CONTRIBUTING, SECURITY and
+  AGENTS written for the public repository. **Before the first release:** add the GitHub remote and push; turn on
+  private vulnerability reporting (Settings → Code security), which SECURITY.md points to; dispatch the Release
+  workflow as a rehearsal, install its artifact, then run it for real.
 - **Needs:** a certificate others trust, for the setup and the binaries (until then SmartScreen and UAC show an unknown
   publisher, and peers are checked by install path, not by signature — `docs/design/product.md`, change 2).

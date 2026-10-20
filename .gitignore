@@ -10,6 +10,8 @@ local/
 *.key
 *.p12
 *.pfx
+# An export (D26) holds VPN profiles, sealed with a password or not at all.
+*.sallyport
 
 # The client page: its packages, and the bundle it builds into the executable.
 node_modules/

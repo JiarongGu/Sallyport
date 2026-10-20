@@ -37,6 +37,8 @@ await using var stream = await network.ConnectAsync(addresses[0], 443);
 
 ## What it speaks
 
-`tls-crypt` (v1) with a client certificate, TLS 1.2/1.3 through `SslStream`, AES-256-GCM / AES-128-GCM data packets
-(`P_DATA_V2`), keepalive, exit notices; UDP and TCP remotes. Not yet: `tls-auth`, `tls-crypt-v2`, `auth-user-pass`,
-`P_DATA_V1`, renegotiation. A profile that asks for one of these is refused before any packet is sent.
+`tls-crypt` (v1), signing in with a client certificate, a username and password (`auth-user-pass`, given as
+`TunnelOptions.Login`), or both; TLS 1.2/1.3 through `SslStream`, AES-256-GCM / AES-128-GCM data packets (`P_DATA_V2`),
+keepalive, exit notices; UDP and TCP remotes. Not yet: `tls-auth`, `tls-crypt-v2`, `P_DATA_V1`, renegotiation (a
+server's renegotiation ends the tunnel, and a session connects again). A profile that asks for one of these, or for a
+username and password when none is given, is refused before any packet is sent (`Tunnel.Unsupported` says why).
