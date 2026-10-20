@@ -17,8 +17,8 @@ internal enum Page { Apps, Network, Profiles, Settings }
 /// <summary>A page to show, once per request; <see cref="App"/>, an app's own page on Apps.</summary>
 internal sealed record NavigationView(Page Page, long Request, string? App = null);
 
-/// <summary>An app's routing as the channel it uses shows it.</summary>
-internal sealed record SelectionView(string Id, string Name, RunView Run, UiAction Stop);
+/// <summary>An app the channel carries now, as the channel shows it: its part of the route, and its switch (on).</summary>
+internal sealed record SelectionView(string Id, string Name, RunView Run, UiAction Vpn, string? IconUrl = null);
 
 internal sealed record ChannelActions(UiAction Disconnect, UiAction CheckLatency);
 
@@ -70,7 +70,8 @@ internal static class WindowViews
         IReadOnlyDictionary<string, (Latency? Last, bool Checking)>? latencies = null, IReadOnlyDictionary<string, Traffic?>? traffic = null)
     {
         var channels = new List<ChannelView>();
-        var routedGame = run is { Ended: null } ? games.FirstOrDefault(g => g.Id == run.GameId) : null;
+        // The apps the route carries: only ever through a profile the person connected (D23), so on its channel's card.
+        var carried = run is { Ended: null } ? games.Where(g => g.Run is not null && run.Carries(g.Id)).ToList() : [];
         // What never changes is on the Profiles page; who routes through it is said by the apps the channel carries.
         string[] notHere = [L.T("Transport"), L.T("Imported"), L.T("SOCKS5 port"), L.T("Connection settings"), L.T("Used by")];
         foreach (var p in profiles)
@@ -80,9 +81,7 @@ internal static class WindowViews
             // The counts are the traffic's figures when there are any.
             string[] counted = flow is null ? [] : [L.T("Downloaded"), L.T("Uploaded")];
             var facts = p.Facts.Where(f => !notHere.Contains(f.Label) && !counted.Contains(f.Label)).ToList();
-            var selections = routedGame is { Run: { } routedRun } && run!.ProfileId == p.Id
-                ? new List<SelectionView> { Selection(routedGame, routedRun) }
-                : [];
+            var selections = run?.ProfileId == p.Id ? carried.Select(Selection).ToList() : [];
             var proxy = p.Phase is ProfilePhase.Refused or ProfilePhase.Stopped ? null
                 : proxyProblems.GetValueOrDefault(p.Id) is { } problem ? L.T("SOCKS5 proxy not listening: {0}", problem)
                 : L.T("SOCKS5 proxy on {0}", p.EndpointText);
@@ -91,36 +90,6 @@ internal static class WindowViews
                 new ChannelActions(p.Actions.Disconnect,
                     p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? L.T("Check ping") : L.T("Check again"), busy: checking) : UiAction.Hidden),
                 p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null, flow));
-        }
-        // A run whose channel is not up yet (the service still preparing it) is shown on its own until it is.
-        if (routedGame is { Run: { } routed } game && run is not null && !channels.Any(c => c.ProfileId == run.ProfileId))
-        {
-            var name = stored.FirstOrDefault(s => s.Id == run.ProfileId)?.Name ?? L.T("its profile");
-            var tunnel = run.Tunnel;
-            var (tone, text, detail) = tunnel?.State switch
-            {
-                SessionState.Up => (Tone.Up, L.T("Connected"), (string?)null),
-                SessionState.Reconnecting => (Tone.Busy, L.T("Reconnecting…"), tunnel.LastError is { } why ? L.T("Last attempt: {0}", why) : null),
-                SessionState.Connecting => (Tone.Busy, tunnel.Attempts > 1 ? L.T("Retrying connection…") : L.T("Connecting…"),
-                    tunnel.LastError is { } why2 ? L.T("Last attempt: {0}", why2) : null),
-                _ when run.Preparing => (Tone.Busy, L.T("Preparing…"), null),
-                _ => (Tone.Busy, L.T("Connecting…"), null),
-            };
-            var facts = new List<Fact>();
-            if (tunnel is { State: SessionState.Up })
-            {
-                if (tunnel.Remote is { } remote) facts.Add(new(L.T("Connected over"), remote));
-                if (tunnel.Address is { } address) facts.Add(new(L.T("Tunnel address"), address));
-            }
-            if (tunnel is not null)
-            {
-                facts.Add(new(L.T("Downloaded"), ClientView.Bytes(tunnel.BytesIn)));
-                facts.Add(new(L.T("Uploaded"), ClientView.Bytes(tunnel.BytesOut)));
-                if (tunnel.Reconnects > 0) facts.Add(new(L.T("Reconnects"), tunnel.Reconnects.ToString("N0", English)));
-            }
-            channels.Add(new ChannelView($"route:{run.ProfileId}", run.ProfileId, name, tone, text, detail,
-                tunnel is { State: SessionState.Up } ? tunnel.Since : null, facts, null,
-                [Selection(game, routed)], new ChannelActions(UiAction.Hidden, UiAction.Hidden)));
         }
 
         // Trouble first, then work under way: one healthy channel must not hide another's failure.
@@ -131,7 +100,7 @@ internal static class WindowViews
         var connections = L.Count(channels.Count, "1 connection", "{0} connections");
         var status = channels.Count == 0 ? L.T("Nothing is connected")
             : routedApps > 0 ? L.T("{0} · {1} using the VPN", connections, L.Count(routedApps, "1 app", "{0} apps")) : connections;
-        return new NetworkView(status, worst, channels.Count == 0 ? new(L.T("Nothing is connected"), L.T("Turn on an app's VPN, or connect a profile, to begin.")) : null,
+        return new NetworkView(status, worst, channels.Count == 0 ? new(L.T("Nothing is connected"), L.T("Connect a profile to begin: the apps whose Use VPN is on go through it.")) : null,
             channels, routing);
     }
 
@@ -172,10 +141,10 @@ internal static class WindowViews
     }
 
     // The tunnel's own facts are the channel's, said once above the apps it carries.
-    private static SelectionView Selection(AppItemView game, RunView run)
+    private static SelectionView Selection(AppItemView game)
     {
         string[] channels = [L.T("Connected over"), L.T("Tunnel address"), L.T("Reconnects")];
-        return new(game.Id, game.Name, run with { Facts = [.. run.Facts.Where(f => !channels.Contains(f.Label))] }, game.Actions.Stop);
+        return new(game.Id, game.Name, game.Run! with { Facts = [.. game.Run!.Facts.Where(f => !channels.Contains(f.Label))] }, game.Actions.Vpn, game.IconUrl);
     }
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
@@ -191,7 +160,7 @@ internal static class WindowViews
         ];
         return new SettingsView(routing,
             new StartupView(startsWithWindows, L.T("Start Sallyport with Windows"),
-                L.T("Opens Sallyport beside the clock when you sign in. Your apps use the VPN only when you turn it on."),
+                L.T("Opens Sallyport beside the clock when you sign in. Your apps use the VPN only once you connect."),
                 UiAction.Shown(startsWithWindows ? L.T("Turn off") : L.T("Turn on"))),
             guide, about,
             new DefaultsView(

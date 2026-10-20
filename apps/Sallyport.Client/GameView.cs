@@ -43,7 +43,7 @@ internal static class GameViews
     [
         new(LossMode.Hold, L.T("Block its internet until the VPN is back"), L.T("Nothing of the app goes out without the VPN. Your game may lag or disconnect while it reconnects.")),
         new(LossMode.Direct, L.T("Use my own connection meanwhile"), L.T("The app keeps going over your own connection while the VPN reconnects, then goes back through the VPN.")),
-        new(LossMode.Stop, L.T("Turn the VPN off for it"), L.T("The app carries on over your own connection until you turn its VPN on again.")),
+        new(LossMode.Stop, L.T("Turn the VPN off for it"), L.T("Its Use VPN switch turns off, and the app carries on over your own connection until you turn it on again.")),
     ];
 
     /// <summary>What a loss policy does, as the end of a sentence: "your own connection until it is back".</summary>
@@ -57,11 +57,15 @@ internal static class GameViews
 
     public static string LossText(GameChoice choice) => L.T("If the VPN drops: {0}", LossShort(choice));
 
-    public static RunView Run(GameProfile game, StoredProfile? profile, RunFacts run)
+    /// <summary>One app's part of the route: its own words for a loss (its policy, not the route's), its own programs'
+    /// counts, and the route's own figures only when it carries this app alone.</summary>
+    public static RunView Run(RoutedItem app, StoredProfile? profile, RunFacts run)
     {
         var name = profile?.Name ?? L.T("its profile");
         var route = run.Route;
         var tunnel = run.Tunnel;
+        var held = run.PhaseSince is { } lostAt && app.Loss == LossMode.Hold
+            && (app.DirectAfterSeconds is not { } after || lostAt + TimeSpan.FromSeconds(after) > DateTimeOffset.Now);
         var (phase, tone, text, detail) = run switch
         {
             { Ended: GameRunner.StoppedByPerson } => (RunPhase.Ended, Tone.Off, L.T("VPN off"), (string?)null),
@@ -70,9 +74,9 @@ internal static class GameViews
             _ => route?.Phase switch
             {
                 RoutePhase.Routing => (RunPhase.Routing, Tone.Up, L.T("VPN on · {0}", name), L.T("Every connection of the app's programs goes through the VPN.")),
-                RoutePhase.Held => (RunPhase.Held, Tone.Busy, L.T("Reconnecting — its internet is blocked meanwhile"),
-                    Join(Attempts(tunnel), DirectAfter(run))),
-                RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, L.T("Reconnecting — on your own connection meanwhile"),
+                RoutePhase.Held when held => (RunPhase.Held, Tone.Busy, L.T("Reconnecting — its internet is blocked meanwhile"),
+                    Join(Attempts(tunnel), DirectAfter(app, run))),
+                RoutePhase.Held or RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, L.T("Reconnecting — on your own connection meanwhile"),
                     Join(Attempts(tunnel), L.T("It goes back through the VPN once it is up."))),
                 _ => (RunPhase.Connecting, Tone.Busy, L.T("Connecting {0}…", name), L.T("Its internet is blocked until the VPN is up.")),
             },
@@ -81,12 +85,18 @@ internal static class GameViews
         var facts = new List<Fact>();
         if (route is { } s)
         {
-            facts.Add(new(L.T("Its processes"), s.Selected.ToString("N0", English)));
-            facts.Add(new(L.T("Connections through the VPN"), s.RoutedFlows.ToString("N0", English)));
-            facts.Add(new(L.T("Packets out / in"), $"{s.Routed:N0} / {s.HandedUp:N0}"));
-            if (s.HeldWhileDown > 0) facts.Add(new(L.T("Blocked while reconnecting"), s.HeldWhileDown.ToString("N0", English)));
-            if (s.DirectWhileDown > 0) facts.Add(new(L.T("Sent directly while reconnecting"), s.DirectWhileDown.ToString("N0", English)));
-            if (s.Blocked > 0) facts.Add(new(L.T("Blocked (IPv6, local network)"), s.Blocked.ToString("N0", English)));
+            var mine = (s.Programs ?? []).Where(p => app.PacketPrograms.Any(a => string.Equals(a.Path, p.Path, StringComparison.OrdinalIgnoreCase))).ToList();
+            var alone = run.Apps.Count == 1;
+            facts.Add(new(L.T("Its processes"), (alone ? s.Selected : mine.Sum(p => p.Processes)).ToString("N0", English)));
+            facts.Add(new(L.T("Connections through the VPN"), (alone ? s.RoutedFlows : mine.Sum(p => p.Flows)).ToString("N0", English)));
+            if (alone)
+            {
+                facts.Add(new(L.T("Packets out / in"), $"{s.Routed:N0} / {s.HandedUp:N0}"));
+                if (s.HeldWhileDown > 0) facts.Add(new(L.T("Blocked while reconnecting"), s.HeldWhileDown.ToString("N0", English)));
+                if (s.DirectWhileDown > 0) facts.Add(new(L.T("Sent directly while reconnecting"), s.DirectWhileDown.ToString("N0", English)));
+                if (s.Blocked > 0) facts.Add(new(L.T("Blocked (IPv6, local network)"), s.Blocked.ToString("N0", English)));
+            }
+            else facts.Add(new(L.T("Packets sent through the VPN"), mine.Sum(p => p.Packets).ToString("N0", English)));
         }
         if (tunnel is { State: SessionState.Up })
         {
@@ -94,14 +104,19 @@ internal static class GameViews
             if (tunnel.Address is { } address) facts.Add(new(L.T("Tunnel address"), address));
             if (tunnel.Reconnects > 0) facts.Add(new(L.T("Reconnects"), tunnel.Reconnects.ToString("N0", English)));
         }
-        return new RunView(phase, tone, text, detail, phase == RunPhase.Routing ? run.PhaseSince : null, facts, Coverage(route));
+        // Since it joined, or since the route came back, whichever is later.
+        var since = phase != RunPhase.Routing ? null : run.Apps.GetValueOrDefault(app.Id) is var joined && joined > run.PhaseSince ? joined : run.PhaseSince;
+        return new RunView(phase, tone, text, detail, since, facts, Coverage(route, run.Apps.Count));
     }
 
     /// <summary>Whether everything of the app went through the VPN: holds, failed (with how many), or could not be
     /// checked (and why) — never collapsed (rule 6).</summary>
-    public static CheckView Coverage(RouteState? route) => route switch
+    public static CheckView Coverage(RouteState? route, int apps = 1) => route switch
     {
         null => new(CheckResult.Unavailable, L.T("Not checked yet.")),
+        // The router counts what left late for the route, not by app: with several apps it cannot say whose it was.
+        { LateFlows: > 0 and var late } when apps > 1 => new(CheckResult.Failed,
+            L.Count((int)late, "1 connection of the apps through this VPN left before it was routed.", "{0} connections of the apps through this VPN left before they were routed.")),
         { LateFlows: > 0 and var late } => new(CheckResult.Failed,
             L.Count((int)late, "1 connection of the app left before it was routed.", "{0} connections of the app left before it was routed.")),
         { Selected: 0 } => new(CheckResult.Unavailable, L.T("No program of the app has run yet, so nothing could be checked.")),
@@ -197,9 +212,9 @@ internal static class GameViews
     private static string? Attempts(SessionStatus? tunnel) => tunnel is null ? null
         : tunnel.LastError is { } why ? L.T("Last attempt: {0}", why) : null;
 
-    private static string? DirectAfter(RunFacts run) =>
-        run.Loss.DirectAfter is { } after && run.PhaseSince is { } since
-            ? L.T("Your own connection in {0} s if it is not back.", Math.Max(0, (int)Math.Ceiling((since + after - DateTimeOffset.Now).TotalSeconds)))
+    private static string? DirectAfter(RoutedItem app, RunFacts run) =>
+        app.DirectAfterSeconds is { } after && run.PhaseSince is { } since
+            ? L.T("Your own connection in {0} s if it is not back.", Math.Max(0, (int)Math.Ceiling((since + TimeSpan.FromSeconds(after) - DateTimeOffset.Now).TotalSeconds)))
             : null;
 
     private static string? Join(string? first, string? second) => first is null ? second : L.Join(first, second);

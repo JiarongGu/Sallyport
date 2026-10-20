@@ -15,7 +15,8 @@ namespace Sallyport.Windows.Service;
 /// </summary>
 public static class RouterProtocol
 {
-    public const int Version = 1;
+    // 2: a run's programs each with their own loss policy, and changed while it runs (D23).
+    public const int Version = 2;
     public const string ServiceName = "Sallyport";
     public const string ControlPipe = "Sallyport.Router.v1";
     public static string RunPipe(string runId) => $"Sallyport.Router.v1.run.{runId}";
@@ -31,6 +32,12 @@ public static class RouterProtocol
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
+
+    /// <summary>What of <paramref name="programs"/> may be routed: a full path, and none of Sallyport's own — the client's
+    /// tunnel must stay direct, and the service with it.</summary>
+    public static ProgramRule[] Routable(IEnumerable<ProgramRule> programs, string serviceFolder) =>
+        [.. programs.Where(p => Path.IsPathFullyQualified(p.Path) && !string.Equals(Path.GetDirectoryName(p.Path),
+            Path.TrimEndingDirectorySeparator(serviceFolder), StringComparison.OrdinalIgnoreCase))];
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
@@ -47,6 +54,7 @@ public static class RouterProtocol
 [JsonDerivedType(typeof(CommitGeneration), "commitGeneration")]
 [JsonDerivedType(typeof(RetireGeneration), "retireGeneration")]
 [JsonDerivedType(typeof(RouteState), "routeState")]
+[JsonDerivedType(typeof(SelectPrograms), "selectPrograms")]
 public abstract record RouterMessage;
 
 /// <summary>Client → supervisor, first.</summary>
@@ -58,8 +66,8 @@ public sealed record Welcome(int Version, string Build, bool DriverReady, string
 /// <summary>Either side: the request (or the client) is refused, and why — a sentence to show, never a secret.</summary>
 public sealed record Rejected(string Reason) : RouterMessage;
 
-/// <summary>Client → supervisor: route these programs (their full executable paths), with this loss policy.</summary>
-public sealed record PrepareRun(string[] Executables, LossMode Loss, int? DirectAfterSeconds) : RouterMessage;
+/// <summary>Client → supervisor: route these programs (their full executable paths), each with its loss policy.</summary>
+public sealed record PrepareRun(ProgramRule[] Programs) : RouterMessage;
 
 /// <summary>Supervisor → client: the run's worker is ready behind its own pipe.</summary>
 public sealed record RunPrepared(string RunId, string Pipe) : RouterMessage;
@@ -85,6 +93,10 @@ public sealed record CommitGeneration(int Generation, string Address, int Mtu) :
 
 /// <summary>Client → worker: a generation's tunnel has gone.</summary>
 public sealed record RetireGeneration(int Generation) : RouterMessage;
+
+/// <summary>Client → worker: route these programs from now on instead — an app turned on or off while its VPN is
+/// connected. Never empty: a run with nothing to route is stopped instead.</summary>
+public sealed record SelectPrograms(ProgramRule[] Programs) : RouterMessage;
 
 /// <summary>Worker → client, every second: where the route stands, and its counts so far.</summary>
 public sealed record RouteState(RoutePhase Phase, int Generation, long Routed, long HandedUp, long Direct, long Unowned, long HeldWhileDown,

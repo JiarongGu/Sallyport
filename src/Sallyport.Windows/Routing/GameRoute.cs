@@ -24,19 +24,35 @@ public enum RoutePhase { Armed, Routing, Held, Direct, Stopped }
 public sealed class GameRoute : IDisposable
 {
     private readonly LossPolicy _loss;
+    private readonly Func<int, LossPolicy?>? _lossOf;
     private readonly Action<int, byte[]> _toTunnel;
     private readonly Lock _lock = new();
     private Timer? _countdown;
     private volatile int _generation;
+    private long _downAt;
 
     /// <param name="toTunnel">Where a routed packet goes: the generation it was routed for, and the packet.</param>
+    /// <param name="lossOf">Each selected process's own loss policy, when its program's differs from the route's
+    /// (several apps through one route, D23): while the tunnel is lost the route holds, and a process whose policy says
+    /// so goes direct — at once, or once its program's wait is over. Under it the route never stops on a loss.</param>
     public GameRoute(PacketDriver driver, DriverAdapter adapter, Func<int, bool> selects, LossPolicy loss, Action<int, byte[]> toTunnel,
-        IEnumerable<(uint Network, uint Mask)>? onLink = null, Func<DriverPacket, bool>? discard = null, bool receivePath = false)
+        IEnumerable<(uint Network, uint Mask)>? onLink = null, Func<DriverPacket, bool>? discard = null, bool receivePath = false,
+        Func<int, LossPolicy?>? lossOf = null)
     {
         _loss = loss;
+        _lossOf = lossOf;
         _toTunnel = toTunnel;
         Router = new Router(driver, adapter.Handle, selects, packet => _toTunnel(_generation, packet), onLink, discard, receivePath);
+        if (lossOf is not null) Router.DirectWhileHeld = DirectWhileHeld;
     }
+
+    // Only after a loss: before the first tunnel everything selected is held, whatever its policy says of a tunnel lost.
+    private bool DirectWhileHeld(int pid) => Volatile.Read(ref _downAt) != 0 && _lossOf!(pid) switch
+    {
+        { Mode: LossMode.Direct or LossMode.Stop } => true,
+        { DirectAfter: { } after } => Environment.TickCount64 - Volatile.Read(ref _downAt) >= after.TotalMilliseconds,
+        _ => false,
+    };
 
     public Router Router { get; }
     public RoutePhase Phase { get; private set; } = RoutePhase.Armed;
@@ -64,6 +80,7 @@ public sealed class GameRoute : IDisposable
             _generation = generation;
             Router.Commit(new Nat(tunnelAddress, mss, mtu));
             DownSince = null;
+            Volatile.Write(ref _downAt, 0);
             Enter(RoutePhase.Routing);
         }
     }
@@ -77,6 +94,13 @@ public sealed class GameRoute : IDisposable
             if (generation != _generation || Phase == RoutePhase.Stopped) return;
             _generation = 0;
             DownSince = DateTimeOffset.UtcNow;
+            Volatile.Write(ref _downAt, Environment.TickCount64);
+            if (_lossOf is not null)
+            {
+                Router.Retire(direct: false);
+                Enter(RoutePhase.Held);
+                return;
+            }
             switch (_loss.Mode)
             {
                 case LossMode.Stop:

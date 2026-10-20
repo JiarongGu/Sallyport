@@ -16,6 +16,35 @@ public sealed class SelectionTests
     }
 
     [Fact]
+    public void A_selection_replaced_looks_at_every_process_afresh_and_knows_each_ones_rule()
+    {
+        var selection = new ProgramSelection([new ProgramRule(Environment.ProcessPath!, LossMode.Direct)]);
+        Assert.True(selection.Selects(Environment.ProcessId));
+        Assert.Equal(LossMode.Direct, selection.RuleOf(Environment.ProcessId)!.Loss);
+
+        // An app turned off: this process is no longer selected, at once, though it was known as selected.
+        selection.Replace([new ProgramRule(Path.Combine(Path.GetTempPath(), "not-a-game.exe"))]);
+        Assert.False(selection.Selects(Environment.ProcessId));
+        Assert.Null(selection.RuleOf(Environment.ProcessId));
+        Assert.Empty(selection.Selected);
+
+        // On again, with another policy: its rule follows.
+        selection.Replace([new ProgramRule(Environment.ProcessPath!, LossMode.Hold, 30)]);
+        Assert.True(selection.Selects(Environment.ProcessId));
+        Assert.Equal(new ProgramRule(Path.GetFullPath(Environment.ProcessPath!), LossMode.Hold, 30), selection.RuleOf(Environment.ProcessId));
+    }
+
+    [Fact]
+    public void Of_two_rules_for_one_program_the_first_stands()
+    {
+        var selection = new ProgramSelection([new ProgramRule(Environment.ProcessPath!, LossMode.Hold), new ProgramRule(Environment.ProcessPath!.ToUpperInvariant(), LossMode.Direct)]);
+
+        Assert.True(selection.Selects(Environment.ProcessId));
+        Assert.Equal(LossMode.Hold, selection.RuleOf(Environment.ProcessId)!.Loss);
+        Assert.Single(selection.Executables);
+    }
+
+    [Fact]
     public void A_process_running_another_executable_is_not()
     {
         var selection = new ProgramSelection([Path.Combine(Path.GetTempPath(), "not-a-game.exe")]);

@@ -66,6 +66,7 @@ internal sealed class ClientCore
     // The app whose page is open, whose programs are looked at while it is (ProgramWatch).
     private volatile string? _watchedApp;
     private readonly ProgramWatch _programs;
+    private readonly AppIcons _icons = new();
 
     private sealed record OpenEditor(string Token, string Kind, string SubjectId, object Values, IReadOnlyDictionary<string, string> Errors);
 
@@ -91,7 +92,12 @@ internal sealed class ClientCore
         _dialogs = dialogs;
         _driverSetup = new PacketFilterSetup(paths.DataArea("drivers"));
         _connections.Changed += Publish;
+        // What is routed follows what the person connected and which apps are on (D23): looked at again whenever either
+        // changes.
+        _connections.Changed += Replan;
         _runner.Changed += Publish;
+        _runner.Lost += TurnOffOnLoss;
+        _runner.Failed += SayFailed;
         _programs = new ProgramWatch(() => _watchedApp is { } watched && _items.Find(watched) is { } item ? [.. item.Programs.Select(p => p.Path)] : [], Publish);
         // Said once, where the person will see it: the window shows warnings until they are dismissed.
         if (items.Unreadable is { } why)
@@ -233,16 +239,23 @@ internal sealed class ClientCore
         if (profile.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}.", profile.Name, why));
         _locationFailed.TryRemove(id, out _);
         _connections.Connect(id);
+        // Connecting is asking again: apps whose route ended on its own for this profile are tried once more.
+        _runner.Retry();
+        Replan();
     }
 
-    /// <summary>Takes the profile's channel down — its proxy, and what is routed through it, asked about first.</summary>
+    /// <summary>Takes the profile's channel down — its proxy, and the apps going through it, asked about first. Their
+    /// switches stay on: they go through it again at the next connect.</summary>
     public async Task DisconnectAsync(string id)
     {
         if (!_connections.IsRunning(id)) return;
-        if (_runner.ProfileInUse == id && _runner.Facts() is { Ended: null } run && _items.Find(run.GameId) is { } routed)
+        if (_runner.Facts() is { Ended: null } run && run.ProfileId == id
+            && run.Apps.Keys.Select(a => _items.Find(a)?.Name).OfType<string>().ToList() is { Count: > 0 } names)
         {
             Confirm("disconnect", id, L.T("Disconnect {0}?", Profile(id).Name),
-                L.T("{0} uses it. Its VPN turns off too, and it carries on over your own connection.", routed.Name), L.T("Disconnect"), L.T("Keep connected"));
+                names.Count == 1 ? L.T("{0} goes through it, and carries on over your own connection until you connect again.", names[0])
+                    : L.T("{0} go through it, and carry on over your own connection until you connect again.", L.List(names)),
+                L.T("Disconnect"), L.T("Keep connected"));
             return;
         }
         await TakeDownAsync(id);
@@ -298,7 +311,6 @@ internal sealed class ClientCore
     {
         var profile = Profile(id);
         if (_connections.IsRunning(id)) throw new ShenoraException("CONNECTED", "id", id, L.T("Disconnect {0} before removing it.", profile.Name));
-        if (_runner.ProfileInUse == id) throw new ShenoraException("PROFILE_IN_USE", "id", id, L.T("Turn off the VPN of the app that uses it first."));
         var inUse = _items.List().Count(i => i.ProfileId == id || i.Programs.Any(p => p.ProfileId == id));
         var text = L.Join(L.T("Deletes Sallyport's encrypted copy. The original file stays unchanged."),
             inUse == 0 ? null : L.Count(inUse, "1 app will need another profile.", "{0} apps will need another profile."));
@@ -370,13 +382,14 @@ internal sealed class ClientCore
         var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folder));
         if (name.Length == 0) name = "app";
         if (name.Length > LongestName) name = name[..LongestName];
-        try { item = WithDefaults(_items.CreateFromFolder(name, folder, DefaultProfile()?.Id)); }
+        try { item = WithDefaults(_items.CreateFromFolder(name, folder, DefaultProfile()?.Id) is var made && made.Programs.Count > 0 ? made with { UseVpn = true } : made, force: true); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         { throw new ShenoraException("APP_FOLDER", "folder", name, L.T("{0} could not be read: {1}.", name, e.GetType().Name)); }
         var included = item.Programs.Count(p => p.Included);
         Notify(NoticeKind.Info, item.Programs.Count == 0
             ? L.T("Added {0}, but its folder holds no program. Scan it again once it is installed.", item.Name)
             : L.T("Added {0}: {1} of its {2} programs will send all their traffic through the VPN.", item.Name, included, item.Programs.Count), new("app", item.Id));
+        Replan();
     }
 
     /// <summary>Asks for the app's program and makes an app of it — one way in for a game and a program alike: a browser
@@ -494,7 +507,8 @@ internal sealed class ClientCore
                     // The person's choice of programs over the scan's, each marked as theirs where it differs.
                     foreach (var program in made.Programs.Where(p => p.Included != included.Contains(p.Path)).ToList())
                         if (preview.Kind == SetupKind.Folder) made = _items.Choose(made.Id, program.Path, included.Contains(program.Path));
-                    made = made with { Loss = values.Loss, DirectAfterSeconds = directAfter };
+                    // Added to use the VPN: its switch on, so it goes through its profile whenever that is connected.
+                    made = made with { Loss = values.Loss, DirectAfterSeconds = directAfter, UseVpn = made.PacketPrograms.Count > 0 };
                     _items.Put(made);
                     _editor = null;
                     _setup = null;
@@ -507,7 +521,12 @@ internal sealed class ClientCore
         }
         if (made is not null)
         {
-            Notify(NoticeKind.Info, L.T("Added {0}. Turn it on to send its traffic through your VPN.", made.Name), new("app", made.Id));
+            var through = _store.Find(made.ProfileId ?? "")?.Name;
+            Notify(NoticeKind.Info, made.UseVpn && through is not null
+                ? L.T("Added {0}. Use VPN is on: it goes through {1} whenever {1} is connected.", made.Name, through)
+                : made.PacketPrograms.Count == 0 ? L.T("Added {0}. Launch it from here to start it through your VPN.", made.Name)
+                : L.T("Added {0}.", made.Name), new("app", made.Id));
+            Replan();
             Navigate(Page.Apps, made.Id);
         }
         else Publish();
@@ -538,11 +557,11 @@ internal sealed class ClientCore
     public async Task AddProgramToAppAsync(string id)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing its programs."));
         var path = await PickProgramAsync("add-program", L.T("Choose another program for {0}", item.Name));
         if (path is null) return;
         try { _items.AddProgram(id, path); }
         catch (ArgumentException) { throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That is not a program.")); }
+        Replan();
         Notify(NoticeKind.Info, L.T("Added {0} to {1}.", Path.GetFileName(path), item.Name), new("app", id));
     }
 
@@ -551,10 +570,10 @@ internal sealed class ClientCore
         _settings.Defaults.ProfileId is { } chosen && _store.Find(chosen) is { Unsupported: null } profile ? profile
         : _store.List().FirstOrDefault(p => p.Unsupported is null);
 
-    private RoutedItem WithDefaults(RoutedItem item)
+    private RoutedItem WithDefaults(RoutedItem item, bool force = false)
     {
         var defaults = _settings.Defaults;
-        if (defaults.Loss == item.Loss && defaults.DirectAfterSeconds == item.DirectAfterSeconds) return item;
+        if (!force && defaults.Loss == item.Loss && defaults.DirectAfterSeconds == item.DirectAfterSeconds) return item;
         var updated = item with { Loss = defaults.Loss, DirectAfterSeconds = defaults.DirectAfterSeconds };
         _items.Put(updated);
         return updated;
@@ -609,10 +628,10 @@ internal sealed class ClientCore
     public void RescanApp(string id)
     {
         var before = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before scanning again."));
         RoutedItem after;
         try { after = _items.Rescan(id); }
         catch (DirectoryNotFoundException) { throw new ShenoraException("APP_FOLDER", "id", id, L.T("{0}'s folder is not there any more.", before.Name)); }
+        Replan();
         var added = after.Programs.Count(e => !before.Programs.Any(b => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
         var gone = before.Programs.Count(b => !after.Programs.Any(e => string.Equals(b.Path, e.Path, StringComparison.OrdinalIgnoreCase)));
         Notify(NoticeKind.Info, added + gone == 0 ? L.T("{0}'s folder holds the same programs.", after.Name) :
@@ -623,17 +642,82 @@ internal sealed class ClientCore
     public void SetAppProgram(string id, string programId, bool included)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing its programs."));
         var program = item.Programs.FirstOrDefault(p => p.Id == programId)
             ?? throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That program is not one of this app's."));
         _items.Choose(id, program.Path, included);
+        // While it goes through the VPN, the change does at once: the route's programs are changed, not restarted.
+        Replan();
         Publish();
+    }
+
+    /// <summary>Its switch, Use VPN: a choice kept whether or not its profile is connected (D23). On, it goes through the
+    /// VPN whenever its profile is connected — at once if it is; off, it keeps the person's own connection.</summary>
+    public void SetAppVpn(string id, bool on)
+    {
+        var item = Item(id);
+        if (on)
+        {
+            if (!item.RoutesPackets) throw new ShenoraException("APP_PROXY_ONLY", "id", id, L.T("{0} uses the VPN when it is launched from here: use Launch.", item.Name));
+            if (item.ProfileId is null || _store.Find(item.ProfileId) is not { } stored)
+                throw new ShenoraException("APP_NO_PROFILE", "id", id, L.T("Choose a VPN profile for {0} first (Edit).", item.Name));
+            if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}.", stored.Name, why));
+            if (item.PacketPrograms.Count == 0) throw new ShenoraException("APP_EMPTY", "id", id, L.T("Include at least one of {0}'s programs sending all its traffic.", item.Name));
+        }
+        if (item.UseVpn != on) _items.Put(item with { UseVpn = on });
+        // Turning one on is asking again, as a connect is: a route that ended on its own is tried once more.
+        if (on) _runner.Retry();
+        Replan();
+        Publish();
+    }
+
+    /// <summary>The app's icon from another of its programs.</summary>
+    public void SetAppIcon(string id, string programId)
+    {
+        var item = Item(id);
+        if (!item.Programs.Any(p => p.Id == programId)) throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That program is not one of this app's."));
+        _items.Put(item with { IconProgramId = programId });
+        Publish();
+    }
+
+    // The route follows the plan: the apps on whose profile the person connected.
+    private void Replan() => _runner.Want(Plan());
+
+    private RoutePlan? Plan()
+    {
+        var on = _items.List()
+            .Where(i => i.UseVpn && i.Rules.Count > 0 && i.ProfileId is { } p && _connections.IsWanted(p) && _store.Find(p) is { Unsupported: null })
+            .ToList();
+        if (on.Count == 0) return null;
+        // One route on the machine (the service runs one): the profile carrying apps keeps them while it is connected;
+        // otherwise the first app's.
+        var profile = _runner.ProfileInUse is { } current && on.Any(i => i.ProfileId == current) ? current : on[0].ProfileId!;
+        return new RoutePlan(profile, [.. on.Where(i => i.ProfileId == profile).Select(i => new PlannedApp(i.Id, i.Rules))]);
+    }
+
+    // "Turn the VPN off for it": the connection lost, such an app's switch goes off, and it keeps the person's own
+    // connection until they turn it on again (the router lets it go direct meanwhile).
+    private void TurnOffOnLoss(IReadOnlyCollection<string> carried)
+    {
+        foreach (var item in carried.Select(_items.Find).OfType<RoutedItem>().Where(i => i.UseVpn && i.Loss == LossMode.Stop))
+        {
+            _items.Put(item with { UseVpn = false });
+            Notify(NoticeKind.Warning, L.T("The connection was lost, so {0}'s Use VPN was turned off, as its setup says. It uses your own connection now.", item.Name),
+                new("app", item.Id));
+        }
+        Replan();
+    }
+
+    // A route that ended on its own while its profile is still connected: said once. One the person ended by disconnecting
+    // is not trouble, and a profile that gave up says so itself.
+    private void SayFailed(string profileId, string why)
+    {
+        if (!_connections.IsWanted(profileId)) return;
+        Notify(NoticeKind.Warning, L.T("Apps could not go through {0}: {1}", _store.Find(profileId)?.Name ?? L.T("its profile"), why), new("profile", profileId));
     }
 
     public void BeginAppEdit(string id)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing it."));
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, L.T("Wait for the launch to finish."));
         lock (_gate)
             _editor = new OpenEditor(NewToken(), "app", id, new AppEditValues(item.Name, _store.Find(item.ProfileId ?? "") is null ? null : item.ProfileId,
@@ -659,8 +743,6 @@ internal sealed class ClientCore
         }
         if (values.LaunchProgramId is { } launch && !item.Programs.Any(p => p.Id == launch && p.Included))
             errors["launchProgramId"] = L.T("Choose one of its included programs.");
-        if (IsLive(item.Id)) errors["form"] = L.T("Turn its VPN off before changing it.");
-
         lock (_gate)
         {
             if (_editor?.Token != token) return;
@@ -671,13 +753,14 @@ internal sealed class ClientCore
                 _editor = null;
             }
         }
+        // Another profile or loss policy takes effect at once, as any change of what goes through the VPN does.
+        Replan();
         Publish();
     }
 
     public void BeginProgramEdit(string id, string programId)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before changing its methods."));
         var program = item.Programs.FirstOrDefault(p => p.Id == programId)
             ?? throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That program is not one of this app's."));
         lock (_gate)
@@ -696,7 +779,6 @@ internal sealed class ClientCore
         if (!values.Packets && !values.Proxy) errors["form"] = L.T("Choose at least one way for its traffic to reach the VPN, or leave the program out instead.");
         if (values.Proxy && !Enum.IsDefined(values.Kind)) errors["kind"] = L.T("Choose how the program is told about the proxy.");
         if (arguments.Length > LongestArguments) errors["arguments"] = L.T("Use at most {0:N0} characters.", LongestArguments);
-        if (IsLive(id)) errors["form"] = L.T("Turn its VPN off before changing its methods.");
 
         lock (_gate)
         {
@@ -717,6 +799,7 @@ internal sealed class ClientCore
                 _editor = null;
             }
         }
+        Replan();
         Publish();
     }
 
@@ -733,7 +816,6 @@ internal sealed class ClientCore
     public void RequestRemoveApp(string id)
     {
         var item = Item(id);
-        if (IsLive(id)) throw new ShenoraException("APP_ROUTING", "id", id, L.T("Turn its VPN off before removing it."));
         if (_launching.ContainsKey(id)) throw new ShenoraException("LAUNCHING", "id", id, L.T("Wait for the launch to finish."));
         Confirm("remove-app", id, L.T("Remove {0}?", item.Name), L.T("Removes it from Sallyport. Its programs and files are not touched; a running copy keeps running."),
             L.T("Remove app"), L.T("Keep app"));
@@ -747,33 +829,12 @@ internal sealed class ClientCore
         {
             if (_editor?.SubjectId.StartsWith(id, StringComparison.Ordinal) == true) _editor = null;
         }
+        Replan();
         Notify(NoticeKind.Info, L.T("Removed {0} from Sallyport. Its programs are unchanged.", name));
     }
 
-    /// <summary>Starts routing an app's programs through its VPN profile's channel. Routed before they start, every
-    /// packet of them goes through it from the first; routed while they run, their connections move to the VPN and a game
-    /// may need to rejoin.</summary>
-    public void RouteApp(string id)
-    {
-        var item = Item(id);
-        var game = item.AsGame();
-        var choice = item.Choice;
-        if (choice.ProfileId is null || _store.Find(choice.ProfileId) is not { } stored)
-            throw new ShenoraException("APP_NO_PROFILE", "id", id, L.T("Choose a VPN profile for {0} first (Edit).", item.Name));
-        if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}.", stored.Name, why));
-        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "id", id, L.T("Another app is using the VPN. Turn its VPN off first."));
-        if (item.PacketPrograms.Count == 0) throw new ShenoraException("APP_EMPTY", "id", id, L.T("Include at least one of {0}'s programs sending all its traffic.", item.Name));
-
-        // Through the profile's channel: the same login as its proxy, if that is connected (docs/design/window.md).
-        _runner.Start(game, stored.Id, choice.Policy);
-        Notify(NoticeKind.Info, L.T("{0} now uses {1}. If it is running already, it may need to reconnect.", item.Name, stored.Name), new("app", id));
-    }
-
-    public Task StopRunAsync() => _runner.StopAsync();
-
-    /// <summary>Starts an app as its card says: its packet programs routed first (and ready before it starts, so its
-    /// first packet goes through the VPN), then the program Launch starts — with proxy settings, its profile connected,
-    /// if that is its method. A wait that ends without the route or the tunnel up never launches later.</summary>
+    /// <summary>Starts an app as its card says: the program Launch starts, with proxy settings, its profile connected
+    /// first — a launch is the person asking for the VPN. A wait that ends without the tunnel up never launches later.</summary>
     public async Task LaunchAsync(string id, string? programId, CancellationToken ct)
     {
         var item = Item(id);
@@ -788,11 +849,6 @@ internal sealed class ClientCore
         {
             try
             {
-                if (item.PacketPrograms.Count > 0)
-                {
-                    if (!IsLive(id)) RouteApp(id);
-                    await WaitRoutedAsync(id, TimeSpan.FromSeconds(45), ct);
-                }
                 if (target.Proxy is not null)
                 {
                     Connect(profileId);
@@ -825,24 +881,6 @@ internal sealed class ClientCore
             ? L.T("{0} started with proxy settings for {1}.", Path.GetFileName(target.Path), profile.Name)
             : L.T("{0} started; its traffic goes through {1}.", Path.GetFileName(target.Path), profile.Name), new("app", id));
     }
-
-    // Until the service routes the app's programs through a generation that is up: what a program then sends is the
-    // VPN's from its first packet.
-    private async Task WaitRoutedAsync(string id, TimeSpan within, CancellationToken ct)
-    {
-        var deadline = DateTime.UtcNow + within;
-        while (true)
-        {
-            var run = _runner.Facts();
-            if (run is null || run.GameId != id) throw new ShenoraException("NOT_ROUTED", "id", id, L.T("its VPN did not turn on"));
-            if (run.Ended is { } why) throw new ShenoraException("NOT_ROUTED", "id", id, L.T("its VPN turned off: {0}", why));
-            if (run.Route?.Phase == RoutePhase.Routing) return;
-            if (DateTime.UtcNow > deadline) throw new ShenoraException("ROUTE_TIMEOUT", "id", id, L.T("its VPN was not ready within {0:0} s", within.TotalSeconds));
-            await Task.Delay(200, ct);
-        }
-    }
-
-    private bool IsLive(string id) => _runner.Facts() is { Ended: null } run && run.GameId == id;
 
     // ---- a profile's connection settings
 
@@ -927,7 +965,7 @@ internal sealed class ClientCore
 
     public void RequestDriverRemove()
     {
-        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "driver", "", L.T("Turn its VPN off first."));
+        if (_runner.IsRunning) throw new ShenoraException("RUN_BUSY", "driver", "", L.T("Disconnect first: apps are going through the VPN."));
         Confirm("driver-remove", "", L.T("Remove the packet driver?"), GameViews.DriverRemoveText, L.T("Remove"), L.T("Keep it"));
     }
 
@@ -945,6 +983,8 @@ internal sealed class ClientCore
                 ? await _driverSetup.InstallAsync(InstallLayout.InstalledHere() is { } here ? InstallLayout.DriverFolder(here) : null)
                 : await _driverSetup.UninstallAsync();
             Notify(outcome.Succeeded ? NoticeKind.Info : NoticeKind.Error, outcome.Text);
+            // A driver just put in is what a route that failed for want of it was waiting for.
+            if (outcome.Succeeded && install) _runner.Retry();
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or InvalidDataException)
         {
@@ -984,8 +1024,11 @@ internal sealed class ClientCore
         var stored = _store.List();
         var items = _items.List();
         var run = _runner.Facts();
-        var routedThrough = run is { Ended: null } ? run.ProfileId : null;
-        var routedGame = routedThrough is null ? null : items.FirstOrDefault(g => g.Id == run!.GameId)?.Name ?? L.T("an app");
+        var live = run is { Ended: null } ? run : null;
+        var failure = _runner.Failure;
+        var carrying = live is null ? null : stored.FirstOrDefault(p => p.Id == live.ProfileId)?.Name;
+        var routedThrough = live?.ProfileId;
+        var routedGame = live is null ? null : L.List(live.Apps.Keys.Select(a => items.FirstOrDefault(g => g.Id == a)?.Name).OfType<string>());
         var profiles = stored.Select(p => ClientView.Profile(new ProfileFacts(
                 p, _connections.ProxyPortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
@@ -997,12 +1040,15 @@ internal sealed class ClientCore
         var apps = items.Select(i =>
             {
                 var profile = stored.FirstOrDefault(p => p.Id == i.ProfileId);
-                return AppViews.Item(new ItemFacts(i, profile, run, run is { Ended: null } && run.GameId != i.Id, driver.Phase == DriverPhase.Ready,
+                return AppViews.Item(new ItemFacts(i, profile, live, i.ProfileId is { } pid && _connections.IsWanted(pid), driver.Phase == DriverPhase.Ready,
                     dialog is not null, _launching.TryGetValue(i.Id, out var phase) ? phase : null,
                     p => profile is null || p.Proxy is not { } proxy ? []
                         : AppLauncher.Describe(new RoutedApp(i.Id, i.Name, p.Path, proxy.Kind, profile.Id, p.LaunchArguments), _connections.ProxyPortOf(profile.Id),
                             Path.Combine(_paths.DataDir, "apps", proxy.DataKey)),
-                    i.Id == _watchedApp ? _programs.Of : null));
+                    i.Id == _watchedApp ? _programs.Of : null,
+                    live is not null && live.ProfileId != i.ProfileId ? carrying : null,
+                    failure is { } failed && failed.ProfileId == i.ProfileId ? failed.Why : null,
+                    _icons.Of(AppViews.IconProgram(i)?.Path)));
             })
             .ToList();
 
@@ -1036,7 +1082,7 @@ internal sealed class ClientCore
             apps,
             ClientView.ProfilesEmpty(stored.Count),
             AppViews.Empty(stored.Count, apps.Count),
-            WindowViews.Network(profiles, apps, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id)),
+            WindowViews.Network(profiles, apps, live, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id)),
                 stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id)), stored.ToDictionary(p => p.Id, p => _connections.TrafficOf(p.Id))),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(), _settings.Defaults,
                 stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null, _settings.Language, _settings.Connection),

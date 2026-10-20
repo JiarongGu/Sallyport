@@ -76,7 +76,10 @@ switch (args.FirstOrDefault())
             Text("--child"), Text("--folder"), Text("--workload"),
             new LossPolicy(Text("--loss") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
                 Option("--direct-after", 0) is > 0 and var directAfter ? TimeSpan.FromSeconds(directAfter) : null),
-            Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0), Option("--proxy", 0));
+            Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0), Option("--proxy", 0),
+            Text("--child2"), new LossPolicy(Text("--loss2") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
+                Option("--direct-after2", 0) is > 0 and var directAfter2 ? TimeSpan.FromSeconds(directAfter2) : null),
+            Text("--start") ?? "12", Option("--select-after", 0), Text("--select") ?? "12");
     case "service-hello":
         return await ServiceHelloAsync();
     case "service-malformed":
@@ -1257,14 +1260,22 @@ static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGatewa
 // TunnelSession, as the client holds it; each generation committed over the run's pipe and the packets crossing it both
 // ways. The selected program is a copy of this executable kept outside Sallyport's folder (--child; the service
 // refuses to route Sallyport's own), or a game folder's programs (--folder). The profile is never printed (rule 2).
+// --child2: a second copy, its own loss policy (--loss2), both in one run (D23); --start 1 prepares the run with the first
+// alone, and --select-after S --select 1|2|12 gives the worker another selection S seconds after the children start —
+// an app turned on or off while its profile is connected.
 async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? childExe, string? folder, string? workload, LossPolicy loss,
-    int cutAfter, int cutFor, int pingRestart, int proxyPort)
+    int cutAfter, int cutFor, int pingRestart, int proxyPort, string? child2Exe = null, LossPolicy? loss2 = null, string start = "12",
+    int selectAfter = 0, string select = "12")
 {
     if (profilePath is null || (childExe is null && folder is null)) { Console.Error.WriteLine("usage: Sallyport.Driver service-route <profile.ovpn> --child <exe> | --folder <game folder>"); return 2; }
     OvpnProfile profile;
     try { profile = OvpnProfile.Parse(File.ReadAllText(profilePath)); }
     catch (Exception e) { Console.WriteLine($"could not read the profile ({e.GetType().Name})"); return 2; }
     var executables = folder is not null ? GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path).ToList() : [Path.GetFullPath(childExe!)];
+    static ProgramRule Rule(string path, LossPolicy policy) => new(path, policy.Mode, policy.DirectAfter is { } after ? (int)after.TotalSeconds : null);
+    var rules = executables.Select(e => Rule(e, loss)).ToList();
+    if (child2Exe is not null) rules.Add(Rule(Path.GetFullPath(child2Exe), loss2 ?? new LossPolicy()));
+    List<ProgramRule> Chosen(string which) => [.. rules.Where((_, i) => which.Contains((char)('1' + Math.Min(i, 1))))];
     var clock = Stopwatch.StartNew();
     string T() => $"{Now()} t={clock.Elapsed.TotalSeconds,5:F1}s";
 
@@ -1272,9 +1283,10 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     Console.WriteLine($"{T()}  service: version {client.Welcome.Version}, build {client.Welcome.Build}, driver {(client.Welcome.DriverReady ? "ready" : client.Welcome.DriverProblem)}");
     client.RunEnded += ended => Console.WriteLine($"{T()}  service: RUN ENDED — {ended.Reason}");
     var prepared = Stopwatch.StartNew();
-    await using var run = await client.PrepareAsync(executables, loss, AppContext.BaseDirectory);
+    await using var run = await client.PrepareAsync(child2Exe is null ? rules : Chosen(start), AppContext.BaseDirectory);
     Console.WriteLine($"{T()}  service: run {run.RunId[..8]} prepared and attached in {prepared.ElapsedMilliseconds} ms, on {run.Attached.Adapter} (MTU {run.Attached.AdapterMtu}),"
-        + $" {executables.Count} program(s), loss {loss.Mode}");
+        + (child2Exe is null ? $" {executables.Count} program(s), loss {loss.Mode}"
+            : $" child 1 {(start.Contains('1') ? $"selected, loss {loss.Mode}" : "not selected")}, child 2 {(start.Contains('2') ? $"selected, loss {(loss2 ?? new()).Mode}" : "not selected")}"));
     var lastPhase = (RoutePhase?)null;
     run.StateChanged += state =>
     {
@@ -1352,11 +1364,24 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             await ExerciseAsync();
             go = "go";
         }
-        using var process = Process.Start(new ProcessStartInfo(childExe, "routed-workload") { RedirectStandardInput = true, RedirectStandardOutput = true })!;
-        Console.WriteLine($"routed — child {process.Id} ({Path.GetFileName(Path.GetDirectoryName(childExe))}\\{Path.GetFileName(childExe)}), selected by its path:");
-        await process.StandardInput.WriteLineAsync(go);
-        while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine($"{T()} {line}");
-        await process.WaitForExitAsync();
+        // Each child's lines labelled when there are two, read as they come.
+        async Task ChildAsync(string exe, string label)
+        {
+            using var process = Process.Start(new ProcessStartInfo(exe, "routed-workload") { RedirectStandardInput = true, RedirectStandardOutput = true })!;
+            Console.WriteLine($"{label}child {process.Id} ({Path.GetFileName(Path.GetDirectoryName(exe))}\\{Path.GetFileName(exe)}), selected by its path:");
+            await process.StandardInput.WriteLineAsync(go);
+            while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine($"{T()} {label}{line}");
+            await process.WaitForExitAsync();
+        }
+        var selecting = selectAfter > 0 && child2Exe is not null ? Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(selectAfter));
+            await run.SelectAsync(Chosen(select));
+            Console.WriteLine($"{T()}  SELECT: child 1 {(select.Contains('1') ? "selected" : "let go")}, child 2 {(select.Contains('2') ? "selected" : "let go")}");
+        }) : Task.CompletedTask;
+        if (child2Exe is null) await ChildAsync(childExe, "");
+        else await Task.WhenAll(ChildAsync(childExe, "[1] "), ChildAsync(child2Exe, "[2] "));
+        await selecting;
         await proxying;
         await Task.Delay(500);
         if (lastDispatcher is { } d)

@@ -30,10 +30,13 @@ internal sealed record RoutedProgram(
 /// <summary>
 /// What the person routes, called an app in the window: a program, or a folder of them (a game). Its VPN profile and what
 /// its packets do while that profile's tunnel is lost apply to every program that does not say otherwise.
+/// <see cref="UseVpn"/>: its switch, the person's choice — it goes through the VPN whenever its profile is connected, and
+/// the switch stays as it is while the profile is not (D23). <see cref="IconProgramId"/>: the program whose icon is the
+/// app's, when the person chose one.
 /// </summary>
 internal sealed record RoutedItem(
     string Id, string Name, string? Folder, DateTimeOffset Created, string? ProfileId, LossMode Loss, int? DirectAfterSeconds,
-    IReadOnlyList<RoutedProgram> Programs, string? LaunchProgramId = null)
+    IReadOnlyList<RoutedProgram> Programs, string? LaunchProgramId = null, bool UseVpn = false, string? IconProgramId = null)
 {
     /// <summary>Its programs routed by their packets, as the router service names them: the included ones whose method it is.</summary>
     [JsonIgnore]
@@ -49,6 +52,11 @@ internal sealed record RoutedItem(
 
     [JsonIgnore]
     public GameChoice Choice => new(ProfileId, Loss, DirectAfterSeconds);
+
+    /// <summary>Its programs as the router service takes them: each sending all its traffic, with the app's loss policy.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<ProgramRule> Rules =>
+        [.. PacketPrograms.Select(p => new ProgramRule(p.Path, Loss, Loss == LossMode.Hold ? DirectAfterSeconds : null))];
 
     /// <summary>As the packet route and its views take a game: the programs of the packet method, each included or not.</summary>
     public GameProfile AsGame() =>

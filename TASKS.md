@@ -239,7 +239,8 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       the adapter `None -> None`; jp not connected, childbin run → jp brought up (its proxy listening too), childbin's
       traffic the VPN; Stop routing → jp down again.
    5. **Many channels in the service's one run:** selections on different profiles at once; one channel's outage;
-      the adapters back when the last ends.
+      the adapters back when the last ends. Several apps on one profile's route, each program with its own loss
+      policy and changed while it runs, is D23 (measured); several profiles at once is not yet.
    6. **The Apps editors — measured 2026-10-20** (`AppViews`): one card per app — a program or a folder — with Launch,
       Route / Stop, its profile, methods and loss policy; Add a program… (a browser launched with proxy settings, anything
       else all its traffic) and Add a folder…; each program's row with its methods, Methods… (all traffic, proxy settings
@@ -251,7 +252,7 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       its Launch with the tool's `mixed-to` as its arguments — the service committed generation 1 at 09:42:46.577, the
       program started at 09:42:47.569, and from its first 2 s every STUN and HTTPS request was answered and the far end
       saw the VPN; the run: 49 routed, 48 handed up, 0 late, 1 selected. The stand-in was removed after.
-      Not yet: conflicts between apps naming the same program (one run at a time, today).
+      Apps naming the same program: the strictest rule of the two (D23).
    7. **Network and Settings — measured 2026-10-20**, but for connection settings as own / override / effective (the
       editor still shows what is in force with the profile's own beneath it):
       - **The retry countdown:** `SessionStatus.NextAttemptAt` and `FailedRounds`, set only while the session waits for

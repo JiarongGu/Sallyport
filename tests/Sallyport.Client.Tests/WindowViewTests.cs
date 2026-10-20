@@ -22,16 +22,16 @@ public class WindowViewTests
             null, false, false, null, false, false));
 
     private static RoutedItem Zenless() => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", At, Us.Id, LossMode.Hold, null,
-        [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", true, null, false, true, null)]);
+        [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", true, null, false, true, null)], UseVpn: true);
 
     private static RunFacts Running(SessionState tunnel) =>
-        new(Zenless().Id, Us.Id, new LossPolicy(), At, false,
+        new(Us.Id, new Dictionary<string, DateTimeOffset> { [Zenless().Id] = At }, At, false,
             new SessionStatus(tunnel, At, "udp/1194", 1, 0, null, "10.8.0.6", 1024, 2048),
             new RouteState(tunnel == SessionState.Up ? RoutePhase.Routing : RoutePhase.Held, 1, 10, 12, 500, 2, 0, 0, 0, 0, 0, 3, 1, 0),
             At, null, null);
 
     private static IReadOnlyList<AppItemView> Games(RunFacts? run) =>
-        [AppViews.Item(new ItemFacts(Zenless(), Us, run, false, true, false, null, _ => []))];
+        [AppViews.Item(new ItemFacts(Zenless(), Us, run, run is not null, true, false, null, _ => []))];
 
     private static readonly IReadOnlyDictionary<string, string?> NoProblems = new Dictionary<string, string?>();
 
@@ -42,7 +42,7 @@ public class WindowViewTests
 
         Assert.Equal("Nothing is connected", view.StatusText);
         Assert.Equal(Tone.Off, view.Tone);
-        Assert.Equal(new NetworkEmpty("Nothing is connected", "Turn on an app's VPN, or connect a profile, to begin."), view.Empty);
+        Assert.Equal(new NetworkEmpty("Nothing is connected", "Connect a profile to begin: the apps whose Use VPN is on go through it."), view.Empty);
         Assert.Empty(view.Channels);
         Assert.Equal(Ready, view.Routing);
     }
@@ -100,22 +100,22 @@ public class WindowViewTests
     }
 
     [Fact]
-    public void A_routed_game_is_a_selection_on_its_profiles_channel()
+    public void An_app_going_through_the_vpn_is_a_selection_on_its_profiles_channel()
     {
         var run = Running(SessionState.Up);
-        var view = WindowViews.Network([Profile(Jp, null), Profile(Us, null)], Games(run), run, [Jp, Us], Ready, NoProblems);
+        var view = WindowViews.Network([Profile(Jp, null), Profile(Us, TunnelServiceStatus.Up)], Games(run), run, [Jp, Us], Ready, NoProblems);
 
         var channel = Assert.Single(view.Channels);
         Assert.Equal("us", channel.Name);
         Assert.Equal("Connected", channel.StatusText);
-        Assert.Equal(At, channel.ConnectedSince);
-        Assert.False(channel.Actions.Disconnect.Visible);
+        // The person's own connection: theirs to end, the apps' switches staying on (D23).
+        Assert.True(channel.Actions.Disconnect is { Visible: true, Label: "Disconnect" });
         var selection = Assert.Single(channel.Selections);
         Assert.Equal("Zenless Zone Zero", selection.Name);
         Assert.Equal("VPN on · us", selection.Run.StatusText);
-        Assert.True(selection.Stop is { Visible: true, Label: "Turn off VPN" });
+        Assert.True(selection.Vpn is { Visible: true, Enabled: true, Label: "Use VPN" });
         Assert.DoesNotContain(selection.Run.Facts, f => f.Label is "Connected over" or "Tunnel address");
-        Assert.Contains(channel.Facts, f => f.Label == "Tunnel address" && f.Value == "10.8.0.6");
+        Assert.Contains(channel.Facts, f => f.Label == "Tunnel address" && f.Value == "10.8.0.2");
         Assert.Equal("1 connection · 1 app using the VPN", view.StatusText);
     }
 
@@ -123,11 +123,10 @@ public class WindowViewTests
     public void A_reconnecting_route_says_so_on_its_channel()
     {
         var run = Running(SessionState.Reconnecting);
-        var channel = Assert.Single(WindowViews.Network([], Games(run), run, [Jp, Us], Ready, NoProblems).Channels);
+        var channel = Assert.Single(WindowViews.Network([Profile(Us, TunnelServiceStatus.Reconnecting)], Games(run), run, [Jp, Us], Ready, NoProblems).Channels);
 
         Assert.Equal(Tone.Busy, channel.Tone);
         Assert.Equal("Reconnecting…", channel.StatusText);
-        Assert.Null(channel.ConnectedSince);
         Assert.Equal("Reconnecting — its internet is blocked meanwhile", channel.Selections[0].Run.StatusText);
     }
 

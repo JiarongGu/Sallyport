@@ -73,10 +73,14 @@ public sealed class RouterClient : IAsyncDisposable
         }
     }
 
+    /// <summary>Asks for a run of these programs, all under one loss policy, and attaches to it.</summary>
+    public Task<RouterRun> PrepareAsync(IReadOnlyList<string> executables, LossPolicy loss, string folder, CancellationToken ct = default) =>
+        PrepareAsync([.. executables.Select(e => new ProgramRule(e, loss.Mode, loss.DirectAfter is { } after ? (int)after.TotalSeconds : null))], folder, ct);
+
     /// <summary>Asks for a run of these programs and attaches to it; the lease is kept from here on.</summary>
-    public async Task<RouterRun> PrepareAsync(IReadOnlyList<string> executables, LossPolicy loss, string folder, CancellationToken ct = default)
+    public async Task<RouterRun> PrepareAsync(IReadOnlyList<ProgramRule> programs, string folder, CancellationToken ct = default)
     {
-        await _control.SendAsync(new PrepareRun([.. executables], loss.Mode, loss.DirectAfter is { } after ? (int)after.TotalSeconds : null), ct);
+        await _control.SendAsync(new PrepareRun([.. programs]), ct);
         var reply = await _replies.Reader.ReadAsync(ct);
         if (reply is Rejected rejected) throw new RouterRefused(rejected.Reason);
         if (reply is not RunPrepared prepared) throw new RouterRefused("the service answered with something this client does not understand");
@@ -192,6 +196,9 @@ public sealed class RouterRun : IAsyncDisposable
     public ValueTask CommitAsync(int generation, IPAddress address, int mtu) => _frames.SendAsync(new CommitGeneration(generation, address.ToString(), mtu));
 
     public ValueTask RetireAsync(int generation) => _frames.SendAsync(new RetireGeneration(generation));
+
+    /// <summary>Routes these programs from now on instead of the run's own (<see cref="SelectPrograms"/>).</summary>
+    public ValueTask SelectAsync(IReadOnlyList<ProgramRule> programs) => _frames.SendAsync(new SelectPrograms([.. programs]));
 
     /// <summary>A packet a generation's tunnel returned: queued for the worker, never waited on.</summary>
     public void FromTunnel(int generation, byte[] packet) => _fromTunnel.Writer.TryWrite((generation, packet));

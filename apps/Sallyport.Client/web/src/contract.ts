@@ -119,8 +119,9 @@ export interface SelectionView {
   id: string;
   name: string;
   run: RunView;
-  /** Posts STOP_RUN. */
-  stop: Action;
+  /** Its switch, on: flipping it posts SET_APP_VPN with on false. */
+  vpn: Action;
+  iconUrl: string | null;
 }
 
 /** One profile's connection: what it is, what goes through it (its proxy, the apps routed), and how to end it. */
@@ -221,8 +222,9 @@ export interface ProgramView {
   launchTarget: boolean;
   /** The flags, preferences or environment a proxy launch gives it, one per line; empty without one. */
   startupSettings: string[];
-  /** toggle posts SET_APP_PROGRAM with the opposite of `included`; edit posts BEGIN_PROGRAM_EDIT; launch posts LAUNCH_APP with its id. */
-  actions: Record<'toggle' | 'edit' | 'launch', Action>;
+  /** toggle posts SET_APP_PROGRAM with the opposite of `included`; edit posts BEGIN_PROGRAM_EDIT; launch posts LAUNCH_APP with its id;
+   *  icon posts SET_APP_ICON with its id. */
+  actions: Record<'toggle' | 'edit' | 'launch' | 'icon', Action>;
   /** The folder it sits in under its app's, when not at the top ("APMCrashReporter"): two of one name tell apart. */
   folder: string | null;
   /** What it is doing now — "Running · through jp", "Not running" — while its app's page is open (WATCH_APP); else null. */
@@ -246,12 +248,19 @@ export interface AppItemView {
   statusText: string;
   /** "Launch starts ZenlessZoneZero.exe" */
   launchText: string | null;
-  /** Its routing, now or the last one; null when it has not been routed since the client started. */
+  /** Its part of the route while its profile carries it; null otherwise. */
   run: RunView | null;
   /** "3 programs included of 7."; empty for a lone program. */
   programsText: string;
   programs: ProgramView[];
-  actions: Record<'route' | 'stop' | 'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
+  /** vpn: its switch, Use VPN — posts SET_APP_VPN with the opposite of `vpnOn`. */
+  actions: Record<'vpn' | 'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
+  /** Its switch: the person's choice, kept whether or not its profile is connected (D23). */
+  vpnOn: boolean;
+  /** What to do for it to go through the VPN, when it is on and does not yet: "Connect jp and it goes through the VPN." */
+  detailText: string | null;
+  /** Its program's own icon as a data URL; null shows its initial. */
+  iconUrl: string | null;
   /** The profile it goes through, when one is chosen: the Network page lists an app under its profile. */
   profileId: string | null;
   /** Its page's setup, label by label: VPN profile, Routes, If the VPN drops, Folder, Launch starts. */
@@ -398,14 +407,14 @@ export interface Commands {
   BEGIN_PROGRAM_EDIT: { id: string; programId: string };
   SAVE_PROGRAM: { token: string; values: ProgramEditValues };
   REQUEST_REMOVE_APP: { id: string };
-  ROUTE_APP: { id: string };
+  SET_APP_VPN: { id: string; on: boolean };
+  SET_APP_ICON: { id: string; programId: string };
   CANCEL_EDIT: { token: string };
   /** Without a programId: what the app's Launch starts. */
   LAUNCH_APP: { id: string; programId?: string };
   REQUEST_REMOVE_PROFILE: { id: string };
   /** Whatever the open confirmation asks: removing a profile or an app, disconnecting, installing or removing the driver. */
   CONFIRM: { token: string };
-  STOP_RUN: Record<string, never>;
   BEGIN_POLICY_EDIT: { id: string };
   SAVE_POLICY: { token: string; values: PolicyValues };
   RESET_POLICY: { token: string };

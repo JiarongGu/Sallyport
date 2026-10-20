@@ -1,7 +1,7 @@
 namespace Sallyport.Client;
 
 /// <summary>What choosing a tray entry does; <see cref="TrayEntry.Target"/> names the profile or app it acts on.</summary>
-internal enum TrayVerb { None, OpenWindow, OpenSettings, Connect, Disconnect, StopRun, Launch, Route, Exit }
+internal enum TrayVerb { None, OpenWindow, OpenSettings, Connect, Disconnect, Exit }
 
 internal enum TrayEntryKind { Command, Note, Submenu, Separator }
 
@@ -20,12 +20,12 @@ internal sealed record TrayEntry(
 
 /// <summary>
 /// The tray's menu from the window's own views (docs/design/client-ui.md §7), so the two never disagree: each profile
-/// to connect or disconnect, the app being routed to stop, every other app to launch or route, and the way out. An
-/// action the window hides is left out; one it disables is shown disabled, with the window's reason as its tip.
+/// to connect or disconnect — what goes through it is set in the window (the owner: no app selection here) — and the
+/// way out. An action the window hides is left out; one it disables is shown disabled, with the window's reason as its tip.
 /// </summary>
 internal static class TrayMenu
 {
-    public static IReadOnlyList<TrayEntry> Build(IReadOnlyList<ProfileView> profiles, IReadOnlyList<AppItemView> apps, string networkStatus)
+    public static IReadOnlyList<TrayEntry> Build(IReadOnlyList<ProfileView> profiles, string networkStatus)
     {
         var menu = new List<TrayEntry>
         {
@@ -45,34 +45,9 @@ internal static class TrayMenu
             menu.Add(TrayEntry.Submenu($"{profile.Name} — {profile.StatusText}", items));
         }
 
-        // The app being routed, to stop; every other app to route or launch, as its card in the window offers.
-        if (apps.FirstOrDefault(Routing) is { } routed)
-        {
-            var items = new List<TrayEntry>();
-            if (routed.Run!.DetailText is { } detail) items.Add(TrayEntry.Note(detail));
-            Add(items, routed.Actions.Stop, TrayVerb.StopRun, routed.Id);
-            Add(items, routed.Actions.Launch, TrayVerb.Launch, routed.Id);
-            menu.Add(TrayEntry.Separator);
-            menu.Add(TrayEntry.Submenu($"{routed.Name} — {routed.Run.StatusText}", items));
-        }
-        if (apps.Where(a => !Routing(a)).ToList() is { Count: > 0 } others)
-        {
-            var items = new List<TrayEntry>();
-            foreach (var app in others)
-            {
-                var actions = new List<TrayEntry>();
-                Add(actions, app.Actions.Launch, TrayVerb.Launch, app.Id);
-                Add(actions, app.Actions.Route, TrayVerb.Route, app.Id);
-                if (actions.Count == 0) actions.Add(TrayEntry.Note(app.StatusText));
-                items.Add(TrayEntry.Submenu($"{app.Name}  ·  {app.ThroughText}", actions));
-            }
-            menu.Add(TrayEntry.Separator);
-            menu.Add(TrayEntry.Submenu(L.T("Apps"), items));
-        }
-
         menu.Add(TrayEntry.Separator);
         menu.Add(new(TrayEntryKind.Command, L.T("Settings"), TrayVerb.OpenSettings));
-        menu.Add(new(TrayEntryKind.Command, L.T("Exit Sallyport"), TrayVerb.Exit, Tip: L.T("Turns off every app's VPN, disconnects, then quits.")));
+        menu.Add(new(TrayEntryKind.Command, L.T("Exit Sallyport"), TrayVerb.Exit, Tip: L.T("Disconnects, then quits. Your apps use your own connection until Sallyport connects again.")));
         return menu;
     }
 
@@ -85,8 +60,6 @@ internal static class TrayMenu
         var cut = text.LastIndexOf(" · ", 124, StringComparison.Ordinal);
         return (cut > 0 ? text[..cut] : text[..124]) + " …";
     }
-
-    private static bool Routing(AppItemView app) => app.Run is { Phase: not RunPhase.Ended };
 
     private static void Add(List<TrayEntry> items, UiAction action, TrayVerb verb, string target)
     {

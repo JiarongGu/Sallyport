@@ -129,6 +129,20 @@ public sealed class Router : IDisposable
         _nat = null;
     }
 
+    /// <summary>Which selected processes go direct while the route holds the rest: their program's own loss policy, where
+    /// the programs of one route differ (D23). Null: every one held. Asked on the router's thread, per packet while held.</summary>
+    public Func<int, bool>? DirectWhileHeld { get; set; }
+
+    /// <summary>Changes what is selected — <paramref name="change"/> runs on the router's own thread, between two batches —
+    /// then decides every flow again: a program newly selected goes to the tunnel from its next packet, one let go goes
+    /// direct from its next. Either may have to reconnect, as when a route starts or stops under it.</summary>
+    public void Reselect(Action change) => _reselections.Enqueue(change);
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _reselections = new();
+
+    /// <summary>Flows whose decision a change of selection turned: to the tunnel, and away from it.</summary>
+    public long Reselected { get; private set; }
+
     /// <summary>What becomes of a routed packet too big for the tunnel in one piece and free to be split: sent whole
     /// (false), so Windows splits the outer datagram and the server puts it back together, or split here (true). Whole:
     /// the far end then receives the datagram as it was sent. Split, it receives pieces, and Google's STUN server, which
@@ -220,6 +234,12 @@ public sealed class Router : IDisposable
                 var started = Stopwatch.GetTimestamp();
                 _interception.Wait(50);
                 var waited = Stopwatch.GetTimestamp();
+                if (!_reselections.IsEmpty)
+                {
+                    while (_reselections.TryDequeue(out var change)) change();
+                    DecideAgain();
+                    Timed("deciding every flow again", waited);
+                }
                 if (Stopwatch.GetElapsedTime(_lastRecheck) >= Recheck) RecheckUdp();
                 Timed("rechecking UDP", waited);
                 var at = Stopwatch.GetTimestamp();
@@ -325,7 +345,7 @@ public sealed class Router : IDisposable
             case Verdict.Blocked: Block(decision.Reason, frame[..link], ip, flow.Protocol == Flow.Tcp ? (ip[0] & 0x0F) * 4 : -1); return true;
         }
 
-        if (WhileDown() is { } passed) return passed;
+        if (WhileDown(decision.Pid) is { } passed) return passed;
         var nat = _nat;
         if (nat is null) { HeldWhileDown++; return true; }
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
@@ -384,7 +404,7 @@ public sealed class Router : IDisposable
             case Verdict.Unowned: UnownedPackets++; return false;
             case Verdict.Blocked: Block(set.Decision.Reason, frame[..link], ip, tcpAt: -1); return true;
         }
-        if (WhileDown() is { } passed) return passed;
+        if (WhileDown(set.Decision.Pid) is { } passed) return passed;
         var nat = _nat;
         if (nat is null) { HeldWhileDown++; return true; }
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
@@ -459,12 +479,12 @@ public sealed class Router : IDisposable
     }
 
     // A routed packet with no tunnel to take it: true, dropped (held); false, passed on direct; null, there is a tunnel.
-    private bool? WhileDown()
+    private bool? WhileDown(int pid)
     {
         switch (_path)
         {
-            case SelectedPath.Held: HeldWhileDown++; return true;
-            case SelectedPath.Direct: DirectWhileDown++; return false;
+            case SelectedPath.Held when DirectWhileHeld?.Invoke(pid) != true: HeldWhileDown++; return true;
+            case SelectedPath.Held or SelectedPath.Direct: DirectWhileDown++; return false;
             default: return null;
         }
     }
@@ -566,6 +586,31 @@ public sealed class Router : IDisposable
             if (answer != Ownership.Owned || pid == decision.Pid) continue;
             Reconsider(decision, _selects(pid) ? new(Verdict.Blocked, pid, BlockReason.Ipv6) : new(Verdict.Direct, pid));
         }
+    }
+
+    // After a change of selection: every flow whose owner is known, decided again for that owner. Not late flows — what
+    // left before was not selected then.
+    private void DecideAgain()
+    {
+        foreach (var (flow, decision) in _flows)
+            if (decision.Verdict != Verdict.Unowned) Turn(decision, Selected(decision.Pid, flow.RemoteAddress), flow.Protocol);
+        foreach (var (flow, decision) in _flows6)
+            if (decision.Verdict != Verdict.Unowned)
+                Turn(decision, _selects(decision.Pid) ? new(Verdict.Blocked, decision.Pid, BlockReason.Ipv6) : new(Verdict.Direct, decision.Pid), flow.Protocol);
+    }
+
+    private void Turn(FlowDecision decision, FlowDecision now, byte protocol)
+    {
+        if (decision.Verdict == now.Verdict && decision.Reason == now.Reason) return;
+        if (now.Verdict == Verdict.Routed)
+        {
+            RoutedFlows++;
+            if (protocol == Flow.Tcp) RoutedTcpFlows++;
+        }
+        Reselected++;
+        decision.Verdict = now.Verdict;
+        decision.Pid = now.Pid;
+        decision.Reason = now.Reason;
     }
 
     private void Reconsider(FlowDecision decision, FlowDecision now)

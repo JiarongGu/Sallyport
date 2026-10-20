@@ -238,14 +238,23 @@ internal sealed class Connections : IDisposable
         Poll();
     }
 
-    /// <summary>The profile's session, for a route to attach to: the channel brought up if it is not, held until
-    /// <see cref="ReleaseAsync"/> with the same <paramref name="holder"/>.</summary>
-    public TunnelSession Acquire(string id, string holder)
+    /// <summary>Whether the person connected the profile and has not disconnected it: its channel is up or coming up, or
+    /// reconnecting. What the apps turned on follow (D23).</summary>
+    public bool IsWanted(string id)
+    {
+        lock (_gate) return _channels.TryGetValue(id, out var channel) && channel.Wanted;
+    }
+
+    /// <summary>The profile's session, for a route to attach to, held until <see cref="ReleaseAsync"/> with the same
+    /// <paramref name="holder"/>: the channel brought up if it is not — unless <paramref name="open"/> is false, when a
+    /// profile not connected is refused.</summary>
+    public TunnelSession Acquire(string id, string holder, bool open = true)
     {
         TunnelSession session;
         lock (_gate)
         {
-            if (!_channels.TryGetValue(id, out var channel)) channel = Open(id);
+            if (!_channels.TryGetValue(id, out var channel))
+                channel = open ? Open(id) : throw new ShenoraException("NOT_CONNECTED", "id", id, L.T("the profile is not connected"));
             channel.Holders.Add(holder);
             session = channel.Session;
         }

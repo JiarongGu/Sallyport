@@ -110,8 +110,8 @@ export function EmptyView({ empty, actions }: { empty: Empty; actions: ClientSta
   </div>;
 }
 
-/** On or off at once, as Connect's toggles: a profile connected, an app routed. `action` is what flipping it does now
- *  (Connect or Disconnect, Route or Stop routing) — its label names the switch, its state says whether it may. */
+/** On or off at once, as Connect's toggles: a profile connected, an app's Use VPN. `action` is what flipping it does now
+ *  (Connect or Disconnect; Use VPN) — its label names the switch, its state says whether it may. */
 export function Switch({ on, action, onFlip, large = false }: { on: boolean; action: Action; onFlip: () => void; large?: boolean }) {
   const reasonId = useId();
   if (!action.visible) return null;
@@ -123,6 +123,11 @@ export function Switch({ on, action, onFlip, large = false }: { on: boolean; act
     </button>
     {action.reason && <span className="sr-only" id={reasonId}>{action.reason}</span>}
   </span>;
+}
+
+/** An app by its program's own icon, as Windows shows it; by its initial when the program has none. */
+export function AppIcon({ name, url }: { name: string; url: string | null }) {
+  return url ? <img className="app-icon" src={url} alt="" aria-hidden="true" draggable={false} /> : <Monogram name={name} />;
 }
 
 /** An app or a profile by its first letter, in a tile of a colour its name picks: a list reads by shape before words. */

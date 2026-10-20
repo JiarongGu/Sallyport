@@ -4,7 +4,7 @@ import type { AppItemView, ChannelView, ClientState, Page, ProfileView, TrafficV
 import { post } from './commands';
 import { clock, countdown, duration } from './format';
 import { RunDetails } from './Run';
-import { ActionButton, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
+import { ActionButton, AppIcon, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { RoutingCard } from './Settings';
 import { featuredProfile } from './ui/Chrome';
 
@@ -58,7 +58,7 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
           : <h2>{profile.name}</h2>}
         <p className={`hero-status tone-text-${profile.tone}`} role="status">{profile.statusText}</p>
         {on || since ? since && <p className="secondary metadata">{t('Connected for {0}', duration(since, now))}</p>
-          : apps.length > 0 && <p className="secondary metadata">{t('Turn on an app below and this connects by itself.')}</p>}
+          : apps.some((a) => a.vpnOn) && <p className="secondary metadata">{t('Connect, and the apps whose Use VPN is on go through it.')}</p>}
       </div>
       <Switch large on={on} action={on ? profile.actions.disconnect : profile.actions.connect}
         onFlip={() => post(on ? 'DISCONNECT' : 'CONNECT', { id: profile.id })} />
@@ -88,28 +88,29 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
 
     {channel?.selections.map((selection) => <section key={selection.id} className="selection" aria-label={selection.name}>
       <div className="row-head">
+        <AppIcon name={selection.name} url={selection.iconUrl} />
         <div className="row-identity">
           <h3>{selection.name}</h3>
           <div className="profile-status">
             <StatusPill tone={selection.run.tone}>{selection.run.statusText}</StatusPill>
-            {selection.run.since && <span className="duration">{t('Routed for {0}', duration(selection.run.since, now))}</span>}
+            {selection.run.since && <span className="duration">{t('Through the VPN for {0}', duration(selection.run.since, now))}</span>}
           </div>
         </div>
-        <ActionButton action={selection.stop} onClick={() => post('STOP_RUN', {})} />
+        <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>
+        <Switch on action={selection.vpn} onFlip={() => post('SET_APP_VPN', { id: selection.id, on: false })} />
       </div>
       <RunDetails run={selection.run} />
     </section>)}
 
-    {/* The apps through this profile not being routed now, to route or launch from here. */}
+    {/* The other apps through this profile: each one's Use VPN to set now, connected or not, and Launch where it has one. */}
     {apps.some((a) => !channel?.selections.some((s) => s.id === a.id)) && <section className="hero-apps" aria-label={t('Apps')}>
       <div className="hero-apps-head"><h3>{t('Apps through it')}</h3><button type="button" onClick={() => go('apps')}>{t('Open Apps')}</button></div>
       <ul>{apps.filter((a) => !channel?.selections.some((s) => s.id === a.id)).map((app) => <li key={app.id}>
-        <Monogram name={app.name} />
+        <AppIcon name={app.name} url={app.iconUrl} />
         <span className="app-line"><span className="app-name">{app.name}</span><StatusPill tone={app.tone}>{app.statusText}</StatusPill></span>
         <ActionButton action={app.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id })} />
-        {(app.actions.stop.visible || app.actions.route.visible) && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
-        <Switch on={app.actions.stop.visible} action={app.actions.stop.visible ? app.actions.stop : app.actions.route}
-          onFlip={() => app.actions.stop.visible ? post('STOP_RUN', {}) : post('ROUTE_APP', { id: app.id })} />
+        {app.actions.vpn.visible && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
+        <Switch on={app.vpnOn} action={app.actions.vpn} onFlip={() => post('SET_APP_VPN', { id: app.id, on: !app.vpnOn })} />
       </li>)}</ul>
     </section>}
   </article>;

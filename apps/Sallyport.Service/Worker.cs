@@ -35,12 +35,13 @@ static class Worker
         using (driver)
         {
             if (driver.InternetAdapter() is not { } adapter) { Say("error No network adapter carries the route to the internet."); return 1; }
-            var selection = new ProgramSelection(setup.Executables);
-            var loss = new LossPolicy(setup.Loss, setup.DirectAfterSeconds is { } s ? TimeSpan.FromSeconds(s) : null);
+            var selection = new ProgramSelection(setup.Programs);
             // What the router routed waits here for the pipe, so the router never waits on the pipe (product design §2:
             // never block forwarding behind it); the oldest goes first when the client falls behind.
             var outbound = Channel.CreateBounded<(int, byte[])>(new BoundedChannelOptions(2048) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
-            using var route = new GameRoute(driver, adapter, selection.Selects, loss, (generation, packet) => outbound.Writer.TryWrite((generation, packet)), PacketDriver.OnLink(adapter));
+            // Each program's own loss policy (D23): the route holds while the tunnel is lost, and lets go what says otherwise.
+            using var route = new GameRoute(driver, adapter, selection.Selects, new LossPolicy(), (generation, packet) => outbound.Writer.TryWrite((generation, packet)),
+                PacketDriver.OnLink(adapter), lossOf: pid => selection.RuleOf(pid)?.Policy);
             route.PhaseChanged += phase => Say($"log route {phase}");
 
             await using var pipe = NamedPipeServerStreamAcl.Create(RouterProtocol.RunPipe(runId), PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
@@ -62,7 +63,7 @@ static class Worker
             }) { IsBackground = true, Priority = ThreadPriority.Highest, Name = "router" }.Start();
             var routing = routed.Task;
             Say($"ready {adapter.Handle:X}");
-            Say($"log on {adapter.Name}, MTU {adapter.Mtu}, {setup.Executables.Length} program(s), loss {loss.Mode}");
+            Say($"log on {adapter.Name}, MTU {adapter.Mtu}, {setup.Programs.Length} program(s), loss {Supervisor.Losses(setup.Programs)}");
             // The router's drains, idle or not (it waits at most 50 ms between two): a count that stops is a router stuck,
             // whatever this thread still says.
             var beating = Task.Run(async () =>
@@ -128,6 +129,11 @@ static class Worker
                                 route.Retire(retire.Generation);
                                 Say($"log generation {retire.Generation} retired");
                                 break;
+                            // Checked as the supervisor checks a run's first: nothing of Sallyport's own, ever.
+                            case SelectPrograms select when RouterProtocol.Routable(select.Programs ?? [], AppContext.BaseDirectory) is { Length: > 0 } programs:
+                                route.Router.Reselect(() => selection.Replace(programs));
+                                Say($"log selection now {programs.Length} program(s), loss {Supervisor.Losses(programs)}");
+                                break;
                         }
                 }
                 Say("log the client closed the run's pipe");
@@ -145,7 +151,7 @@ static class Worker
             var r = route.Router;
             foreach (var miss in r.SynMisses) Say($"log a SYN with no owner: {miss}");
             Say($"log ended: routed {r.RoutedPackets}, handed up {r.HandedUp}, held {r.HeldWhileDown}, direct while down {r.DirectWhileDown},"
-                + $" late flows {r.LateFlows}, stale {route.Stale}, selected {selection.Selected.Count()}");
+                + $" late flows {r.LateFlows}, reselected {r.Reselected}, stale {route.Stale}, selected {selection.Selected.Count()}");
             return 0;
         }
     }

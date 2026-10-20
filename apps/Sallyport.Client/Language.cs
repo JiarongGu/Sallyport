@@ -33,6 +33,9 @@ internal static class L
     /// <summary>One or many: English says "1 attempt" and "3 attempts"; a language without plurals translates both.</summary>
     public static string Count(int n, string one, string many) => n == 1 ? T(one) : T(many, n.ToString("N0", Invariant));
 
+    /// <summary>Names in a sentence: "Zenless, Edge"; Chinese lists with its own enumeration comma.</summary>
+    public static string List(IEnumerable<string> names) => string.Join(Current == Language.Chinese ? "、" : ", ", names);
+
     public static string Count(long n, string one, string many) => n == 1 ? T(one) : T(many, n.ToString("N0", Invariant));
 
     /// <summary>Two sentences as one line: a space between them in English, none in Chinese, whose own full stop parts them.</summary>

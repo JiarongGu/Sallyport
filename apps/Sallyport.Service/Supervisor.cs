@@ -166,10 +166,8 @@ sealed class Supervisor(Log log)
 
     private async Task<RouterMessage> StartAsync(PrepareRun prepare, PipePeer peer, FrameStream owner)
     {
-        // Sallyport's own programs are never routed: the client's tunnel must stay direct, and this service with it.
-        var executables = prepare.Executables.Where(e => Path.IsPathFullyQualified(e) && !string.Equals(Path.GetDirectoryName(e),
-            Path.TrimEndingDirectorySeparator(_folder), StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (executables.Length == 0) return new Rejected("There is no program to route.");
+        var programs = RouterProtocol.Routable(prepare.Programs ?? [], _folder);
+        if (programs.Length == 0) return new Rejected("There is no program to route.");
         if (Driver() is (false, var problem)) return new Rejected(problem ?? "The packet driver is not ready.");
 
         var id = Guid.NewGuid().ToString("N");
@@ -178,7 +176,7 @@ sealed class Supervisor(Log log)
             RedirectStandardInput = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
         })!;
         _job.Add(worker);
-        await worker.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new WorkerSetup(executables, prepare.Loss, prepare.DirectAfterSeconds), RouterProtocol.Json));
+        await worker.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new WorkerSetup(programs), RouterProtocol.Json));
         await worker.StandardInput.FlushAsync();
 
         // The worker says "ready" once its pipe exists, or why it could not start.
@@ -201,7 +199,7 @@ sealed class Supervisor(Log log)
         var run = new Run(id, worker, owner, peer.ProcessId, adapter);
         lock (_lock) _run = run;
         _ = Task.Run(() => FollowAsync(run));
-        log.Say($"run {id}: worker {worker.Id} for client pid {peer.ProcessId}, {executables.Length} program(s), loss {prepare.Loss}");
+        log.Say($"run {id}: worker {worker.Id} for client pid {peer.ProcessId}, {programs.Length} program(s), loss {Losses(programs)}");
         return new RunPrepared(id, RouterProtocol.RunPipe(id));
     }
 
@@ -304,6 +302,13 @@ sealed class Supervisor(Log log)
         catch (Win32Exception e) { log.Say($"{why}: adapter 0x{adapter:X} not reset (Windows error {e.NativeErrorCode})"); }
     }
 
+    /// <summary>The loss policies of a run's programs, for the log: "hold", or "hold 2, direct 1".</summary>
+    internal static string Losses(IReadOnlyCollection<ProgramRule> programs)
+    {
+        var kinds = programs.GroupBy(p => (p.DirectAfterSeconds is { } s ? $"{p.Loss} then direct after {s} s" : p.Loss.ToString()).ToLowerInvariant()).ToList();
+        return kinds.Count == 1 ? kinds[0].Key : string.Join(", ", kinds.Select(k => $"{k.Key} {k.Count()}"));
+    }
+
     private static void Kill(Process worker)
     {
         try { if (!worker.HasExited) worker.Kill(entireProcessTree: true); }
@@ -351,5 +356,5 @@ sealed class Supervisor(Log log)
     }
 }
 
-/// <summary>What the supervisor hands a new worker on its standard input: the programs, and the loss policy.</summary>
-sealed record WorkerSetup(string[] Executables, LossMode Loss, int? DirectAfterSeconds);
+/// <summary>What the supervisor hands a new worker on its standard input: the programs, each with its loss policy.</summary>
+sealed record WorkerSetup(ProgramRule[] Programs);

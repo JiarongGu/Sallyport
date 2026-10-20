@@ -112,8 +112,9 @@ public sealed partial class LanguageTests
         {
             L.Current = Language.Chinese;
             Assert.Equal("已连接", L.T("Connected"));
-            Assert.Equal("jp 现在为 Zenless 提供 VPN。如果它已在运行，可能需要重新连接。",
-                L.T("{0} now uses {1}. If it is running already, it may need to reconnect.", "Zenless", "jp"));
+            Assert.Equal("已添加 Zenless。“使用 VPN”已打开：只要 jp 已连接，它就会经由 jp。",
+                L.T("Added {0}. Use VPN is on: it goes through {1} whenever {1} is connected.", "Zenless", "jp"));
+            Assert.Equal("Zenless、Edge", L.List(["Zenless", "Edge"]));
             Assert.Equal("已尝试 3 次。", L.Count(3, "1 attempt so far.", "{0} attempts so far."));
             Assert.Equal("连接中断。上次尝试：timeout", L.Join("连接中断。", L.T("Last attempt: {0}", "timeout")));
             Assert.Equal("2026年10月20日", L.Date(new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero)));
@@ -130,7 +131,7 @@ public sealed partial class LanguageTests
         try
         {
             L.Current = Language.Chinese;
-            var menu = TrayMenu.Build([], [], "");
+            var menu = TrayMenu.Build([], "");
             Assert.Equal("打开 Sallyport", menu[0].Text);
             Assert.All(menu.Where(e => e.Kind is TrayEntryKind.Command or TrayEntryKind.Note), e => Assert.Matches(@"\p{IsCJKUnifiedIdeographs}", e.Text));
         }

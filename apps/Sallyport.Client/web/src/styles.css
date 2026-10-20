@@ -265,6 +265,8 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 
 /* a tile by an app's or a profile's first letter */
 .monogram { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; color: #fff; font: 600 15px/1 var(--font-ui); }
+/* An app's own icon where it has one, in the initial's place and size: drawn as Windows draws it, no tile. */
+.app-icon { width: 36px; height: 36px; flex: none; object-fit: contain; }
 .hue-0 { background: #2563eb; } .hue-1 { background: #7c3aed; } .hue-2 { background: #0f8a7e; }
 .hue-3 { background: #c2410c; } .hue-4 { background: #be185d; } .hue-5 { background: #4f46e5; }
 
@@ -332,7 +334,9 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .hero-apps ul { list-style: none; margin: 0; padding: 0; display: grid; }
 .hero-apps li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--divider); }
 .hero-apps li:first-child { border-top: 0; }
-.hero-apps .monogram { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
+.hero-apps .monogram, .selection .monogram { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
+.hero-apps .app-icon, .selection .app-icon { width: 32px; height: 32px; }
+.app-detail { margin-top: 2px; }
 .app-line { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .app-name { font: var(--font-body-strong); min-width: 0; overflow-wrap: anywhere; }
 .also { margin-top: 24px; display: grid; gap: 8px; }

@@ -534,3 +534,49 @@ taken (the owner and OpenVPN Connect both say profile). Adopted:
 - About folds its long paths under *Technical details*; the guide's steps say what to do now;
 - the title on the content's edge at the window's narrow width; heading buttons and *Open Apps* drawn as buttons; Add
   app's reason under the pair rather than between them.
+
+## D23 — An app's Use VPN is a choice that stands; Connect is the connection (2026-10-20; measured)
+
+The owner: "the vpn toggle for app should not be a connection that should be enabled the route or not and connect for
+vpn is the actual connection and the app toggle can enable during vpn on or off". Until now an app's switch started a
+run, which brought its profile up itself, and one app was routed at a time.
+
+- **The switch is kept** (`RoutedItem.UseVpn` in `apps.json`). On, the app goes through its profile whenever the person
+  has connected that profile; it never connects anything, and stays as set while the profile is not ("Waiting for
+  jp" — "Connect jp and it goes through the VPN."). An app added is added with it on.
+- **The client follows a plan** (`GameRunner.Want`): the apps switched on whose profile the person connected. It starts
+  the service's run when there is one, changes it while it runs, and stops it when none is left or the person
+  disconnects. It joins only a connection the person made (`Connections.Acquire(open: false)`). The service still runs
+  one route, so a second connected profile's apps wait, and say so. A run that ends on its own (a service that refuses,
+  a driver missing, the guard) is not started again until the person asks again: a switch turned on, a connect, the
+  driver put in.
+- **One route, several apps** (`RouterProtocol` version 2): the run's programs each carry their app's loss policy
+  (`ProgramRule`). While the tunnel is lost the route holds, and lets go program by program (`GameRoute` with `lossOf`,
+  `Router.DirectWhileHeld`): *own connection* at once, *block* after its wait if it has one; before the first tunnel
+  everything is held. *Turn the VPN off for it* turns that app's switch off when the loss is noticed. Two apps naming
+  one program: the strictest rule stands.
+- **Changed while it runs**: `SelectPrograms` on the run's pipe. The worker's router takes the new selection between
+  two batches and decides every flow again (`Router.Reselect`, `ProgramSelection.Replace`): nothing restarts, and the
+  other apps' connections are not touched. So an app's programs, profile and loss policy can be changed while it goes
+  through the VPN; the selection follows.
+- **Icons**: an app shows its program's own icon (`AppIcons`: the executable's icon at 64 px, a PNG data URL — the page
+  is given no path); *Use its icon for the app* on another of its programs.
+- **The tray** connects and disconnects profiles only. The owner: "we dont need the app selection in the tray menu",
+  "the tray menu just simplily connect with the configured profile + apps config".
+
+Measured 2026-10-20, the service and client installed in `D:\Program Files\Sallyport`, against jp, with two copies of
+the driver tool as stand-ins (`childbin`, `childbin2`) and the guard outside (0 failed in every run):
+- *Two programs, two policies, one route* (`service-route --child … --child2 … --loss hold --loss2 direct
+  --ping-restart 15`, the server cut by Windows Firewall at 33 s for 40 s): the loss noticed at 47.9 s; from then the
+  held child had no answer (54 packets held) and the other was seen at home within 1.4 s (53 sent direct); generation 2
+  at 75.2 s, both seen at the VPN again within 2 s; 0 late flows.
+- *Turned on while it runs* (`--start 1 --select-after 16 --select 12`): the second child seen at home until the
+  selection, at the VPN from the next 2 s; the first answered 4 of 4 throughout.
+- *Turned off while it runs* (`--start 12 --select 1`): the second child at home from the next 2 s, the first at the
+  VPN, 4 of 4, throughout; no restart.
+- *Through the client* (UI Automation on the Chinese window): `childbin2` added by `--add-game` with its switch on —
+  "等待 jp"; jp connected from the Overview's switch — the service's run with its 3 programs, "VPN 已开启 · jp". Its
+  `mixed-to` workload running: Zenless turned on at 20 s ("selection now 6 program(s)"), the stand-in still the VPN,
+  every request answered; the stand-in turned off at 40 s ("selection now 3 program(s)") — one HTTPS request failed at
+  the switch, then home every round; Zenless off at 60 s — the run ended, "stopped by the client", 5 flows decided
+  again, 0 late.

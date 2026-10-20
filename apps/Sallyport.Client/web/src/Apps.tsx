@@ -4,7 +4,7 @@ import type { AppItemView, ClientState, ProgramView } from './contract';
 import { post } from './commands';
 import { duration } from './format';
 import { RunDetails } from './Run';
-import { ActionButton, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
+import { ActionButton, AppIcon, Disclosure, EmptyView, Facts, Icon, StatusPill, Switch } from './ui/shared';
 import { Traffic } from './Network';
 
 /** Everything the person routes, one card per app — a program or a folder. Each opens a page of its own. */
@@ -25,21 +25,21 @@ export function Apps({ state, now, open, editorForm }: {
 
 function AppHead({ app, now, headingId, children }: { app: AppItemView; now: number; headingId?: string; children?: ReactNode }) {
   return <div className="row-head">
-    <Monogram name={app.name} />
+    <AppIcon name={app.name} url={app.iconUrl} />
     <div className="row-identity">
       {headingId && <h3 id={headingId}>{app.name}</h3>}
       <div className="profile-status">
         <StatusPill tone={app.tone} announce>{app.statusText}</StatusPill>
-        {app.run?.since && <span className="duration">{t('Routed for {0}', duration(app.run.since, now))}</span>}
+        {app.run?.since && <span className="duration">{t('Through the VPN for {0}', duration(app.run.since, now))}</span>}
         <span className="summary">{[app.throughText, app.methodText].filter(Boolean).join(' · ')}</span>
       </div>
+      {app.detailText && <p className="metadata secondary app-detail">{app.detailText}</p>}
     </div>
     <div className="actions row-primary">
       <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
-      {/* Its VPN on or off, as a switch with its word beside it: Route turns it on, Stop routing off. */}
-      {(app.actions.stop.visible || app.actions.route.visible) && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
-      <Switch on={app.actions.stop.visible} action={app.actions.stop.visible ? app.actions.stop : app.actions.route}
-        onFlip={() => app.actions.stop.visible ? post('STOP_RUN', {}) : post('ROUTE_APP', { id: app.id })} />
+      {/* Its Use VPN, a choice that stands whether or not its profile is connected: the switch with its word beside it. */}
+      {app.actions.vpn.visible && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
+      <Switch on={app.vpnOn} action={app.actions.vpn} onFlip={() => post('SET_APP_VPN', { id: app.id, on: !app.vpnOn })} />
     </div>
     {children}
   </div>;
@@ -84,11 +84,11 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
       <div className="card">
         <RunDetails run={app.run} />
         {channel?.traffic && <div className="app-traffic">
-          <p className="secondary">{t('Through {0}: everything routed through it, this app’s and any other’s.', channel.name)}</p>
+          <p className="secondary">{t('Through {0}: everything that goes through it, this app’s and any other’s.', channel.name)}</p>
           <Traffic traffic={channel.traffic} />
         </div>}
       </div>
-    </section> : app.actions.route.visible && <p className="next-step">{t('Turn on Use VPN above, then start it as you always do.')}</p>}
+    </section> : app.actions.vpn.visible && !app.vpnOn && <p className="next-step">{t('Turn on Use VPN above, then start it as you always do.')}</p>}
 
     <section className="settings-group" aria-labelledby={programsId}>
       <div className="group-head">
@@ -152,9 +152,10 @@ function ProgramRow({ app, program, expanded, toggle, editorForm }: {
     <div id={detailsId} hidden={!expanded} className="program-details">
       {program.facts && <Facts facts={program.facts} />}
       <p className="metadata secondary program-path">{program.path}</p>
-      {(program.actions.edit.visible || program.actions.launch.visible) && <div className="actions">
+      {(program.actions.edit.visible || program.actions.launch.visible || program.actions.icon.visible) && <div className="actions">
         <ActionButton action={program.actions.edit} focusKey={`program:${program.id}`} onClick={() => post('BEGIN_PROGRAM_EDIT', { id: app.id, programId: program.id })} />
         <ActionButton action={program.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id, programId: program.id })} />
+        <ActionButton action={program.actions.icon} onClick={() => post('SET_APP_ICON', { id: app.id, programId: program.id })} />
       </div>}
       {program.startupSettings.length > 0 && <details className="startup-settings">
         <summary aria-controls={settingsId}>{t('Startup settings')}</summary>

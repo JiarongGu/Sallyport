@@ -106,7 +106,7 @@ internal sealed class StatusTray : IDisposable
         foreach (var old in _menu.Items.Cast<ToolStripItem>().ToList()) old.Dispose();
         var state = _core.Snapshot();
         Style(_menu, Theme.Current());
-        foreach (var entry in TrayMenu.Build(state.Profiles, state.Apps, state.Network.StatusText)) _menu.Items.Add(Item(entry, (MenuRenderer)_menu.Renderer));
+        foreach (var entry in TrayMenu.Build(state.Profiles, state.Network.StatusText)) _menu.Items.Add(Item(entry, (MenuRenderer)_menu.Renderer));
         Fit(_menu);
     }
 
@@ -167,8 +167,8 @@ internal sealed class StatusTray : IDisposable
             renderer.SystemDrawsBorder = true;
     }
 
-    /// <summary>What an entry does. A question it raises (disconnecting a profile an app is routed through) is asked in
-    /// the window, so the window comes up for it.</summary>
+    /// <summary>What an entry does. A question it raises (disconnecting a profile apps go through) is asked in the window,
+    /// so the window comes up for it.</summary>
     private void Do(TrayEntry entry)
     {
         var id = entry.Target ?? "";
@@ -179,9 +179,6 @@ internal sealed class StatusTray : IDisposable
             case TrayVerb.Exit: Exit(); return;
             case TrayVerb.Connect: Run(() => { _core.Connect(id); return Task.CompletedTask; }); return;
             case TrayVerb.Disconnect: Run(() => _core.DisconnectAsync(id)); return;
-            case TrayVerb.StopRun: Run(_core.StopRunAsync); return;
-            case TrayVerb.Launch: Run(() => _core.LaunchAsync(id, null, CancellationToken.None)); return;
-            case TrayVerb.Route: Run(() => { _core.RouteApp(id); return Task.CompletedTask; }); return;
         }
     }
 
@@ -202,7 +199,7 @@ internal sealed class StatusTray : IDisposable
         _window.Hide();
         if (_toldHidden) return;
         _toldHidden = true;
-        Tell(L.T("Sallyport is still running, here beside the clock. Your apps stay on the VPN; right-click here to exit."));
+        Tell(L.T("Sallyport is still running, here beside the clock. What is connected stays connected; right-click here to exit."));
     }
 
     public void Dispose()

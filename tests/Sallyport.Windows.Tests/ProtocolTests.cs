@@ -17,13 +17,30 @@ public sealed class ProtocolTests
     [Fact]
     public async Task A_control_message_reads_back_as_written()
     {
-        var reader = await WrittenAsync(async f => await f.SendAsync(new PrepareRun([@"E:\Games\Zenless\ZenlessZoneZero.exe"], LossMode.Direct, 15)));
+        var reader = await WrittenAsync(async f =>
+        {
+            await f.SendAsync(new PrepareRun([new(@"E:\Games\Zenless\ZenlessZoneZero.exe", LossMode.Hold, 15), new(@"C:\Tools\launcher.exe", LossMode.Direct)]));
+            await f.SendAsync(new SelectPrograms([new(@"C:\Tools\launcher.exe", LossMode.Stop)]));
+        });
 
-        var frame = await reader.ReadAsync(CancellationToken.None);
+        var prepare = Assert.IsType<PrepareRun>((await reader.ReadAsync(CancellationToken.None))!.Value.Message);
+        var select = Assert.IsType<SelectPrograms>((await reader.ReadAsync(CancellationToken.None))!.Value.Message);
 
-        var prepare = Assert.IsType<PrepareRun>(frame!.Value.Message);
-        Assert.Equal(@"E:\Games\Zenless\ZenlessZoneZero.exe", Assert.Single(prepare.Executables));
-        Assert.Equal((LossMode.Direct, (int?)15), (prepare.Loss, prepare.DirectAfterSeconds));
+        // Each program with its own loss policy (D23), and the selection changed while the run lasts.
+        Assert.Equal([new ProgramRule(@"E:\Games\Zenless\ZenlessZoneZero.exe", LossMode.Hold, 15), new ProgramRule(@"C:\Tools\launcher.exe", LossMode.Direct)],
+            prepare.Programs);
+        Assert.Equal(new ProgramRule(@"C:\Tools\launcher.exe", LossMode.Stop), Assert.Single(select.Programs));
+        Assert.Equal(TimeSpan.FromSeconds(15), prepare.Programs[0].Policy.DirectAfter);
+    }
+
+    [Fact]
+    public void Nothing_of_sallyports_own_folder_and_nothing_relative_is_routable()
+    {
+        var routable = RouterProtocol.Routable(
+            [new(@"D:\Program Files\Sallyport\Sallyport.Client.exe"), new(@"game.exe"), new(@"E:\Games\ZZZ\ZenlessZoneZero.exe")],
+            @"D:\Program Files\Sallyport\");
+
+        Assert.Equal(@"E:\Games\ZZZ\ZenlessZoneZero.exe", Assert.Single(routable).Path);
     }
 
     [Fact]
