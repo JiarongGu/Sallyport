@@ -39,6 +39,7 @@ internal sealed class StatusTray : IDisposable
         _menu = new ContextMenuStrip();
         // Rebuilt as it opens, so it is never a state behind.
         _menu.Opening += (_, e) => { Fill(); e.Cancel = false; };
+        _menu.Opened += (_, _) => Lift(_menu);
         Fill();
         _icon = new NotifyIcon { ContextMenuStrip = _menu, Visible = true };
         _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowWindow(); };
@@ -211,6 +212,20 @@ internal sealed class StatusTray : IDisposable
         else menu.HandleCreated += (_, _) => Round(menu);
     }
 
+    /// <summary>The menu clear of the taskbar, as Windows 11's own sit above it: WinForms opens a tray's menu with its
+    /// corner at the pointer and holds it only to the screen (ShowInTaskbar), so opened from the taskbar it hangs over it,
+    /// its bottom on the taskbar's. Held inside the working area, the gap from it the menu's own edge (MenuRenderer.Edge).</summary>
+    private static void Lift(ToolStripDropDown menu)
+    {
+        var bounds = menu.Bounds;
+        var area = Screen.FromRectangle(bounds).WorkingArea;
+        var gap = menu.Renderer is MenuRenderer renderer ? renderer.Edge : 0;
+        var x = Math.Clamp(bounds.X, area.Left + gap, Math.Max(area.Left + gap, area.Right - gap - bounds.Width));
+        var y = Math.Clamp(bounds.Y, area.Top + gap, Math.Max(area.Top + gap, area.Bottom - gap - bounds.Height));
+        // An open drop-down keeps where WinForms put it whatever Location is set to (measured); Windows moves it.
+        if (x != bounds.X || y != bounds.Y) SetWindowPos(menu.Handle, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
     private static void Round(ToolStrip menu)
     {
         var preference = DWMWCP_ROUNDSMALL;
@@ -269,6 +284,10 @@ internal sealed class StatusTray : IDisposable
     }
 
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUNDSMALL = 3;
+    private const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
