@@ -45,6 +45,8 @@ public sealed partial class LanguageTests
         {
             var source = File.ReadAllText(file);
             keys.AddRange(PageT().Matches(source).Select(m => m.Groups[1].Value));
+            // t(cond ? 'one' : 'other'): both are said, and neither follows t( itself.
+            keys.AddRange(PageTChoice().Matches(source).SelectMany(m => new[] { m.Groups[1].Value, m.Groups[2].Value }));
             keys.AddRange(PageHelper().Matches(source).SelectMany(m => new[] { m.Groups[1].Value, m.Groups[2].Value }).Where(v => v.Length > 0));
             keys.AddRange(PageTabs().Matches(source).Select(m => m.Groups[1].Value));
         }
@@ -177,6 +179,9 @@ public sealed partial class LanguageTests
 
     [GeneratedRegex("""\bt\(\s*'((?:[^'\\]|\\.)*)'""")]
     private static partial Regex PageT();
+
+    [GeneratedRegex("""\bt\(\s*(?:[^'()?]|'[^']*')*\?\s*'((?:[^'\\]|\\.)*)'\s*:\s*'((?:[^'\\]|\\.)*)'\s*\)""")]
+    private static partial Regex PageTChoice();
 
     // The editors' helpers: text('field', 'Label', 'unit') and check('field', 'Label'), whose words are said through t().
     [GeneratedRegex("""\b(?:text|check)\('[a-zA-Z]+', '([^']*)'(?:, '([^']*)')?\)""")]

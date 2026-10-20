@@ -47,7 +47,12 @@ list of quick toggles is what its users asked back for — never from code of th
   arrow (the chevron turned to point on) that opens the app's page — Monitoring once it has something to show, Programs
   (those it uses first, the others folded), Setup. Every app's switch has its word beside it, *Use VPN*. **Settings**: rows of
   what acts the moment it changes — General (Language, Start with Windows as a switch) and Connection (VPN protocol, If
-  it cannot connect) — each a word, a line under it, and its control on the right.
+  it cannot connect) — each a word, a line under it where one is needed, and its control on the right. What a group is
+  for sits behind a "?" beside its heading, in a modal as the confirmation's (`ui/Help.tsx`; the owner: *"a proper
+  helper modal instead putting all in the display this is for things like import/export"*): Connection (each protocol
+  and what a round is), Driver, Defaults, Move to another computer (what each part of the file holds, its password,
+  importing); How to use (the three steps, the proxy for experts) is About's How to use…, not a group of its own (*"why
+  you need a sperated session for 使用方法?"*) — the page a line at most each.
 
 ## Tokens
 

@@ -1695,8 +1695,8 @@ internal sealed class ClientCore
                 editor.Kind == "profile-edit" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary
                     : editor.Kind == "new-profile" && profileRead is { Preview.Unsupported: { } cannot }
                         ? L.T("This version cannot connect it yet: {0}. You can import it now; a later version can connect it.", cannot)
-                    : editor.Kind == "import" && importing is { } read ? L.T("{0}, exported {1}.", read.Name, L.Date(read.File.Exported))
-                    : editor.Kind == "export" ? L.T("Choose what goes in the file. With a password, the profiles in it open only with that password; without one, anyone who has the file can use them.") : null,
+                    // What the file is; what each part holds and what its password does are Settings' help (the "?").
+                    : editor.Kind == "import" && importing is { } read ? L.T("{0}, exported {1}.", read.Name, L.Date(read.File.Exported)) : null,
                 editor.Kind switch
                 {
                     "new-app" => UiAction.Shown(L.T("Add app"), setup is not null, L.T("Choose where it is first.")),
@@ -1765,11 +1765,12 @@ internal sealed class ClientCore
             .Select(c => new IconChoice(c.Id, Path.GetFileName(c.Path), c.Url!)),
     ];
 
+    /// <summary>The parts of an export, each with how much of it there is; what each holds is said in Settings' help.</summary>
     private static IReadOnlyList<EditorOption> MoveParts(int profiles, int apps, bool connection) =>
     [
-        .. profiles > 0 ? [new EditorOption("profiles", L.Count(profiles, "1 VPN profile", "{0} VPN profiles"), L.T("Their keys included; the .ovpn files themselves are not needed."))] : Array.Empty<EditorOption>(),
-        .. apps > 0 ? [new EditorOption("apps", L.Count(apps, "1 app", "{0} apps"), L.T("Their programs, switches and the VPNs they go through. The games themselves are not copied."))] : Array.Empty<EditorOption>(),
-        .. connection ? [new EditorOption("connection", L.T("Connection settings"), L.T("VPN protocol, retries, each profile's own changes, and the defaults for new apps."))] : Array.Empty<EditorOption>(),
+        .. profiles > 0 ? [new EditorOption("profiles", L.Count(profiles, "1 VPN profile", "{0} VPN profiles"))] : Array.Empty<EditorOption>(),
+        .. apps > 0 ? [new EditorOption("apps", L.Count(apps, "1 app", "{0} apps"))] : Array.Empty<EditorOption>(),
+        .. connection ? [new EditorOption("connection", L.T("Connection settings"))] : Array.Empty<EditorOption>(),
     ];
 
     private string? PolicyHint(string id)

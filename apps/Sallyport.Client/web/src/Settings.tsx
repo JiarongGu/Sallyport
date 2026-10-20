@@ -3,8 +3,10 @@ import type { ClientState, DriverView } from './contract';
 import { post } from './commands';
 import { t } from './i18n';
 import { ActionButton, Disclosure, Facts, StatusPill } from './ui/shared';
+import { HelpButton, HelpHeading } from './ui/Help';
 
-/** How Sallyport is set up on this computer, and how to use it. */
+/** How Sallyport is set up on this computer, and how to use it: each group its heading and its controls, what it is for
+ *  behind the "?" beside the heading (the owner: "a proper helper modal instead putting all in the display"). */
 export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
   state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode; moveForm: ReactNode;
 }) {
@@ -16,7 +18,6 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
   const protocolId = useId();
   const retryId = useId();
   const connection = settings.connection;
-  const protocolHelp = connection.protocol.choices.find((choice) => choice.id === connection.protocol.setting)?.help;
   return <section className="page settings" aria-label={t('Settings')}>
     {/* Settings that act the moment they change, as rows: what it is on the left, its control on the right. */}
     <section className="settings-group" aria-labelledby={generalId}>
@@ -41,25 +42,24 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
     </section>
 
     <section className="settings-group" aria-labelledby={connectionId}>
-      <h2 id={connectionId}>{t('Connection')}</h2>
-      <p className="secondary">{t('For every profile, from its next connection. A profile can be changed on its own under Profiles.')}</p>
+      <HelpHeading id={connectionId} title={t('Connection')}>
+        <p>{t('For every profile, from its next connection. A profile can be changed on its own under Profiles.')}</p>
+        <h3>{t('VPN protocol')}</h3>
+        <p>{t('How Sallyport talks to your VPN server; your apps’ traffic goes through it either way.')}</p>
+        <dl>{connection.protocol.choices.map((choice) => <div key={choice.id}><dt>{choice.label}</dt><dd>{choice.help}</dd></div>)}</dl>
+        <h3>{t('If it cannot connect')}</h3>
+        <p>{t('A round tries every server of the profile once, then waits a little longer each time.')}</p>
+      </HelpHeading>
       <div className="card setting-rows">
         <div className="setting-row">
-          <span className="setting-text">
-            <span id={protocolId}>{t('VPN protocol')}</span>
-            <span>{protocolHelp ? t('{0} {1}', t('How Sallyport talks to your VPN server; your apps’ traffic goes through it either way.'), protocolHelp)
-              : t('How Sallyport talks to your VPN server; your apps’ traffic goes through it either way.')}</span>
-          </span>
+          <span className="setting-text"><span id={protocolId}>{t('VPN protocol')}</span></span>
           <select className="setting-choice" aria-labelledby={protocolId} value={connection.protocol.setting}
             onChange={(event) => post('SET_PROTOCOL', { protocol: event.target.value })}>
             {connection.protocol.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
           </select>
         </div>
         <div className="setting-row">
-          <span className="setting-text">
-            <span id={retryId}>{t('If it cannot connect')}</span>
-            <span>{t('A round tries every server of the profile once, then waits a little longer each time.')}</span>
-          </span>
+          <span className="setting-text"><span id={retryId}>{t('If it cannot connect')}</span></span>
           <select className="setting-choice" aria-labelledby={retryId} value={connection.retry.setting}
             onChange={(event) => post('SET_RETRY', { rounds: Number(event.target.value) })}>
             {connection.retry.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
@@ -69,14 +69,17 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
     </section>
 
     <section className="settings-group" aria-label={t('Driver')}>
-      <h2>{t('Driver')}</h2>
-      <p className="secondary">{t('Sending a whole app through your VPN needs a free driver (Windows Packet Filter, by NT Kernel) and the Sallyport service.')}</p>
+      <HelpHeading title={t('Driver')}>
+        <p>{t('Sending a whole app through your VPN needs a free driver (Windows Packet Filter, by NT Kernel) and the Sallyport service.')}</p>
+        <p>{t('Without it, a profile still works as a SOCKS5 proxy on this computer, for the programs set to use one.')}</p>
+      </HelpHeading>
       <RoutingCard routing={settings.routing} manage />
     </section>
 
     <section className="settings-group" aria-label={t('Defaults for new apps')}>
-      <h2>{t('Defaults for new apps')}</h2>
-      <p className="secondary">{t('What an app you add starts with. Apps added before keep their own.')}</p>
+      <HelpHeading title={t('Defaults for new apps')}>
+        <p>{t('What an app you add starts with. Apps added before keep their own.')}</p>
+      </HelpHeading>
       <div className="card">
         <div className="row-head">
           <Facts facts={settings.defaults.facts} />
@@ -87,11 +90,10 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
     </section>
 
     {settings.move && <section className="settings-group" aria-label={t('Move to another computer')}>
-      <h2>{t('Move to another computer')}</h2>
-      <p className="secondary">{t('Export your VPN profiles, apps and connection settings to one file, and import them here or on another computer.')}</p>
+      <HelpHeading title={t('Move to another computer')}><MoveHelp /></HelpHeading>
       <div className="card">
         <div className="row-head move-row">
-          <span className="secondary">{t('Give the file a password and its VPN profiles open only with it.')}</span>
+          <span className="secondary">{t('Your VPN profiles, apps and settings in one file, for here or another computer.')}</span>
           {(settings.move.export.visible || settings.move.import.visible) && <div className="actions">
             <ActionButton action={settings.move.export} focusKey="export" onClick={() => post('BEGIN_EXPORT', {})} />
             <ActionButton action={settings.move.import} focusKey="import" onClick={() => post('BEGIN_IMPORT', {})} />
@@ -101,15 +103,18 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
       </div>
     </section>}
 
-    <section className="settings-group" aria-label={t('How to use')}>
-      <h2>{t('How to use')}</h2>
-      <Guide guide={settings.guide} manualOpen={expanded.has('manual')} toggleManual={() => toggle('manual')} />
-    </section>
-
     <section className="settings-group" aria-label={t('About')}>
       <h2>{t('About')}</h2>
       <div className="card about">
-        <Facts facts={settings.about} />
+        {/* How to use is help, not a group of its own (the owner: "why you need a sperated session for 使用方法?"). */}
+        <div className="row-head">
+          <Facts facts={settings.about} />
+          <div className="actions">
+            <HelpButton title={t('How to use')} label={t('How to use…')}>
+              <Guide guide={settings.guide} manualOpen={expanded.has('manual')} toggleManual={() => toggle('manual')} />
+            </HelpButton>
+          </div>
+        </div>
         {settings.uninstall?.visible && <div className="row-head uninstall">
           <p className="secondary">{t('Removes Sallyport from this computer. You choose whether your profiles, apps and settings stay.')}</p>
           <div className="actions"><ActionButton action={settings.uninstall} danger onClick={() => post('UNINSTALL', {})} /></div>
@@ -142,6 +147,23 @@ export function RoutingCard({ routing, manage, openSettings }: { routing: Driver
     </div>
     <Facts facts={routing.facts} />
   </div>;
+}
+
+/** Export and Import, all of it: what each part of the file holds, the password, and taking it in on another computer. */
+function MoveHelp() {
+  return <>
+    <p>{t('Export your VPN profiles, apps and connection settings to one file, and import them here or on another computer.')}</p>
+    <h3>{t('What goes in the file')}</h3>
+    <dl>
+      <div><dt>{t('VPN profiles')}</dt><dd>{t('Their keys included; the .ovpn files themselves are not needed.')}</dd></div>
+      <div><dt>{t('Apps')}</dt><dd>{t('Their programs, switches and the VPNs they go through. The games themselves are not copied.')}</dd></div>
+      <div><dt>{t('Connection settings')}</dt><dd>{t('VPN protocol, retries, each profile’s own changes, and the defaults for new apps.')}</dd></div>
+    </dl>
+    <h3>{t('Password')}</h3>
+    <p>{t('With a password, the profiles in the file open only with that password; without one, anyone who has the file can use them. Keep the password: it cannot be recovered.')}</p>
+    <h3>{t('Import')}</h3>
+    <p>{t('Choose the file, then what to take from it. An app installed somewhere else on this computer says so on its page: choose Locate… there and show Sallyport where it is.')}</p>
+  </>;
 }
 
 function Guide({ guide, manualOpen, toggleManual }: {
