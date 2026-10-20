@@ -9,6 +9,7 @@ names has the rest. What a record says could not be checked stays open in `TASKS
 Each was one item of TASKS §0, done in its own commit (newest first), whose message has its measurement on the
 installed copy.
 
+- D32 A small uninstaller beside the program: setup's removal compiled ahead of time, 4.4 MB, in Windows' own dialog.
 - D31 The release trimmed, .NET's own assemblies only: 27.5 MB from 53; setup's shortcuts, which trimming broke
   silently, fixed.
 - `a262fa6` No defaults for new apps: Add an app sets each one up; an earlier export still imports.

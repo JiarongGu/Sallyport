@@ -21,6 +21,7 @@ Layout: `src/Sallyport` (the protocol library) and `src/Sallyport.Windows` (the 
 protocol, the install layout); `apps/` the applications — `Sallyport.Client` (Sallyport's one program, D30: the window
 and tray, its page in `web/`, hosting the next two), `Sallyport.Service` (the router, LocalSystem; `--service`),
 `Sallyport.Setup` (install and removal; the release's name or `/uninstall`; `package.ps1`, `version.ps1`),
+`Sallyport.Uninstall` (the small uninstaller setup writes beside the program, setup's removal compiled ahead of time, D32),
 `Sallyport.Host` (one profile's tunnel and proxy, headless, for another app); `Sallyport.Observer` and `Sallyport.Vpn`
 are the driverless route, kept but not in the product; `tools/Sallyport.Probe` and `tools/Sallyport.Driver` drive a phase
 against a real server; `tests/` one project per area. Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work

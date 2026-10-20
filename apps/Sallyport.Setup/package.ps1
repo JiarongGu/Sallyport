@@ -43,13 +43,22 @@ try {
 }
 finally { Pop-Location }
 
+# The small uninstaller (D32), compiled ahead of time, so it carries no .NET runtime. Its linker is found through
+# vswhere, which Visual Studio's installer keeps out of PATH.
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+if (-not (Get-Command vswhere.exe -ErrorAction SilentlyContinue) -and (Test-Path "$vswhere\vswhere.exe")) { $env:PATH = "$vswhere;$env:PATH" }
+$uninstaller = Join-Path $build "uninstall"
+Run 'compiling the uninstaller' {
+    dotnet publish "$root\apps\Sallyport.Uninstall" -c Release -r win-x64 -nologo -v q "-p:Version=$Version" -o $uninstaller -p:DebugType=none
+}
+
 # One program, one file, one .NET runtime inside it (D30): the window, the service and setup. WebView2's native loader
-# is carried inside it too, and written beside it when it installs itself, rather than unpacked into %TEMP% on the
-# system drive at every start.
+# and the uninstaller are carried inside it too, and written beside it when it installs itself: the loader rather than
+# unpacked into %TEMP% on the system drive at every start.
 Run 'publishing the program' {
     dotnet publish "$root\apps\Sallyport.Client" -c Release -r win-x64 --self-contained -nologo -v q "-p:Version=$Version" -o $program `
         -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none `
-        -p:PublishDocumentationFile=false -p:PublishReferencesDocumentationFiles=false
+        -p:PublishDocumentationFile=false -p:PublishReferencesDocumentationFiles=false "-p:UninstallerExe=$uninstaller\uninstall.exe"
 }
 
 $name = "Sallyport-$Version-win-x64-setup.exe"

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The small uninstaller (D32; the owner: "after install the setup/uninstall should be a small exe"): setup's own
+       removal (Installer.cs and its words, compiled in here as they are there), in Windows' task dialog, compiled ahead
+       of time so it carries no .NET runtime. Setup writes it beside the program as uninstall.exe. BCL only (rule 4). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <AssemblyName>uninstall</AssemblyName>
+    <RootNamespace>Sallyport.Uninstall</RootNamespace>
+    <AssemblyTitle>Sallyport uninstaller</AssemblyTitle>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <!-- Its words are its own tables, English and Chinese; nothing of it formats by culture. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StackTraceSupport>false</StackTraceSupport>
+    <!-- Administrator from its start (Windows asks), the task dialog's common controls 6, and its scale per monitor. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Sallyport.Client\Sallyport.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Sallyport.Setup\Installer.cs" Link="Setup\Installer.cs" />
+    <Compile Include="..\Sallyport.Setup\Language.cs" Link="Setup\Language.cs" />
+    <Compile Include="..\Sallyport.Setup\Chinese.cs" Link="Setup\Chinese.cs" />
+    <Compile Include="..\Sallyport.Setup\ShellLink.cs" Link="Setup\ShellLink.cs" />
+    <ProjectReference Include="..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -31,7 +31,7 @@ public static class SetupProgram
         // A windowed program has no console of its own: /quiet speaks to the one it was started from, if any.
         if (quiet) AttachConsole(-1);
         if (!Elevated()) return Elevate(args, quiet);
-        if (Array.IndexOf(args, "--asker") is >= 0 and var by && by + 1 < args.Length && int.TryParse(args[by + 1], out var asker)) Asker = asker;
+        if (Array.IndexOf(args, "--asker") is >= 0 and var by && by + 1 < args.Length && int.TryParse(args[by + 1], out var asker)) Installer.Asker = asker;
         var choices = new SetupChoices(Driver: !args.Contains("--no-driver"), RemoveData: args.Contains("--remove-data"));
 
         string? Value(string name) => Array.IndexOf(args, name) is >= 0 and var at && at + 1 < args.Length ? args[at + 1] : null;
@@ -73,10 +73,6 @@ public static class SetupProgram
     }
 
     private static bool Elevated() => new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
-
-    /// <summary>The start that asked for this one to be administrator, and waits for it (<c>--asker</c>): not a window
-    /// to close.</summary>
-    public static int Asker { get; private set; }
 
     // The one administrator prompt, as the setup's manifest gave it before setup became the one program (whose window
     // runs as the person): the same start again, elevated, waited for. Refused, nothing is done.
@@ -162,8 +158,9 @@ public static class SetupProgram
     }
 
     // The install as a zip of what goes in the folder, as a payload was: the program under its installed name, whatever
-    // the release's file is called, and the loader beside it (kept out of the single file, which would unpack it to
-    // %TEMP% on the system drive at every start). Stored, not compressed: the program is compressed already.
+    // the release's file is called, the loader beside it (kept out of the single file, which would unpack it to %TEMP%
+    // on the system drive at every start), and the small uninstaller when the release carries one (D32). Stored, not
+    // compressed: each is compressed already.
     private static Stream? Itself()
     {
         var entry = Assembly.GetEntryAssembly();
@@ -178,8 +175,14 @@ public static class SetupProgram
             using (var program = archive.CreateEntry(Installer.Program, CompressionLevel.NoCompression).Open())
             using (var source = File.OpenRead(self))
                 source.CopyTo(program);
-            using var loaded = archive.CreateEntry(Installer.Loader, CompressionLevel.NoCompression).Open();
-            loader.CopyTo(loaded);
+            using (var loaded = archive.CreateEntry(Installer.Loader, CompressionLevel.NoCompression).Open())
+                loader.CopyTo(loaded);
+            using var uninstaller = entry.GetManifestResourceStream(Installer.Uninstaller);
+            if (uninstaller is not null)
+            {
+                using var written = archive.CreateEntry(Installer.Uninstaller, CompressionLevel.Optimal).Open();
+                uninstaller.CopyTo(written);
+            }
         }
         zip.Position = 0;
         return zip;

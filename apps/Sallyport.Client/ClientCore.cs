@@ -184,12 +184,17 @@ internal sealed class ClientCore
         Publish();
     }
 
-    /// <summary>Setup's removal, as Windows' installed apps start it: this program with /uninstall (D30), which asks to be
-    /// administrator, then asks the person, and closes this window when they go ahead.</summary>
+    /// <summary>The removal, as Windows' installed apps start it: the small uninstaller beside this program (D32), which
+    /// asks to be administrator, then asks the person, and closes this window when they go ahead; an install without
+    /// one, this program with /uninstall (D30).</summary>
     public void Uninstall()
     {
-        if (InstallLayout.InstalledHere() is null || Environment.ProcessPath is not { } self) return;
-        try { Process.Start(new ProcessStartInfo(self, "/uninstall") { UseShellExecute = false })?.Dispose(); }
+        if (InstallLayout.InstalledHere() is not { } folder || Environment.ProcessPath is not { } self) return;
+        var uninstaller = Path.Combine(folder, "uninstall.exe");
+        // Through the shell: its manifest asks for administrator, which a start of our own would refuse.
+        var start = File.Exists(uninstaller) ? new ProcessStartInfo(uninstaller) { UseShellExecute = true }
+            : new ProcessStartInfo(self, "/uninstall") { UseShellExecute = false };
+        try { Process.Start(start)?.Dispose(); }
         catch (System.ComponentModel.Win32Exception e) { Notify(NoticeKind.Error, L.T("The removal did not start ({0}).", e.Message)); }
     }
 

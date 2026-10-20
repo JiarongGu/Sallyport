@@ -30,7 +30,10 @@
   connection but could not be identified are said on the app's page only, as what they were (closed already, or
   refusing to be read).
 - Uninstalling where a person looks (2026-10-21): the Start menu has a Sallyport folder with Sallyport and Uninstall
-  Sallyport, and Settings → About has Uninstall Sallyport…; each opens setup's removal, as Windows' installed apps do.
+  Sallyport, and Settings → About has Uninstall Sallyport…; each opens the removal, as Windows' installed apps do.
+- A small uninstaller (2026-10-21, D32): `uninstall.exe` beside the program, 4.4 MB, compiled ahead of time with no .NET
+  inside, in Windows' own dialog and Sallyport's language; every way to remove Sallyport starts it. The removal is
+  setup's own, as before.
 - The window and setup follow Windows' Text size (Settings → Accessibility → Text size; 2026-10-21): the window's
   page is sized in rem of a root that the client sets from it, and arranges itself for a narrow window by its width in
   that size; setup's window and fonts grow by it too.

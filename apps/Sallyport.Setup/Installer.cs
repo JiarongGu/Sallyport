@@ -17,6 +17,11 @@ sealed record SetupChoices(bool Driver, bool RemoveData);
 /// removes only if it installed it.</summary>
 sealed record SetupRecord(string Version, bool InstalledDriver, DateTimeOffset At);
 
+/// <summary>The record's JSON made when it is built, not by reflection: the uninstaller is compiled ahead of time (D32),
+/// where reflection cannot be relied on. The same shape as before, so a record an earlier setup wrote reads.</summary>
+[System.Text.Json.Serialization.JsonSerializable(typeof(SetupRecord))]
+partial class SetupJson : System.Text.Json.Serialization.JsonSerializerContext;
+
 /// <summary>Setup as it goes: a step begun (<see cref="Text"/>) or only further along, and how much of the whole is done.</summary>
 sealed record SetupProgress(string? Text, double Done);
 
@@ -75,6 +80,14 @@ sealed class Installer
 
     /// <summary>WebView2's loader, beside the program rather than inside it (which would unpack it to %TEMP%).</summary>
     public const string Loader = "WebView2Loader.dll";
+
+    /// <summary>The small program that removes Sallyport (D32; the owner: "after install the setup/uninstall should be a
+    /// small exe"), beside the program; every way to remove Sallyport starts it.</summary>
+    public const string Uninstaller = "uninstall.exe";
+
+    /// <summary>The start that asked for this one to be administrator, and waits for it (<c>--asker</c>): not a window
+    /// to close.</summary>
+    public static int Asker { get; set; }
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Sallyport";
     private const string ProgId = "Sallyport.ovpn";
 
@@ -157,6 +170,11 @@ sealed class Installer
     private static string RemovalShortcut => Path.Combine(MenuFolder, L.T("Uninstall Sallyport") + ".lnk");
     private static string OldShortcut => Path.Combine(Programs, "Sallyport.lnk");
     public string Client => Path.Combine(_folder, Program);
+
+    // What removes Sallyport: the small uninstaller once it is here, else the program itself (D30), as an install from a
+    // payload without one has it.
+    private (string Program, string Arguments) Remover =>
+        File.Exists(Path.Combine(_folder, Uninstaller)) ? (Path.Combine(_folder, Uninstaller), "") : (Client, "/uninstall");
 
     /// <summary>Whether removing Sallyport takes the packet driver too: only if Sallyport put it there.</summary>
     public bool RemovesDriver => ReadRecord()?.InstalledDriver == true;
@@ -274,7 +292,7 @@ sealed class Installer
         say(L.T("Adding Sallyport to the Start menu…"), 0.95);
         try { File.Delete(OldShortcut); } catch (IOException) { }
         ShellLink.Create(Shortcut, Client, "", L.T("Send your games and apps through your VPN"));
-        ShellLink.Create(RemovalShortcut, Client, "/uninstall", L.T("Remove Sallyport from this computer"));
+        ShellLink.Create(RemovalShortcut, Remover.Program, Remover.Arguments, L.T("Remove Sallyport from this computer"));
         RegisterOpenWith();
         RegisterUninstall(version);
         say(L.T("Done."), 1);
@@ -431,7 +449,7 @@ sealed class Installer
         // service, never killed under the service manager, which would start it again), nor this setup and the start
         // that asked for it to be administrator.
         while (Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Program))
-                   .Where(p => p.SessionId != 0 && p.Id != Environment.ProcessId && p.Id != SetupProgram.Asker).ToArray() is { Length: > 0 } left)
+                   .Where(p => p.SessionId != 0 && p.Id != Environment.ProcessId && p.Id != Asker).ToArray() is { Length: > 0 } left)
         {
             if (Environment.TickCount64 > deadline)
             {
@@ -569,8 +587,9 @@ sealed class Installer
         key.SetValue("Publisher", "Sallyport");
         key.SetValue("InstallLocation", _folder);
         key.SetValue("DisplayIcon", $"\"{Client}\",0");
-        key.SetValue("UninstallString", $"\"{Client}\" /uninstall");
-        key.SetValue("QuietUninstallString", $"\"{Client}\" /uninstall /quiet");
+        var (remover, arguments) = Remover;
+        key.SetValue("UninstallString", $"\"{remover}\" {arguments}".TrimEnd());
+        key.SetValue("QuietUninstallString", $"\"{remover}\" {arguments} /quiet".Replace("  ", " "));
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
         key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         var kilobytes = new DirectoryInfo(_folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) / 1024;
@@ -579,11 +598,11 @@ sealed class Installer
 
     private SetupRecord? ReadRecord()
     {
-        try { return File.Exists(Record) ? JsonSerializer.Deserialize<SetupRecord>(File.ReadAllBytes(Record)) : null; }
+        try { return File.Exists(Record) ? JsonSerializer.Deserialize(File.ReadAllBytes(Record), SetupJson.Default.SetupRecord) : null; }
         catch (JsonException) { return null; }
     }
 
-    private void WriteRecord(SetupRecord record) => File.WriteAllBytes(Record, JsonSerializer.SerializeToUtf8Bytes(record));
+    private void WriteRecord(SetupRecord record) => File.WriteAllBytes(Record, JsonSerializer.SerializeToUtf8Bytes(record, SetupJson.Default.SetupRecord));
 
     // Everything in the folder but what is kept: a folder inside it, and the folders that lead to it.
     private static IEnumerable<string> Removable(string folder, IReadOnlyList<string>? keep)

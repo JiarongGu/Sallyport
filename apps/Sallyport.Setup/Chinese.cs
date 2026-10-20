@@ -84,6 +84,8 @@ internal static class Chinese
         ["Starting…"] = "正在开始…",
         ["Stopped: {0}"] = "已停止：{0}",
         ["Sallyport was not removed"] = "Sallyport 未被移除",
+        ["Sallyport is not installed in {0}."] = "Sallyport 未安装在 {0}。",
+        ["What stays"] = "保留的内容",
         ["Setup did not finish"] = "安装未完成",
         ["The details below, and the setup log, say every step it took."] = "下方详情和安装日志记录了它执行的每一步。",
         ["Try again"] = "重试",

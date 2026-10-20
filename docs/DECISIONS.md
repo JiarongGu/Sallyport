@@ -873,3 +873,38 @@ clipboard read back); Export's save dialog opened and cancelled; the language sw
 written twice); setup's quiet upgrade, exit 0 in 10 s, the service running again, both shortcuts written; `/uninstall`'s
 window opened and cancelled. Not measured trimmed: Import's open dialog (as Export's, Shenora's), a driver install or
 removal (they pause the network; the code is the same), and a first install and a removal to the end (no clean machine).
+
+## D32 — A small uninstaller beside the program, setup's removal compiled ahead of time (2026-10-21; measured, but for a removal to the end)
+
+The owner: "after install the setup/uninstall should be a small exe", and "the setup exe as the same size of the actual
+exe does not sound right after installation". Since D30 the remover was the program itself with `/uninstall`.
+
+- **`apps/Sallyport.Uninstall`, published as `uninstall.exe`** (4.4 MB, from the program's 28.8): Native AOT, so it
+  carries no .NET runtime. It compiles in setup's own `Installer.cs`, `Language.cs`, `Chinese.cs` and `ShellLink.cs`,
+  so the removal is setup's, word for word and step for step, and cannot drift from it; `Installer.Asker` moved out
+  of setup's `Program` for that, and setup's record is source-generated JSON (reflection is not relied on ahead of
+  time; the shape is as before, so an earlier record reads). Windows Forms is not available ahead of time: its window is
+  Windows' own task dialog (`TaskDialogIndirect`), three pages in one — what it removes, with "Also remove the VPN
+  profiles and settings" and what stays folded; each step and its share as the progress, Close held until done; then
+  removed, removed with what was left, or not removed and why — in the language the person chose in Sallyport, its own
+  buttons (Windows' common ones are in Windows' language), Sallyport's mark on its title bar. Its manifest asks for
+  administrator, and common controls 6. `/quiet` (and `--remove-data`) answers by exit code; another folder's
+  Sallyport is not its to remove.
+- **Carried inside the program**, as WebView2's loader is: `package.ps1` compiles it first and the program takes it as a
+  resource (`UninstallerExe`); setup writes it beside the program, and registers it — the uninstall entry's
+  `UninstallString` and `QuietUninstallString`, the Start menu's Uninstall Sallyport, Settings' About. Where it is not
+  there (a payload without one), the program with `/uninstall` is the remover, as before; that path stays.
+- **The linker is found through vswhere**, which Visual Studio's installer keeps out of PATH: `package.ps1` puts it there
+  for the build (without it the native link ran without the Windows SDK's libraries: exit 123).
+
+Measured 2026-10-21 on the owner's machine: the release rehearsal (0.1.1) 30,992,189 bytes with it inside; its quiet
+upgrade wrote `uninstall.exe` (4,394,496 bytes) beside the program and pointed the entry (`"…\uninstall.exe"`, and
+`… /quiet`) and the Start menu's 卸载 Sallyport at it. From each — the entry's own command, the Start menu shortcut,
+Settings → About → 卸载 Sallyport… in the window — it opened "从这台电脑上移除 Sallyport" in Chinese, and its Cancel
+left everything: the service running, the program and `data` there. From a folder without Sallyport it says so
+("Sallyport 未安装在 …", exit 1). Its removing and ending pages were seen through a scratch harness of the same dialog
+code with a stand-in for the removal that only reports setup's steps: the progress at "正在从开始菜单和 Windows 列表中移除
+Sallyport…", then "Sallyport 已移除", "Sallyport 已移除，但有遗留内容" with what was left, and "Sallyport 未被移除" with why
+(exit 1). Found on the way: Windows' icon constants are a WORD (`MAKEINTRESOURCE(-2)`, 0xFFFE); passed wider, the dialog
+read a string's address there (an access violation). Not measured: a removal to the end (the owner's install stays;
+TASKS §4), a machine with UAC on (where its manifest's prompt is the one), and the release workflow's build of it.

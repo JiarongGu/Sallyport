@@ -42,6 +42,12 @@
     <InternalsVisibleTo Include="Sallyport.Client.Tests" />
   </ItemGroup>
 
+  <!-- The small uninstaller (D32), compiled ahead of time on its own by package.ps1 and carried as a resource, as the
+       loader is, for setup to write beside the program. A build without it installs the program as its own remover. -->
+  <ItemGroup Condition="'$(UninstallerExe)' != ''">
+    <EmbeddedResource Include="$(UninstallerExe)" LogicalName="uninstall.exe" WithCulture="false" />
+  </ItemGroup>
+
   <!-- The page, built from web/ into wwwroot/ (gitignored) and embedded. WithCulture="false": a name like msg.fr.json
        would otherwise go to a satellite assembly, out of the bundle. -->
   <ItemGroup>

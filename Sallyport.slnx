@@ -9,6 +9,7 @@
     <Project Path="apps/Sallyport.Observer/Sallyport.Observer.csproj" />
     <Project Path="apps/Sallyport.Service/Sallyport.Service.csproj" />
     <Project Path="apps/Sallyport.Setup/Sallyport.Setup.csproj" />
+    <Project Path="apps/Sallyport.Uninstall/Sallyport.Uninstall.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Sallyport.Driver/Sallyport.Driver.csproj" />

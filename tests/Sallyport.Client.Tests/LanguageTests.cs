@@ -78,7 +78,10 @@ public sealed partial class LanguageTests
         var setup = Path.Combine(Repository(), "apps", "Sallyport.Setup");
         // Setup's table is its own assembly's: read from its source, as its keys are.
         var table = SetupTable().Matches(File.ReadAllText(Path.Combine(setup, "Chinese.cs"))).Select(m => m.Groups[1].Value).ToHashSet();
-        var keys = Directory.EnumerateFiles(setup, "*.cs").Where(f => !f.EndsWith("Chinese.cs", StringComparison.Ordinal))
+        // The uninstaller speaks with setup's words (D32): its own sources are read with setup's.
+        var uninstaller = Path.Combine(Repository(), "apps", "Sallyport.Uninstall");
+        var keys = Directory.EnumerateFiles(setup, "*.cs").Concat(Directory.EnumerateFiles(uninstaller, "*.cs"))
+            .Where(f => !f.EndsWith("Chinese.cs", StringComparison.Ordinal))
             .SelectMany(f => HostT().Matches(File.ReadAllText(f)).Select(m => m.Groups[1].Value))
             // The verbs, said through L.T(verb).
             .Concat(["Install", "Update", "Reinstall"])

@@ -10,11 +10,6 @@ The owner, 2026-10-21: "next session will be a full code review + perpare for nu
 library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, After 0.1.0.
 
 The owner's reports since, each first:
-- **A small uninstaller.** "after install the setup/uninstall should be a small exe". Today the uninstall entry, the
-  Start menu's and Settings' all start the program itself with `/uninstall` (D30). **Done when:** setup writes a small
-  uninstaller beside the program and every way to remove Sallyport starts it; it removes as setup's removal does (the
-  data kept unless asked), in the window's language; measured opening and cancelling it from each, and a removal to
-  the end on a machine where that is safe (§4 until one exists).
 - **A folder release with a manifest.** "instead bundle we will need a zip/folder bundle too with mainfest file for file
   hash check (and this is been widely used in sibling repo you can check and pick the best one you think)". **Done
   when:** the release has, beside the setup exe, a zip of the installed folder and a manifest (each file's size and
@@ -126,6 +121,8 @@ were seeded instead), Firefox and Electron launches, the dark theme of the new w
 - **Sizes at another display scale (2026-10-21):** the window and setup follow Windows' Text size (measured at 100% and
   150% on the owner's one screen, at 200%, through `SALLYPORT_TEXT_SCALE`); the screen's own scale is WinForms' and
   WebView2's, as before. Not measured at another display scale: this machine has one screen. Measure at 100% and 150%.
+- **The small uninstaller's removal (2026-10-21, D32):** opened from every way in and cancelled on the owner's machine,
+  its removing and ending pages seen through a harness; a removal to the end, on a machine where that is safe.
 - **One program's install and removal (2026-10-21, D30):** measured as upgrades of the owner's install and used; not a
   first install on a machine without Sallyport, nor a removal to the end (the Start menu's Uninstall Sallyport, Settings'
   Uninstall Sallyport… and Windows' installed apps each open setup's removal, cancelled there), nor with UAC on. A clean
