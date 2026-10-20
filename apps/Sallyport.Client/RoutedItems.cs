@@ -27,17 +27,42 @@ internal sealed record RoutedProgram(
     public string LaunchArguments => Arguments.Length > 0 ? Arguments : Proxy?.Arguments ?? "";
 }
 
+/// <summary>An app in a profile's section (D24): it goes through that profile whenever the person connects it, while
+/// <see cref="On"/> — the switch beside it, kept whether or not the profile is connected (D23).</summary>
+internal sealed record AppUse(string ProfileId, bool On = true);
+
 /// <summary>
-/// What the person routes, called an app in the window: a program, or a folder of them (a game). Its VPN profile and what
-/// its packets do while that profile's tunnel is lost apply to every program that does not say otherwise.
-/// <see cref="UseVpn"/>: its switch, the person's choice — it goes through the VPN whenever its profile is connected, and
-/// the switch stays as it is while the profile is not (D23). <see cref="IconProgramId"/>: the program whose icon is the
-/// app's, when the person chose one.
+/// What the person routes, called an app in the window: a program, or a folder of them (a game). What its packets do while
+/// a tunnel is lost applies to every program that does not say otherwise. <see cref="Uses"/>: the profiles it goes
+/// through, each in that profile's section with a switch of its own — an app in many, a profile with many (D24); the
+/// first that is connected carries it. <see cref="ProfileId"/> and <see cref="UseVpn"/> are an earlier client's one
+/// profile and switch, read into <see cref="Uses"/> and never written since. <see cref="IconProgramId"/>: the program
+/// whose icon is the app's, when the person chose one.
 /// </summary>
 internal sealed record RoutedItem(
     string Id, string Name, string? Folder, DateTimeOffset Created, string? ProfileId, LossMode Loss, int? DirectAfterSeconds,
-    IReadOnlyList<RoutedProgram> Programs, string? LaunchProgramId = null, bool UseVpn = false, string? IconProgramId = null)
+    IReadOnlyList<RoutedProgram> Programs, string? LaunchProgramId = null, bool UseVpn = false, string? IconProgramId = null,
+    IReadOnlyList<AppUse>? Uses = null)
 {
+    /// <summary>Its sections, an earlier client's one profile read as one.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<AppUse> Sections => Uses ?? (ProfileId is { } profile ? [new AppUse(profile, UseVpn)] : []);
+
+    public AppUse? UseOf(string profileId) => Sections.FirstOrDefault(u => u.ProfileId == profileId);
+
+    /// <summary>In that profile's section, or taken out of it; its switch set, or on when it joins.</summary>
+    public RoutedItem WithUse(string profileId, bool? on, bool remove = false) => this with
+    {
+        ProfileId = null,
+        UseVpn = false,
+        Uses = remove ? [.. Sections.Where(u => u.ProfileId != profileId)]
+            : UseOf(profileId) is null ? [.. Sections, new AppUse(profileId, on ?? true)]
+            : [.. Sections.Select(u => u.ProfileId == profileId ? u with { On = on ?? u.On } : u)],
+    };
+
+    /// <summary>The profile a Launch connects for it: the first of its sections that is connected, else its first.</summary>
+    public string? LaunchProfile(Func<string, bool> connected) =>
+        Sections.FirstOrDefault(u => connected(u.ProfileId))?.ProfileId ?? Sections.FirstOrDefault()?.ProfileId;
     /// <summary>Its programs routed by their packets, as the router service names them: the included ones whose method it is.</summary>
     [JsonIgnore]
     public IReadOnlyList<RoutedProgram> PacketPrograms => [.. Programs.Where(p => p.Included && p.Packets)];
@@ -51,7 +76,7 @@ internal sealed record RoutedItem(
     public RoutedProgram? ProxyProgram => Programs.FirstOrDefault(p => p.Included && p.Proxy is not null);
 
     [JsonIgnore]
-    public GameChoice Choice => new(ProfileId, Loss, DirectAfterSeconds);
+    public GameChoice Choice => new(Sections.FirstOrDefault()?.ProfileId, Loss, DirectAfterSeconds);
 
     /// <summary>Its programs as the router service takes them: each sending all its traffic, with the app's loss policy.</summary>
     [JsonIgnore]
@@ -64,7 +89,7 @@ internal sealed record RoutedItem(
 
     /// <summary>As the proxy launcher and its views take an app; null when nothing of it is launched with proxy settings.</summary>
     public RoutedApp? AsApp() => ProxyProgram is { Proxy: { } proxy } program
-        ? new RoutedApp(Id, Name, program.Path, proxy.Kind, program.ProfileId ?? ProfileId ?? "", proxy.Arguments)
+        ? new RoutedApp(Id, Name, program.Path, proxy.Kind, program.ProfileId ?? Sections.FirstOrDefault()?.ProfileId ?? "", proxy.Arguments)
         : null;
 }
 
@@ -154,8 +179,8 @@ internal sealed class RoutedItemStore
     /// (<see cref="GameFolder.Scan"/>).</summary>
     public RoutedItem CreateFromFolder(string name, string folder, string? profileId)
     {
-        var item = new RoutedItem(NewId(8), Named(name), Path.GetFullPath(folder), DateTimeOffset.UtcNow, profileId, LossMode.Hold, null,
-            [.. GameFolder.Scan(folder).Select(e => new RoutedProgram(NewId(6), e.Path, e.Included, e.Reason, false, Packets: true, Proxy: null))]);
+        var item = new RoutedItem(NewId(8), Named(name), Path.GetFullPath(folder), DateTimeOffset.UtcNow, null, LossMode.Hold, null,
+            [.. GameFolder.Scan(folder).Select(e => new RoutedProgram(NewId(6), e.Path, e.Included, e.Reason, false, Packets: true, Proxy: null))], Uses: Sections(profileId));
         Put(item);
         return item;
     }
@@ -174,7 +199,7 @@ internal sealed class RoutedItemStore
         if (!programs.Any(p => string.Equals(p.Path, full, StringComparison.OrdinalIgnoreCase)))
             programs.Insert(0, new RoutedProgram(NewId(6), full, true, null, true, Packets: true, Proxy: null));
         var launch = programs.First(p => string.Equals(p.Path, full, StringComparison.OrdinalIgnoreCase)).Id;
-        var item = new RoutedItem(NewId(8), Named(name), folder, DateTimeOffset.UtcNow, profileId, LossMode.Hold, null, programs, launch);
+        var item = new RoutedItem(NewId(8), Named(name), folder, DateTimeOffset.UtcNow, null, LossMode.Hold, null, programs, launch, Uses: Sections(profileId));
         Put(item);
         return item;
     }
@@ -184,8 +209,8 @@ internal sealed class RoutedItemStore
     public RoutedItem CreateFromProgram(string name, string path, AppKind kind, string? profileId, bool packets = false, bool proxy = true)
     {
         var id = NewId(8);
-        var item = new RoutedItem(id, Named(name), null, DateTimeOffset.UtcNow, profileId, LossMode.Hold, null,
-            [new RoutedProgram(NewId(6), Path.GetFullPath(path), true, null, true, packets, proxy ? new ProxyLaunch(kind, "", id) : null)]);
+        var item = new RoutedItem(id, Named(name), null, DateTimeOffset.UtcNow, null, LossMode.Hold, null,
+            [new RoutedProgram(NewId(6), Path.GetFullPath(path), true, null, true, packets, proxy ? new ProxyLaunch(kind, "", id) : null)], Uses: Sections(profileId));
         Put(item);
         return item;
     }
@@ -259,6 +284,23 @@ internal sealed class RoutedItemStore
             Write(next, verify: false);
             _items = next;
             return true;
+        }
+    }
+
+    // A new app's first section, on: it was added to go through it.
+    private static IReadOnlyList<AppUse> Sections(string? profileId) => profileId is null ? [] : [new AppUse(profileId)];
+
+    /// <summary>Takes a profile out of every app's sections (the profile removed): the apps stay, going through their others.</summary>
+    public int Forget(string profileId)
+    {
+        lock (_gate)
+        {
+            var next = _items.Select(i => i.UseOf(profileId) is null ? i : i.WithUse(profileId, null, remove: true)).ToList();
+            var changed = next.Zip(_items).Count(pair => !ReferenceEquals(pair.First, pair.Second));
+            if (changed == 0) return 0;
+            Write(next, verify: false);
+            _items = next;
+            return changed;
         }
     }
 

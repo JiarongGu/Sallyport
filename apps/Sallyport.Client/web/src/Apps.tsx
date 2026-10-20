@@ -14,7 +14,7 @@ export function Apps({ state, now, open, editorForm }: {
   const editing = state.editor;
   const subject = editing?.kind === 'program' ? editing.subjectId.split('/')[0] : editing?.subjectId;
   return <section className="page" aria-label={t('Apps')}>
-    <p className="page-intro secondary">{t('Your games and programs. Turn on Use VPN and only that app goes through your VPN; everything else keeps your own connection.')}</p>
+    <p className="page-intro secondary">{t('Your games and programs. Each goes through the VPNs you put it in, on its page or on Overview; everything else keeps your own connection.')}</p>
     {state.appsEmpty && <EmptyView empty={state.appsEmpty} actions={state.actions} />}
     {editorForm && !state.apps.some((app) => app.id === subject) && editorForm}
     <div className="rows">
@@ -37,9 +37,6 @@ function AppHead({ app, now, headingId, children }: { app: AppItemView; now: num
     </div>
     <div className="actions row-primary">
       <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
-      {/* Its Use VPN, a choice that stands whether or not its profile is connected: the switch with its word beside it. */}
-      {app.actions.vpn.visible && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
-      <Switch on={app.vpnOn} action={app.actions.vpn} onFlip={() => post('SET_APP_VPN', { id: app.id, on: !app.vpnOn })} />
     </div>
     {children}
   </div>;
@@ -62,6 +59,7 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
   app: AppItemView; state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
   const monitorId = useId();
+  const vpnsId = useId();
   const setupId = useId();
   const programsId = useId();
   const editing = state.editor;
@@ -88,7 +86,22 @@ export function AppPage({ app, state, now, expanded, toggle, editorForm }: {
           <Traffic traffic={channel.traffic} />
         </div>}
       </div>
-    </section> : app.actions.vpn.visible && !app.vpnOn && <p className="next-step">{t('Turn on Use VPN above, then start it as you always do.')}</p>}
+    </section> : null}
+
+    {/* The VPNs it goes through, one switch each (D24): the same as its row in each profile's section on Overview. */}
+    {app.vpns && app.vpns.length > 0 && <section className="settings-group" aria-labelledby={vpnsId}>
+      <h2 id={vpnsId}>{t('Goes through')}</h2>
+      <p className="secondary">{t('Turn on Use VPN for each VPN it should go through. While two are connected, it goes through the first; start it as you always do.')}</p>
+      <div className="card">
+        <ul className="vpn-list">{app.vpns.map((vpn) => <li key={vpn.profileId}>
+          <span className="app-line"><span className="app-name">{vpn.name}</span><StatusPill tone={vpn.tone}>{vpn.statusText}</StatusPill>
+            {vpn.detailText && <span className="metadata secondary">{vpn.detailText}</span>}</span>
+          <ActionButton action={vpn.launch} onClick={() => post('LAUNCH_APP', { id: app.id, profileId: vpn.profileId })} />
+          {vpn.vpn.visible && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
+          <Switch on={vpn.on} action={vpn.vpn} onFlip={() => post('SET_APP_VPN', { id: app.id, profileId: vpn.profileId, on: !vpn.on })} />
+        </li>)}</ul>
+      </div>
+    </section>}
 
     <section className="settings-group" aria-labelledby={programsId}>
       <div className="group-head">

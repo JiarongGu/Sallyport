@@ -95,16 +95,6 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, name: event.target.value } })} />
         {error('name')}
       </div>
-      <div className="field">
-        <label htmlFor={`${prefix}-profile`}>{t('VPN profile')}</label>
-        <select id={`${prefix}-profile`} value={draft.values.profileId ?? ''} disabled={saving}
-          aria-invalid={!!editor.errors.profileId} aria-describedby={description('profileId')}
-          onChange={(event) => onChange({ ...draft, values: { ...draft.values, profileId: event.target.value || null } })}>
-          <option value="" hidden disabled />
-          {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
-        </select>
-        {error('profileId')}
-      </div>
       {editor.options && editor.options.length > 0 && <div className="field">
         <label htmlFor={`${prefix}-launch`}>{t('Launch starts')}</label>
         <select id={`${prefix}-launch`} value={draft.values.launchProgramId ?? ''} disabled={saving}
@@ -302,7 +292,7 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
           {error('name')}
         </div>
         <div className="field">
-          <label htmlFor={`${prefix}-profile`}>{t('VPN profile')}</label>
+          <label htmlFor={`${prefix}-profile`}>{t('Goes through')}</label>
           <select id={`${prefix}-profile`} value={values.profileId ?? ''} aria-invalid={!!editor.errors.profileId}
             onChange={(event) => update({ profileId: event.target.value || null })}>
             <option value="">{t('Choose later')}</option>

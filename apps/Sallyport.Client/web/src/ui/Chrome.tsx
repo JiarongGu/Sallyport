@@ -24,14 +24,6 @@ export const pages: readonly (readonly [Page, string, IconName])[] = [
   ['network', 'Overview', 'overview'], ['apps', 'Apps', 'apps'], ['profiles', 'Profiles', 'key'], ['settings', 'Settings', 'gear'],
 ];
 
-/** The profile shown first on the Overview: the one chosen, else the first with a connection open (trouble first, as
- *  the host orders them), else the first. */
-export function featuredProfile(state: ClientState, featured: string | null): ProfileView | undefined {
-  return state.profiles.find((p) => p.id === featured)
-    ?? state.profiles.find((p) => state.network.channels.some((c) => c.profileId === p.id))
-    ?? state.profiles[0];
-}
-
 /**
  * The menu as a rail, always narrow: the mark; the pages, each an icon with its word under it; Settings at the foot;
  * and under the buttons whether anything is connected, in its tone. The Overview holds the switch itself.

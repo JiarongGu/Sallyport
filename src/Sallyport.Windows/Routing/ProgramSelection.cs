@@ -3,8 +3,9 @@ using System.Text.Json.Serialization;
 namespace Sallyport.Windows.Routing;
 
 /// <summary>A program a route selects, by its executable's full path, and what its packets do while the route's tunnel
-/// is lost: apps of one route may each say otherwise (D23).</summary>
-public sealed record ProgramRule(string Path, LossMode Loss = LossMode.Hold, int? DirectAfterSeconds = null)
+/// is lost: apps of one route may each say otherwise (D23). <see cref="Lane"/>: the profile's tunnel it goes into, one lane
+/// per profile carrying apps (D24).</summary>
+public sealed record ProgramRule(string Path, LossMode Loss = LossMode.Hold, int? DirectAfterSeconds = null, int Lane = 0)
 {
     [JsonIgnore]
     public LossPolicy Policy => new(Loss, DirectAfterSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null);
@@ -66,6 +67,10 @@ public sealed class ProgramSelection
     /// <summary>The rule of the program a selected process runs; null for one not selected. On the thread that calls
     /// <see cref="Selects"/>.</summary>
     public ProgramRule? RuleOf(int pid) => _pathOf.TryGetValue(pid, out var path) ? _rules.GetValueOrDefault(path) : null;
+
+    /// <summary>The lane of the program a selected process runs; 0 for one not selected. On the thread that calls
+    /// <see cref="Selects"/>.</summary>
+    public int LaneOf(int pid) => RuleOf(pid)?.Lane ?? 0;
 
     /// <summary>Another set of programs from now on, every process looked at afresh. Only on the thread that calls
     /// <see cref="Selects"/> — the router's, through <see cref="Router.Reselect"/> — so no decision is made half on

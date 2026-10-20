@@ -21,17 +21,25 @@ public class WindowViewTests
             state == TunnelServiceStatus.Up ? "udp/1194" : null, 1, 0, error, state == TunnelServiceStatus.Up ? "10.8.0.2" : null, 2, 2048, 4096, 1088),
             null, false, false, null, false, false));
 
-    private static RoutedItem Zenless() => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", At, Us.Id, LossMode.Hold, null,
-        [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", true, null, false, true, null)], UseVpn: true);
+    private static RoutedItem Zenless() => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", At, null, LossMode.Hold, null,
+        [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", true, null, false, true, null)], Uses: [new AppUse(Us.Id)]);
 
+    // us's lane carrying Zenless, its tunnel as given.
     private static RunFacts Running(SessionState tunnel) =>
-        new(Us.Id, new Dictionary<string, DateTimeOffset> { [Zenless().Id] = At }, At, false,
-            new SessionStatus(tunnel, At, "udp/1194", 1, 0, null, "10.8.0.6", 1024, 2048),
-            new RouteState(tunnel == SessionState.Up ? RoutePhase.Routing : RoutePhase.Held, 1, 10, 12, 500, 2, 0, 0, 0, 0, 0, 3, 1, 0),
-            At, null, null);
+        new([new LaneFacts(Us.Id, 0, new Dictionary<string, DateTimeOffset> { [Zenless().Id] = At },
+                new SessionStatus(tunnel, At, "udp/1194", 1, 0, null, "10.8.0.6", 1024, 2048), tunnel == SessionState.Up ? RoutePhase.Routing : RoutePhase.Held, At)],
+            At, false, new RouteState(tunnel == SessionState.Up ? RoutePhase.Routing : RoutePhase.Held, 1, 10, 12, 500, 2, 0, 0, 0, 0, 0, 3, 1, 0), null, null);
 
-    private static IReadOnlyList<AppItemView> Games(RunFacts? run) =>
-        [AppViews.Item(new ItemFacts(Zenless(), Us, run, run is not null, true, false, null, _ => []))];
+    private static ItemFacts Facts(RunFacts? run) => new(Zenless(), [Jp, Us], run, id => run is not null && id == Us.Id, _ => null, true, false, null, _ => []);
+
+    private static IReadOnlyList<AppItemView> Games(RunFacts? run) => [AppViews.Item(Facts(run))];
+
+    // Each profile's section as the core builds it: the apps in it, and the others to put in.
+    private static Dictionary<string, (IReadOnlyList<AppSectionView>, IReadOnlyList<EditorOption>)> Sections(RunFacts? run) => new()
+    {
+        [Jp.Id] = ([], [new EditorOption(Zenless().Id, Zenless().Name)]),
+        [Us.Id] = ([AppViews.InSection(Facts(run), Us, forApp: false)], []),
+    };
 
     private static readonly IReadOnlyDictionary<string, string?> NoProblems = new Dictionary<string, string?>();
 
@@ -100,19 +108,26 @@ public class WindowViewTests
     }
 
     [Fact]
-    public void An_app_going_through_the_vpn_is_a_selection_on_its_profiles_channel()
+    public void Every_vpn_is_a_section_with_its_apps_and_the_others_to_put_in()
     {
         var run = Running(SessionState.Up);
-        var view = WindowViews.Network([Profile(Jp, null), Profile(Us, TunnelServiceStatus.Up)], Games(run), run, [Jp, Us], Ready, NoProblems);
+        var view = WindowViews.Network([Profile(Jp, null), Profile(Us, TunnelServiceStatus.Up)], Games(run), run, [Jp, Us], Ready, NoProblems, sections: Sections(run));
 
         var channel = Assert.Single(view.Channels);
         Assert.Equal("us", channel.Name);
         Assert.Equal("Connected", channel.StatusText);
         // The person's own connection: theirs to end, the apps' switches staying on (D23).
         Assert.True(channel.Actions.Disconnect is { Visible: true, Label: "Disconnect" });
-        var selection = Assert.Single(channel.Selections);
+        // Every profile a section in import order, connected or not; jp's empty, with Zenless to put in (D24).
+        Assert.Equal(["jp", "us"], view.Sections!.Select(s => s.Profile.Name));
+        Assert.True(view.Sections![0] is { Channel: null, Apps.Count: 0, Add: { Visible: true, Label: "Add an app to jp" } });
+        Assert.Equal("Put an app here and it goes through jp whenever it is connected.", view.Sections[0].HintText);
+        var us = view.Sections[1];
+        Assert.Same(channel, us.Channel);
+        Assert.False(us.Add.Visible);
+        var selection = Assert.Single(us.Apps);
         Assert.Equal("Zenless Zone Zero", selection.Name);
-        Assert.Equal("VPN on · us", selection.Run.StatusText);
+        Assert.Equal("VPN on · us", selection.Run!.StatusText);
         Assert.True(selection.Vpn is { Visible: true, Enabled: true, Label: "Use VPN" });
         Assert.DoesNotContain(selection.Run.Facts, f => f.Label is "Connected over" or "Tunnel address");
         Assert.Contains(channel.Facts, f => f.Label == "Tunnel address" && f.Value == "10.8.0.2");
@@ -123,22 +138,23 @@ public class WindowViewTests
     public void A_reconnecting_route_says_so_on_its_channel()
     {
         var run = Running(SessionState.Reconnecting);
-        var channel = Assert.Single(WindowViews.Network([Profile(Us, TunnelServiceStatus.Reconnecting)], Games(run), run, [Jp, Us], Ready, NoProblems).Channels);
+        var view = WindowViews.Network([Profile(Us, TunnelServiceStatus.Reconnecting)], Games(run), run, [Jp, Us], Ready, NoProblems, sections: Sections(run));
+        var channel = Assert.Single(view.Channels);
 
         Assert.Equal(Tone.Busy, channel.Tone);
         Assert.Equal("Reconnecting…", channel.StatusText);
-        Assert.Equal("Reconnecting — its internet is blocked meanwhile", channel.Selections[0].Run.StatusText);
+        Assert.Equal("Reconnecting — its internet is blocked meanwhile", Assert.Single(view.Sections!).Apps[0].Run!.StatusText);
     }
 
     [Fact]
     public void A_proxy_and_a_route_on_one_profile_are_one_channel()
     {
         var run = Running(SessionState.Up);
-        var view = WindowViews.Network([Profile(Us, TunnelServiceStatus.Up)], Games(run), run, [Jp, Us], Ready, NoProblems);
+        var view = WindowViews.Network([Profile(Us, TunnelServiceStatus.Up)], Games(run), run, [Jp, Us], Ready, NoProblems, sections: Sections(run));
 
         var channel = Assert.Single(view.Channels);
         Assert.Equal("SOCKS5 proxy on 127.0.0.1:1088", channel.ProxyText);
-        Assert.Equal("Zenless Zone Zero", Assert.Single(channel.Selections).Name);
+        Assert.Equal("Zenless Zone Zero", Assert.Single(Assert.Single(view.Sections!).Apps).Name);
         Assert.True(channel.Actions.Disconnect is { Visible: true, Label: "Disconnect" });
         Assert.Equal("1 connection · 1 app using the VPN", view.StatusText);
     }

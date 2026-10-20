@@ -19,12 +19,13 @@ public sealed class RunPump : ITunnelRoute
     private int _disposed;
 
     /// <summary>The generation is committed with the largest packet its tunnel carries whole: the router's adapter's
-    /// MTU less the tunnel's own overhead (<see cref="Tunnel.Overhead"/>).</summary>
-    public RunPump(TunnelDispatcher dispatcher, RouterRun run)
+    /// MTU less the tunnel's own overhead (<see cref="Tunnel.Overhead"/>). <paramref name="lane"/>: the profile's lane in
+    /// the run (D24); its generation crosses the pipe with the lane in its top byte.</summary>
+    public RunPump(TunnelDispatcher dispatcher, RouterRun run, int lane = 0)
     {
         _dispatcher = dispatcher;
         Tunnel = dispatcher.Tunnel;
-        Generation = dispatcher.Generation;
+        Generation = Routing.GameRoute.Wire(lane, dispatcher.Generation);
         _run = run;
         _committed = Tunnel.Config.Address is { AddressFamily: AddressFamily.InterNetwork } address
             ? run.CommitAsync(Generation, address, run.Attached.AdapterMtu - Tunnel.Overhead).AsTask()
@@ -35,16 +36,20 @@ public sealed class RunPump : ITunnelRoute
     }
 
     public Tunnel Tunnel { get; }
+    /// <summary>Its generation as the pipe carries it, lane and all.</summary>
     public int Generation { get; }
 
     void ITunnelRoute.FromTunnel(byte[] packet) => _run.FromTunnel(Generation, packet);
 
     /// <summary>Sends what the router routed into the tunnel of the generation it was routed for, and nowhere else,
     /// until the run ends. <paramref name="current"/> is the pump of the tunnel up now, or null between two.</summary>
-    public static async Task ForwardAsync(RouterRun run, Func<RunPump?> current)
+    public static Task ForwardAsync(RouterRun run, Func<RunPump?> current) => ForwardAsync(run, _ => current());
+
+    /// <summary>As above, with a tunnel per lane: <paramref name="pumpOf"/> gives the pump up now for a lane.</summary>
+    public static async Task ForwardAsync(RouterRun run, Func<int, RunPump?> pumpOf)
     {
         await foreach (var (generation, packet) in run.ToTunnel.Reader.ReadAllAsync())
-            if (current() is { } pump && pump.Generation == generation)
+            if (pumpOf(Routing.GameRoute.FromWire(generation).Lane) is { } pump && pump.Generation == generation)
                 try { await pump.Tunnel.SendAsync(packet); }
                 catch (Exception e) when (e is TunnelEnded or ObjectDisposedException or OperationCanceledException) { }
     }

@@ -324,7 +324,9 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .graph .line.in { stroke: var(--graph-in); }
 .graph .line.out { stroke: var(--graph-out); }
 
-.hero .latency, .hero .selection, .hero-apps { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
+.hero .latency, .hero-apps { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--divider); }
+/* One section per VPN (D24), each a hero card of its own. */
+.sections { display: grid; gap: 16px; }
 .hero > .facts { margin: 20px 0 0; }
 .latency { display: grid; gap: 12px; }
 .latency-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -332,10 +334,23 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .hero-apps-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .hero-apps-head h3 { font: var(--font-body-strong); }
 .hero-apps ul { list-style: none; margin: 0; padding: 0; display: grid; }
-.hero-apps li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--divider); }
+.hero-apps li { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--divider); }
+.section-app { display: flex; align-items: center; gap: 12px; }
+.section-app-detail, .hero-apps li .run { margin-left: 44px; }
+.hero-apps li .run .supporting { margin: 0; }
+.remove-from-section { margin-left: -4px; }
+.add-to-section { width: auto; max-width: 50%; min-height: 32px; }
+/* A way on from a sentence, read as part of it. */
+button.link { min-height: 0; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+button.link:hover:not(:disabled) { background: none; color: var(--accent-hover); }
+.section-hint .link { margin-left: 4px; }
 .hero-apps li:first-child { border-top: 0; }
-.hero-apps .monogram, .selection .monogram { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
-.hero-apps .app-icon, .selection .app-icon { width: 32px; height: 32px; }
+.hero-apps .monogram { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
+.hero-apps .app-icon { width: 32px; height: 32px; }
+/* An app's VPNs on its page: one row each, the switch at the end. */
+.vpn-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.vpn-list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--divider); }
+.vpn-list li:first-child { border-top: 0; }
 .app-detail { margin-top: 2px; }
 .app-line { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .app-name { font: var(--font-body-strong); min-width: 0; overflow-wrap: anywhere; }

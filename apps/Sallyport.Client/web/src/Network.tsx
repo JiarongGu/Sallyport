@@ -1,33 +1,23 @@
 import { t } from './i18n';
 import { useId, useState } from 'react';
-import type { AppItemView, ChannelView, ClientState, Page, ProfileView, TrafficView } from './contract';
+import type { AppSectionView, ClientState, Page, SectionView, TrafficView } from './contract';
 import { post } from './commands';
 import { clock, countdown, duration } from './format';
 import { RunDetails } from './Run';
 import { ActionButton, AppIcon, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { RoutingCard } from './Settings';
-import { featuredProfile } from './ui/Chrome';
 
 /**
- * What is connected and what goes through it, as OpenVPN Connect shows a connection: one profile first, with its
- * switch, its time, its traffic and its round trips, the apps that go through it beneath; the others after it.
+ * Each VPN with the apps that go through it (D24), as OpenVPN Connect shows a connection: a profile's section with its
+ * switch, its time, its traffic and its round trips, and beneath it the apps in it, each with a switch of its own. An app
+ * may be in several sections; a profile holds several apps.
  */
-export function Network({ state, now, go, featured, feature }: {
-  state: ClientState; now: number; go: (page: Page) => void; featured: string | null; feature: (id: string) => void;
-}) {
+export function Network({ state, now, go }: { state: ClientState; now: number; go: (page: Page) => void }) {
   const network = state.network;
-  const profiles = state.profiles;
-  const first = featuredProfile(state, featured);
-  const others = network.channels.filter((c) => c.profileId !== first?.id);
   return <section className="page network" aria-label={t('Overview')}>
-    <p className="page-intro secondary">{t('What is connected, and what goes through it now.')}</p>
-    {!first ? state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} /> :
-      <Hero profile={first} channel={network.channels.find((c) => c.profileId === first.id) ?? null} profiles={profiles}
-        apps={state.apps.filter((a) => a.profileId === first.id)} now={now} feature={feature} go={go} />}
-    {others.length > 0 && <section className="also" aria-labelledby="also-connected">
-      <h2 id="also-connected">{t('Also connected')}</h2>
-      <div className="rows">{others.map((channel) => <OtherChannel key={channel.id} channel={channel} now={now} feature={feature} />)}</div>
-    </section>}
+    <p className="page-intro secondary">{t('Each VPN and the apps that go through it. Connect one, and the apps switched on in it go through it; everything else keeps your own connection.')}</p>
+    {network.sections.length === 0 ? state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />
+      : <div className="sections">{network.sections.map((section) => <Section key={section.profile.id} section={section} now={now} go={go} />)}</div>}
     {/* Said here only when it needs doing something: all is well is Settings' to show. */}
     {network.routing.phase !== 'ready' && <section className="network-routing" aria-label={t('App VPN on this computer')}>
       <h2>{t('App VPN on this computer')}</h2>
@@ -36,12 +26,11 @@ export function Network({ state, now, go, featured, feature }: {
   </section>;
 }
 
-function Hero({ profile, channel, profiles, apps, now, feature, go }: {
-  profile: ProfileView; channel: ChannelView | null; profiles: ProfileView[]; apps: AppItemView[]; now: number;
-  feature: (id: string) => void; go: (page: Page) => void;
-}) {
-  const pickerId = useId();
+function Section({ section, now, go }: { section: SectionView; now: number; go: (page: Page) => void }) {
+  const profile = section.profile;
+  const channel = section.channel;
   const detailsId = useId();
+  const appsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const on = profile.actions.disconnect.visible;
   const since = profile.connectedSince ?? channel?.connectedSince;
@@ -50,15 +39,10 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
     <div className="hero-head">
       <Monogram name={profile.name} />
       <div className="hero-identity">
-        {profiles.length > 1
-          ? <><label className="sr-only" htmlFor={pickerId}>{t('Profile')}</label>
-            <select id={pickerId} className="profile-picker" value={profile.id} onChange={(event) => feature(event.target.value)}>
-              {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select></>
-          : <h2>{profile.name}</h2>}
+        <h2>{profile.name}</h2>
         <p className={`hero-status tone-text-${profile.tone}`} role="status">{profile.statusText}</p>
-        {on || since ? since && <p className="secondary metadata">{t('Connected for {0}', duration(since, now))}</p>
-          : apps.some((a) => a.vpnOn) && <p className="secondary metadata">{t('Connect, and the apps whose Use VPN is on go through it.')}</p>}
+        {since ? <p className="secondary metadata">{t('Connected for {0}', duration(since, now))}</p>
+          : !on && section.apps.some((a) => a.on) && <p className="secondary metadata">{t('Connect, and the apps switched on below go through it.')}</p>}
       </div>
       <Switch large on={on} action={on ? profile.actions.disconnect : profile.actions.connect}
         onFlip={() => post(on ? 'DISCONNECT' : 'CONNECT', { id: profile.id })} />
@@ -77,7 +61,7 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
       {channel.latency.checkedAt && <p className="metadata secondary">{t('Checked')} <time dateTime={channel.latency.checkedAt}>{clock(channel.latency.checkedAt)}</time></p>}
     </section>}
 
-    {/* How it is connected, for those who look: folded, so the hero says what a person needs at a glance. */}
+    {/* How it is connected, for those who look: folded, so the section says what a person needs at a glance. */}
     {channel && (channel.facts.length > 0 || channel.proxyText) && <div className="hero-details">
       <Disclosure open={detailsOpen} controls={detailsId} onClick={() => setDetailsOpen(!detailsOpen)}>{t('Details')}</Disclosure>
       <div id={detailsId} hidden={!detailsOpen}>
@@ -86,34 +70,43 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
       </div>
     </div>}
 
-    {channel?.selections.map((selection) => <section key={selection.id} className="selection" aria-label={selection.name}>
-      <div className="row-head">
-        <AppIcon name={selection.name} url={selection.iconUrl} />
-        <div className="row-identity">
-          <h3>{selection.name}</h3>
-          <div className="profile-status">
-            <StatusPill tone={selection.run.tone}>{selection.run.statusText}</StatusPill>
-            {selection.run.since && <span className="duration">{t('Through the VPN for {0}', duration(selection.run.since, now))}</span>}
-          </div>
-        </div>
-        <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>
-        <Switch on action={selection.vpn} onFlip={() => post('SET_APP_VPN', { id: selection.id, on: false })} />
+    {/* Its apps, each with its own switch here; the apps not in it, to put in. */}
+    <section className="hero-apps" aria-labelledby={appsId}>
+      <div className="hero-apps-head">
+        <h3 id={appsId}>{t('Apps through {0}', profile.name)}</h3>
+        {section.add.visible && <select className="add-to-section" aria-label={section.add.label} value=""
+          onChange={(event) => event.target.value && post('ADD_APP_TO_PROFILE', { id: event.target.value, profileId: profile.id })}>
+          <option value="">{section.add.label}</option>
+          {section.addable.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+        </select>}
       </div>
-      <RunDetails run={selection.run} />
-    </section>)}
-
-    {/* The other apps through this profile: each one's Use VPN to set now, connected or not, and Launch where it has one. */}
-    {apps.some((a) => !channel?.selections.some((s) => s.id === a.id)) && <section className="hero-apps" aria-label={t('Apps')}>
-      <div className="hero-apps-head"><h3>{t('Apps through it')}</h3><button type="button" onClick={() => go('apps')}>{t('Open Apps')}</button></div>
-      <ul>{apps.filter((a) => !channel?.selections.some((s) => s.id === a.id)).map((app) => <li key={app.id}>
-        <AppIcon name={app.name} url={app.iconUrl} />
-        <span className="app-line"><span className="app-name">{app.name}</span><StatusPill tone={app.tone}>{app.statusText}</StatusPill></span>
-        <ActionButton action={app.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id })} />
-        {app.actions.vpn.visible && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
-        <Switch on={app.vpnOn} action={app.actions.vpn} onFlip={() => post('SET_APP_VPN', { id: app.id, on: !app.vpnOn })} />
-      </li>)}</ul>
-    </section>}
+      {section.hintText && <p className="secondary metadata section-hint">{section.hintText}
+        {section.addable.length === 0 && <> <button type="button" className="link" onClick={() => go('apps')}>{t('Open Apps')}</button></>}</p>}
+      {section.apps.length > 0 && <ul>{section.apps.map((app) => <SectionApp key={app.appId} app={app} now={now} />)}</ul>}
+    </section>
   </article>;
+}
+
+/** An app in a section: its icon and name, what it is doing through this profile, its switch here, and its route's
+ *  detail while this profile carries it. */
+function SectionApp({ app, now }: { app: AppSectionView; now: number }) {
+  return <li className={app.run ? 'carried' : undefined}>
+    <div className="section-app">
+      <AppIcon name={app.name} url={app.iconUrl} />
+      <span className="app-line">
+        <span className="app-name">{app.name}</span>
+        <StatusPill tone={app.tone}>{app.statusText}</StatusPill>
+        {app.run?.since && <span className="duration">{t('Through the VPN for {0}', duration(app.run.since, now))}</span>}
+      </span>
+      <ActionButton action={app.launch} onClick={() => post('LAUNCH_APP', { id: app.appId, profileId: app.profileId })} />
+      {app.vpn.visible && <span className="switch-caption" aria-hidden="true">{t('Use VPN')}</span>}
+      <Switch on={app.on} action={app.vpn} onFlip={() => post('SET_APP_VPN', { id: app.appId, profileId: app.profileId, on: !app.on })} />
+      {app.remove.visible && <button type="button" className="subtle icon remove-from-section" aria-label={app.remove.label} title={app.remove.label}
+        onClick={() => post('REMOVE_APP_FROM_PROFILE', { id: app.appId, profileId: app.profileId })}><Icon name="dismiss" /></button>}
+    </div>
+    {app.detailText && !app.run && <p className="metadata secondary section-app-detail">{app.detailText}</p>}
+    {app.run && <RunDetails run={app.run} counts={false} />}
+  </li>;
 }
 
 /** Received and sent, as figures with the rate now, over a minute's graph of the two. */
@@ -147,22 +140,4 @@ function Graph({ inRates, outRates }: { inRates: number[]; outRates: number[] })
     {inRates.length > 1 && <><polygon className="area in" points={area(inRates)} /><polyline className="line in" points={line(inRates)} /></>}
     {outRates.length > 1 && <><polygon className="area out" points={area(outRates)} /><polyline className="line out" points={line(outRates)} /></>}
   </svg>;
-}
-
-function OtherChannel({ channel, now, feature }: { channel: ChannelView; now: number; feature: (id: string) => void }) {
-  return <article className={`card channel tone-border-${channel.tone}`} aria-label={channel.name}>
-    <div className="row-head">
-      <Monogram name={channel.name} />
-      <div className="row-identity">
-        <h3>{channel.name}</h3>
-        <div className="profile-status">
-          <StatusPill tone={channel.tone} announce>{channel.statusText}</StatusPill>
-          {channel.connectedSince && <span className="duration">{t('Connected for {0}', duration(channel.connectedSince, now))}</span>}
-          {channel.traffic && <span className="summary">↓ {channel.traffic.received.figure} · ↑ {channel.traffic.sent.figure}</span>}
-        </div>
-      </div>
-      <button type="button" className="subtle" onClick={() => feature(channel.profileId)}>{t('Show')}</button>
-      <Switch on action={channel.actions.disconnect} onFlip={() => post('DISCONNECT', { id: channel.profileId })} />
-    </div>
-  </article>;
 }

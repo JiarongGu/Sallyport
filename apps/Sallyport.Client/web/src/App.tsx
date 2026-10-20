@@ -24,8 +24,6 @@ export function App() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [now, setNow] = useState(Date.now);
   // Visual state only: which profile the Overview puts first.
-  const [featured, setFeatured] = useState<string | null>(() => { try { return localStorage.getItem('featured-profile'); } catch { return null; } });
-  const feature = (id: string) => { setFeatured(id); try { localStorage.setItem('featured-profile', id); } catch { /* kept for this session only */ } };
   const polite = useRef<HTMLDivElement>(null);
   const alert = useRef<HTMLDivElement>(null);
   const editorToken = useRef<string | null>(null);
@@ -156,7 +154,7 @@ export function App() {
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'apps' ? <Apps state={state} now={now} open={setAppPage}
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
-          shown === 'network' ? <Network state={state} now={now} go={setPage} featured={featured} feature={feature} /> :
+          shown === 'network' ? <Network state={state} now={now} go={setPage} /> :
           policyEditor ? <ProfileSettings name={policyName} editorForm={editorForm} /> :
           shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle} /> :
           <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null} />}

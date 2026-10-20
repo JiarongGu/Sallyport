@@ -40,9 +40,10 @@ static class Worker
             // never block forwarding behind it); the oldest goes first when the client falls behind.
             var outbound = Channel.CreateBounded<(int, byte[])>(new BoundedChannelOptions(2048) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
             // Each program's own loss policy (D23): the route holds while the tunnel is lost, and lets go what says otherwise.
+            // Each into its profile's lane (D24).
             using var route = new GameRoute(driver, adapter, selection.Selects, new LossPolicy(), (generation, packet) => outbound.Writer.TryWrite((generation, packet)),
-                PacketDriver.OnLink(adapter), lossOf: pid => selection.RuleOf(pid)?.Policy);
-            route.PhaseChanged += phase => Say($"log route {phase}");
+                PacketDriver.OnLink(adapter), lossOf: pid => selection.RuleOf(pid)?.Policy, laneOf: selection.LaneOf);
+            route.LanePhaseChanged += (lane, phase) => Say(lane == 0 ? $"log route {phase}" : $"log route lane {lane} {phase}");
 
             await using var pipe = NamedPipeServerStreamAcl.Create(RouterProtocol.RunPipe(runId), PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 1 << 20, 1 << 20, PipePeer.Security());
@@ -123,11 +124,11 @@ static class Worker
                         {
                             case CommitGeneration commit when IPAddress.TryParse(commit.Address, out var address) && address.GetAddressBytes().Length == 4:
                                 route.Commit(commit.Generation, BinaryPrimitives.ReadUInt32LittleEndian(address.GetAddressBytes()), Math.Clamp(commit.Mtu, 576, adapter.Mtu));
-                                Say($"log generation {commit.Generation} committed");
+                                Say($"log generation {Generation(commit.Generation)} committed");
                                 break;
                             case RetireGeneration retire:
                                 route.Retire(retire.Generation);
-                                Say($"log generation {retire.Generation} retired");
+                                Say($"log generation {Generation(retire.Generation)} retired");
                                 break;
                             // Checked as the supervisor checks a run's first: nothing of Sallyport's own, ever.
                             case SelectPrograms select when RouterProtocol.Routable(select.Programs ?? [], AppContext.BaseDirectory) is { Length: > 0 } programs:
@@ -156,6 +157,9 @@ static class Worker
         }
     }
 
+    // "3", or "3 of lane 1": the log says a lane only where there is more than one.
+    private static string Generation(int wire) => GameRoute.FromWire(wire) is var (lane, generation) && lane != 0 ? $"{generation} of lane {lane}" : $"{generation}";
+
     private static RouteState State(GameRoute route, ProgramSelection selection)
     {
         var r = route.Router;
@@ -168,6 +172,6 @@ static class Worker
             .ToList();
         return new RouteState(route.Phase, route.Generation, r.RoutedPackets, r.HandedUp, r.DirectPackets, r.UnownedPackets, r.HeldWhileDown,
             r.DirectWhileDown, r.LateFlows, r.Blocked.Values.Sum(), route.Stale, r.RoutedFlows, selection.Selected.Count(), selection.Unreadable.Count(),
-            programs);
+            programs, [.. Enumerable.Range(0, Router.Lanes).Select(l => new LaneRoute(l, route.PhaseOf(l), route.GenerationOf(l)))]);
     }
 }

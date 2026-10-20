@@ -129,7 +129,7 @@ public sealed class RoutedItemStoreTests : IDisposable
         var item = store.CreateFromProgramFolder("Game", Path.Combine(folder, "unins000.exe"), "ad50a53b0da826ad");
 
         Assert.Equal(Path.GetFullPath(folder), item.Folder);
-        Assert.Equal("ad50a53b0da826ad", item.ProfileId);
+        Assert.Equal([new AppUse("ad50a53b0da826ad")], item.Sections);
         var picked = Assert.Single(item.Programs, p => p.Path.EndsWith("unins000.exe", StringComparison.Ordinal));
         Assert.True(picked is { Included: true, ChosenByPerson: true, Packets: true });
         Assert.Equal(picked.Id, item.LaunchProgramId);

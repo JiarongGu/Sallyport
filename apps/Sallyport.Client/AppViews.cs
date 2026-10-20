@@ -4,7 +4,8 @@ using Sallyport.Windows.Routing;
 namespace Sallyport.Client;
 
 // The Apps page's view model and its words (docs/design/window.md, step 6): one card per app — a program or a folder —
-// each program with its methods. The page renders this and decides nothing (D15).
+// each program with its methods, and each app in the sections of the profiles it goes through (D24). The page renders
+// this and decides nothing (D15).
 
 internal sealed record ProgramActions(UiAction Toggle, UiAction Edit, UiAction Launch, UiAction Icon);
 
@@ -18,32 +19,40 @@ internal sealed record ProgramView(string Id, string Name, string Path, bool Inc
     IReadOnlyList<string> StartupSettings, ProgramActions Actions, ActivityView? Activity = null, IReadOnlyList<Fact>? Facts = null,
     string? Folder = null);
 
-/// <summary><see cref="Vpn"/>: its switch, Use VPN — posts SET_APP_VPN with the opposite of <see cref="AppItemView.VpnOn"/>.</summary>
-internal sealed record AppItemActions(UiAction Vpn, UiAction Launch, UiAction Edit, UiAction Rescan, UiAction AddProgram, UiAction Remove);
+/// <summary>An app in one profile's section (D24), as the Overview's section lists its apps and the app's page lists its
+/// VPNs: whether it is in it (<see cref="Member"/>) and switched on there (<see cref="On"/>), what that means now, and
+/// its part of the route while that profile carries it. <see cref="Name"/> and <see cref="IconUrl"/> are the app's on the
+/// Overview and the profile's on the app's page. <see cref="Vpn"/> posts SET_APP_VPN with the opposite of
+/// <see cref="On"/>; <see cref="Remove"/> takes it out of the section; <see cref="Launch"/> starts it through this
+/// profile's proxy.</summary>
+internal sealed record AppSectionView(
+    string AppId, string ProfileId, string Name, string? IconUrl, bool Member, bool On, Tone Tone, string StatusText, string? DetailText, RunView? Run,
+    UiAction Vpn, UiAction Launch, UiAction Remove);
 
-/// <summary>An app's card: its profile and methods, whether it uses the VPN (<see cref="VpnOn"/>, the person's choice, kept
-/// whether or not its profile is connected — D23), what that means now (<see cref="StatusText"/>, its route
-/// <see cref="Run"/> while its profile carries it), and what can be done with it. <see cref="DetailText"/>: what to do
-/// for it to go through the VPN, when it is on and does not yet. <see cref="IconUrl"/>: its program's own icon.</summary>
+internal sealed record AppItemActions(UiAction Launch, UiAction Edit, UiAction Rescan, UiAction AddProgram, UiAction Remove);
+
+/// <summary>An app's card: the VPNs it goes through (<see cref="ThroughText"/>, and on its page <see cref="Vpns"/>, one row
+/// per profile with its own switch), its methods, what it is doing now (<see cref="StatusText"/>, its part of the route
+/// <see cref="Run"/> while a profile carries it, <see cref="DetailText"/>: what to do for it to go through the VPN), and
+/// what can be done with it. <see cref="IconUrl"/>: its program's own icon.</summary>
 internal sealed record AppItemView(
     string Id, string Name, string? Folder, string ThroughText, string MethodText, string? LossText, Tone Tone, string StatusText,
     string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions, string? ProfileId = null,
-    IReadOnlyList<Fact>? Setup = null, bool VpnOn = false, string? DetailText = null, string? IconUrl = null);
+    IReadOnlyList<Fact>? Setup = null, string? DetailText = null, string? IconUrl = null, IReadOnlyList<AppSectionView>? Vpns = null);
 
-internal sealed record AppEditValues(string Name, string? ProfileId, LossMode Loss, string DirectAfterText, string? LaunchProgramId);
+internal sealed record AppEditValues(string Name, LossMode Loss, string DirectAfterText, string? LaunchProgramId);
 
 internal sealed record ProgramEditValues(bool Packets, bool Proxy, AppKind Kind, string Arguments);
 
 internal sealed record EditorOption(string Id, string Label, string? Help = null);
 
-/// <summary>What the host knows of an app beyond the store, for <see cref="AppViews.Item"/>. <see cref="Run"/>: the route,
-/// while it carries the app. <see cref="Connected"/>: the person connected its profile. <see cref="CarriedBy"/>: the
-/// profile whose route carries other apps while this one's waits (one route on the machine). <see cref="Failure"/>: why
-/// its profile's route ended on its own, not started again until the person asks.</summary>
+/// <summary>What the host knows of an app beyond the store, for <see cref="AppViews.Item"/>: every profile (its sections),
+/// the route (<see cref="Run"/>), which profiles the person connected (<see cref="Connected"/>), why a profile's lane
+/// ended on its own and waits for the person (<see cref="FailureOf"/>).</summary>
 internal sealed record ItemFacts(
-    RoutedItem Item, StoredProfile? Profile, RunFacts? Run, bool Connected, bool DriverReady, bool Busy, AppPhase? Launching,
-    Func<RoutedProgram, IReadOnlyList<string>> StartupSettings, Func<string, ProgramActivity?>? Activity = null, string? CarriedBy = null,
-    string? Failure = null, string? IconUrl = null);
+    RoutedItem Item, IReadOnlyList<StoredProfile> Profiles, RunFacts? Run, Func<string, bool> Connected, Func<string, string?> FailureOf,
+    bool DriverReady, bool Busy, AppPhase? Launching, Func<RoutedProgram, IReadOnlyList<string>> StartupSettings,
+    Func<string, ProgramActivity?>? Activity = null, string? IconUrl = null);
 
 internal static class AppViews
 {
@@ -81,22 +90,72 @@ internal static class AppViews
             _ => L.T("Included, with no method chosen"),
         };
 
+    /// <summary>The app in one profile's section: what its switch there means now. Its route is that profile's lane; if
+    /// another of its sections carries it, it says so; a profile not connected keeps it waiting.</summary>
+    public static AppSectionView InSection(ItemFacts f, StoredProfile profile, bool forApp)
+    {
+        var item = f.Item;
+        var use = item.UseOf(profile.Id);
+        var member = use is not null;
+        var on = use?.On == true;
+        var lane = f.Run?.LaneOf(item.Id);
+        var mine = lane?.ProfileId == profile.Id ? lane : null;
+        var other = lane is not null && mine is null ? f.Profiles.FirstOrDefault(p => p.Id == lane.ProfileId)?.Name : null;
+        var run = mine is null ? null : GameViews.Run(item, profile, f.Run!, mine);
+        // On the Overview the tunnel's own facts are the section's, said once above its apps.
+        if (run is not null && !forApp) run = WindowViews.InSection(run);
+        var packets = item.PacketPrograms.Count > 0;
+        var proxyOnly = !packets && item.ProxyProgram is not null;
+        var connected = f.Connected(profile.Id);
+        string? cannot =
+            profile.Unsupported is not null ? L.T("This version cannot connect {0}.", profile.Name) :
+            !packets && !proxyOnly ? L.T("Include at least one program sending all its traffic.") :
+            null;
+
+        var (tone, status, detail) =
+            !member ? (Tone.Off, L.T("Not used"), (string?)null) :
+            proxyOnly ? (Tone.Off, L.T("Launched with its proxy settings"), (string?)null) :
+            !on ? (Tone.Off, L.T("Off"), null) :
+            run is { } r ? (r.Tone, r.StatusText, r.DetailText) :
+            other is not null ? (Tone.Info, L.T("Through {0} now", other), L.T("It goes through {0} when {1} is disconnected.", profile.Name, other)) :
+            cannot is { } why ? (Tone.Trouble, L.T("Cannot use the VPN"), why) :
+            !f.DriverReady ? (Tone.Trouble, L.T("Cannot use the VPN"),
+                L.T("Turning on an app's VPN needs the driver and the Sallyport service. Open Settings to see what is missing.")) :
+            !connected ? (Tone.Off, L.T("Waiting for {0}", profile.Name), forApp ? L.T("Connect {0} and it goes through the VPN.", profile.Name) : null) :
+            f.FailureOf(profile.Id) is { } failed ? (Tone.Trouble, L.T("Not using the VPN"), L.T("{0} Turn it off and on to try again.", failed)) :
+            (Tone.Busy, L.T("Connecting {0}…", profile.Name), (string?)null);
+
+        var target = LaunchTarget(item);
+        string? cannotLaunch =
+            target is null ? L.T("Choose what Launch starts (Edit).") :
+            !File.Exists(target.Path) ? L.T("{0} is not where it was added from.", Path.GetFileName(target.Path)) :
+            profile.Unsupported is not null ? L.T("This version cannot connect {0}.", profile.Name) :
+            null;
+        return new AppSectionView(item.Id, profile.Id, forApp ? profile.Name : item.Name, forApp ? null : f.IconUrl, member, on, tone, status, detail, run,
+            // A browser goes through a profile by being launched with its proxy: no switch, its Launch instead.
+            Vpn: proxyOnly ? UiAction.Hidden : UiAction.Shown(L.T("Use VPN"), on || cannot is null, on ? null : cannot),
+            Launch: proxyOnly && member ? UiAction.Shown(L.T("Launch"), cannotLaunch is null && !f.Busy && f.Launching is null, cannotLaunch, busy: f.Launching is not null) : UiAction.Hidden,
+            Remove: member && !forApp ? UiAction.Shown(L.T("Remove from {0}", profile.Name)) : UiAction.Hidden);
+    }
+
     public static AppItemView Item(ItemFacts f)
     {
         var item = f.Item;
-        var profile = f.Profile;
         var packets = item.PacketPrograms;
         var proxied = item.Programs.Count(p => p.Included && p.Proxy is not null);
-        var mine = f.Run is { } run && run.Carries(item.Id) ? run : null;
-        var runView = mine is null ? null : GameViews.Run(item, profile, mine);
+        var lane = f.Run?.LaneOf(item.Id);
+        var carrying = lane is null ? null : f.Profiles.FirstOrDefault(p => p.Id == lane.ProfileId);
+        var runView = lane is not null && carrying is not null ? GameViews.Run(item, carrying, f.Run!, lane) : null;
         var target = LaunchTarget(item);
         var launching = f.Launching is not null;
         // Sallyport starts a program only where it has to: one told of the proxy as it starts. A game or a program routed
         // by its packets is started as the person always starts it (the owner: "we dont really need start the game").
         var proxyOnly = packets.Count == 0 && proxied > 0;
-        var routedNow = mine?.Route is { Phase: RoutePhase.Routing };
-        var on = item.UseVpn && item.RoutesPackets;
-        var name = profile?.Name ?? L.T("its profile");
+        var routedNow = lane?.Phase == RoutePhase.Routing;
+        var sections = f.Profiles.Where(p => item.UseOf(p.Id) is not null).ToList();
+        // Its VPNs on its page: those it is in first, then every other profile it could be put in.
+        var vpns = sections.Concat(f.Profiles.Where(p => p.Unsupported is null && !sections.Contains(p))).Select(p => InSection(f, p, forApp: true)).ToList();
+        var waiting = vpns.FirstOrDefault(v => v is { On: true, Run: null });
 
         var methodText = (packets.Count, proxied) switch
         {
@@ -105,38 +164,22 @@ internal static class AppViews
             (0, > 0) => L.Count(proxied, "Launched with proxy settings", "{0} programs launched with proxy settings"),
             _ => L.T("{0} · {1} launched with proxy settings", L.Count(packets.Count, "All traffic of 1 program", "All traffic of {0} programs"), proxied),
         };
-
-        // Why its switch cannot be turned on; one that is on can always be turned off.
-        string? cannotTurnOn =
-            profile is null ? L.T("Choose a VPN profile for it first (Edit).") :
-            profile.Unsupported is not null ? L.T("This version cannot connect its VPN profile.") :
-            packets.Count == 0 ? L.T("Include at least one program sending all its traffic.") :
-            null;
         string? cannotLaunch =
             target is null ? L.T("Choose what Launch starts (Edit).") :
             !File.Exists(target.Path) ? L.T("{0} is not where it was added from.", Path.GetFileName(target.Path)) :
-            profile is null ? L.T("Choose a VPN profile for it first (Edit).") :
-            profile.Unsupported is not null ? L.T("This version cannot connect its VPN profile.") :
+            sections.Count == 0 ? L.T("Add it to a VPN first, on its page or on Overview.") :
             null;
 
-        // Its switch is a choice that stands; what it means now is said here, and what to do when it is on and its
-        // traffic does not go through the VPN yet.
+        // What it is doing now, from the section that carries it, or the first whose switch is on.
         var (tone, status, detail) =
-            f.Launching is AppPhase.Connecting ? (Tone.Busy, L.T("Connecting {0} before launch…", profile?.Name), (string?)null) :
+            f.Launching is AppPhase.Connecting ? (Tone.Busy, L.T("Connecting before launch…"), (string?)null) :
             f.Launching is AppPhase.Starting ? (Tone.Busy, L.T("Starting…"), null) :
             runView is { } r ? (r.Tone, r.StatusText, (string?)null) :
-            profile is null ? (Tone.Off, L.T("Choose a VPN profile"), null) :
             item.Programs.Count(p => p.Included) == 0 ? (Tone.Off, L.T("No program included"), null) :
-            !item.RoutesPackets ? (Tone.Off, L.T("Ready to launch"), null) :
-            !on ? (Tone.Off, L.T("VPN off"), null) :
-            cannotTurnOn is { } why ? (Tone.Trouble, L.T("Cannot use the VPN"), why) :
-            !f.DriverReady ? (Tone.Trouble, L.T("Cannot use the VPN"),
-                L.T("Turning on an app's VPN needs the driver and the Sallyport service. Open Settings to see what is missing.")) :
-            !f.Connected ? (Tone.Info, L.T("Waiting for {0}", name), L.T("Connect {0} and it goes through the VPN.", name)) :
-            f.Failure is { } failed ? (Tone.Trouble, L.T("Not using the VPN"), L.T("{0} Turn Use VPN off and on to try again.", failed)) :
-            f.CarriedBy is { } other ? (Tone.Info, L.T("Waiting for {0}", name),
-                L.T("Apps go through {0} now: one profile carries apps at a time. Disconnect it and this app goes through {1}.", other, name)) :
-            (Tone.Busy, L.T("Connecting {0}…", name), (string?)null);
+            sections.Count == 0 ? (Tone.Off, L.T("In no VPN yet"), L.T("Turn on Use VPN for a profile below, or add it to a VPN on Overview.")) :
+            proxyOnly ? (Tone.Off, L.T("Ready to launch"), null) :
+            waiting is { } w ? (w.Tone, w.StatusText, w.DetailText) :
+            (Tone.Off, L.T("VPN off"), null);
 
         // Those that go through the VPN first, as the person reads down to what matters; the store's order otherwise.
         var icon = IconProgram(item);
@@ -163,8 +206,8 @@ internal static class AppViews
         ActivityView? Activity(RoutedProgram p)
         {
             var way = !p.Included ? L.T("your own connection")
-                : p.Packets && routedNow && profile is not null ? L.T("through {0}", profile.Name)
-                : p.Packets && on ? L.T("through the VPN once {0} is connected", name)
+                : p.Packets && routedNow && carrying is not null ? L.T("through {0}", carrying.Name)
+                : p.Packets && waiting is not null ? L.T("through the VPN once {0} is connected", f.Profiles.First(x => x.Id == waiting.ProfileId).Name)
                 : p.Packets ? L.T("through the VPN when Use VPN is on")
                 : L.T("through the VPN when launched from here");
             if (f.Activity?.Invoke(p.Path) is not { } seen) return null;
@@ -179,7 +222,7 @@ internal static class AppViews
             if (f.Activity?.Invoke(p.Path) is { Processes: > 0 } seen)
                 facts.Add(new(L.T("Connections now"), L.T("{0} TCP · {1} UDP", seen.Tcp, seen.Udp)));
             // The router's own count, by the executable it found each process running: what went through the VPN.
-            if (mine?.Route?.Programs?.FirstOrDefault(r => string.Equals(r.Path, p.Path, StringComparison.OrdinalIgnoreCase)) is { } routed)
+            if (lane is not null && f.Run?.Route?.Programs?.FirstOrDefault(r => string.Equals(r.Path, p.Path, StringComparison.OrdinalIgnoreCase)) is { } routed)
                 facts.Add(new(L.T("Through the VPN"), L.T("{0} · {1}", L.Count(routed.Flows, "1 connection", "{0} connections"),
                     L.Count(routed.Packets, "1 packet sent", "{0} packets sent"))));
             else if (p.Included && p.Packets && routedNow)
@@ -189,31 +232,29 @@ internal static class AppViews
 
         string? cannotLaunchFor(RoutedProgram p) =>
             !File.Exists(p.Path) ? L.T("{0} is not where it was added from.", Path.GetFileName(p.Path)) :
-            profile is null ? L.T("Choose a VPN profile for it first (Edit).") : null;
+            sections.Count == 0 ? L.T("Add it to a VPN first, on its page or on Overview.") : null;
 
         var included = item.Programs.Count(p => p.Included);
         var programsText = item.Folder is null && item.Programs.Count == 1 ? "" :
             L.T("Using the VPN: {0} of {1}.", L.Count(included, "1 program", "{0} programs"), item.Programs.Count);
-        return new AppItemView(item.Id, item.Name, item.Folder, profile is null ? L.T("No VPN profile chosen") : L.T("Through {0}", profile.Name), methodText,
+        var through = sections.Count == 0 ? L.T("In no VPN yet") : L.T("Through {0}", L.List(sections.Select(p => p.Name)));
+        return new AppItemView(item.Id, item.Name, item.Folder, through, methodText,
             item.RoutesPackets ? GameViews.LossText(item.Choice) : null, tone, status,
             proxyOnly && target is not null ? L.T("Launch starts {0}", Path.GetFileName(target.Path)) : null, runView, programsText, programs,
             new AppItemActions(
-                Vpn: !item.RoutesPackets ? UiAction.Hidden
-                    : UiAction.Shown(L.T("Use VPN"), on || cannotTurnOn is null, on ? null : cannotTurnOn),
                 Launch: proxyOnly ? UiAction.Shown(L.T("Launch"), cannotLaunch is null && !f.Busy, cannotLaunch, busy: launching) : UiAction.Hidden,
                 Edit: UiAction.Shown(L.T("Edit"), !launching, L.T("Wait for the launch to finish.")),
                 Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown(L.T("Scan folder again"), !launching, L.T("Wait for the launch to finish.")),
                 AddProgram: UiAction.Shown(L.T("Add a program…"), !launching && !f.Busy, L.T("A file dialog is open.")),
                 Remove: UiAction.Shown(L.T("Remove app"), !launching, L.T("Wait for the launch to finish."))),
-            profile?.Id,
-            // Its page's setup, label by label, where the card has one line of it.
+            carrying?.Id ?? sections.FirstOrDefault()?.Id,
+            // Its page's setup, label by label, where the card has one line of it; its VPNs are a section of their own.
             [
-                new(L.T("VPN profile"), profile?.Name ?? L.T("None chosen")),
                 new(L.T("Uses the VPN"), methodText),
                 .. item.RoutesPackets ? [new Fact(L.T("If the VPN drops"), GameViews.LossShort(item.Choice))] : Array.Empty<Fact>(),
                 .. proxyOnly && target is not null ? [new Fact(L.T("Launch starts"), Path.GetFileName(target.Path))] : Array.Empty<Fact>(),
             ],
-            on, detail, f.IconUrl);
+            detail, f.IconUrl, vpns);
     }
 
     /// <summary>The program whose icon is the app's: the one the person chose, else what Launch starts, else the first of

@@ -9,7 +9,7 @@ export function Profiles({ state, now, expanded, toggle }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void;
 }) {
   return <section className="page" aria-label={t('Profiles')}>
-    <p className="page-intro secondary">{t('Your VPN connections, from the .ovpn files you import. Turning on an app connects its own; you can also turn one on here.')}</p>
+    <p className="page-intro secondary">{t('Your VPN connections, from the .ovpn files you import. Connect one here or on Overview; the apps you put in it go through it.')}</p>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}
     <div className="rows">
       {state.profiles.map((profile) => <ProfileRow key={profile.id} profile={profile} now={now}

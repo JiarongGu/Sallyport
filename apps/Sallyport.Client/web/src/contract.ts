@@ -114,14 +114,37 @@ export interface DriverView {
   remove: Action;
 }
 
-/** An app's routing, as the channel it goes through shows it. */
-export interface SelectionView {
-  id: string;
+/** An app in one profile's section (D24): on the Overview, the app (its name and icon); on the app's page, the profile.
+ *  vpn posts SET_APP_VPN with the opposite of `on`; launch posts LAUNCH_APP with this profile; remove posts
+ *  REMOVE_APP_FROM_PROFILE. */
+export interface AppSectionView {
+  appId: string;
+  profileId: string;
   name: string;
-  run: RunView;
-  /** Its switch, on: flipping it posts SET_APP_VPN with on false. */
-  vpn: Action;
   iconUrl: string | null;
+  /** In the section at all; on its page, a profile it is not in reads as not used. */
+  member: boolean;
+  on: boolean;
+  tone: Tone;
+  statusText: string;
+  detailText: string | null;
+  /** Its part of the route while this profile carries it. */
+  run: RunView | null;
+  vpn: Action;
+  launch: Action;
+  remove: Action;
+}
+
+/** A profile's section on the Overview: the profile and its switch, its connection while it has one, its apps, and the
+ *  apps that could join it (add posts ADD_APP_TO_PROFILE with one of `addable`). */
+export interface SectionView {
+  profile: ProfileView;
+  channel: ChannelView | null;
+  apps: AppSectionView[];
+  addable: { id: string; label: string; help: string | null }[];
+  add: Action;
+  /** What to do when it has no app yet. */
+  hintText: string | null;
 }
 
 /** One profile's connection: what it is, what goes through it (its proxy, the apps routed), and how to end it. */
@@ -137,7 +160,6 @@ export interface ChannelView {
   facts: Fact[];
   /** "SOCKS5 proxy on 127.0.0.1:1088", when the channel serves one. */
   proxyText: string | null;
-  selections: SelectionView[];
   /** Disconnect posts DISCONNECT with the channel's profileId; checkLatency posts CHECK_LATENCY with it. */
   actions: { disconnect: Action; checkLatency: Action };
   /** ISO time the next round of attempts starts, while the channel waits for it. */
@@ -176,6 +198,8 @@ export interface NetworkView {
   channels: ChannelView[];
   /** The packet driver and the Sallyport service, as they are. */
   routing: DriverView;
+  /** Every profile that can connect, each with the apps in it (D24). */
+  sections: SectionView[];
 }
 
 export interface SettingsView {
@@ -253,10 +277,9 @@ export interface AppItemView {
   /** "3 programs included of 7."; empty for a lone program. */
   programsText: string;
   programs: ProgramView[];
-  /** vpn: its switch, Use VPN — posts SET_APP_VPN with the opposite of `vpnOn`. */
-  actions: Record<'vpn' | 'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
-  /** Its switch: the person's choice, kept whether or not its profile is connected (D23). */
-  vpnOn: boolean;
+  actions: Record<'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
+  /** Its VPNs on its page: every profile, those it is in first, each with its own switch (D24). */
+  vpns: AppSectionView[] | null;
   /** What to do for it to go through the VPN, when it is on and does not yet: "Connect jp and it goes through the VPN." */
   detailText: string | null;
   /** Its program's own icon as a data URL; null shows its initial. */
@@ -269,7 +292,6 @@ export interface AppItemView {
 
 export interface AppEditValues {
   name: string;
-  profileId: string | null;
   loss: LossMode;
   /** Under 'hold': seconds before the traffic goes direct after all, or empty to hold until the VPN is back. */
   directAfterText: string;
@@ -407,11 +429,13 @@ export interface Commands {
   BEGIN_PROGRAM_EDIT: { id: string; programId: string };
   SAVE_PROGRAM: { token: string; values: ProgramEditValues };
   REQUEST_REMOVE_APP: { id: string };
-  SET_APP_VPN: { id: string; on: boolean };
+  SET_APP_VPN: { id: string; profileId: string; on: boolean };
+  ADD_APP_TO_PROFILE: { id: string; profileId: string };
+  REMOVE_APP_FROM_PROFILE: { id: string; profileId: string };
   SET_APP_ICON: { id: string; programId: string };
   CANCEL_EDIT: { token: string };
   /** Without a programId: what the app's Launch starts. */
-  LAUNCH_APP: { id: string; programId?: string };
+  LAUNCH_APP: { id: string; programId?: string; profileId?: string };
   REQUEST_REMOVE_PROFILE: { id: string };
   /** Whatever the open confirmation asks: removing a profile or an app, disconnecting, installing or removing the driver. */
   CONFIRM: { token: string };

@@ -15,8 +15,9 @@ namespace Sallyport.Windows.Service;
 /// </summary>
 public static class RouterProtocol
 {
-    // 2: a run's programs each with their own loss policy, and changed while it runs (D23).
-    public const int Version = 2;
+    // 2: a run's programs each with their own loss policy, and changed while it runs (D23). 3: lanes — each program
+    // into its profile's tunnel, a generation saying its lane in its top byte (D24).
+    public const int Version = 3;
     public const string ServiceName = "Sallyport";
     public const string ControlPipe = "Sallyport.Router.v1";
     public static string RunPipe(string runId) => $"Sallyport.Router.v1.run.{runId}";
@@ -88,7 +89,8 @@ public sealed record Attach(string RunId) : RouterMessage;
 /// <summary>Worker → client: attached; the adapter it routes on and its MTU.</summary>
 public sealed record Attached(string Adapter, int AdapterMtu) : RouterMessage;
 
-/// <summary>Client → worker: a tunnel is up — its generation, its IPv4 address and the largest packet it carries whole.</summary>
+/// <summary>Client → worker: a tunnel is up — its generation (its lane in the top byte, <see cref="GameRoute.Wire"/>), its
+/// IPv4 address and the largest packet it carries whole.</summary>
 public sealed record CommitGeneration(int Generation, string Address, int Mtu) : RouterMessage;
 
 /// <summary>Client → worker: a generation's tunnel has gone.</summary>
@@ -98,10 +100,18 @@ public sealed record RetireGeneration(int Generation) : RouterMessage;
 /// connected. Never empty: a run with nothing to route is stopped instead.</summary>
 public sealed record SelectPrograms(ProgramRule[] Programs) : RouterMessage;
 
-/// <summary>Worker → client, every second: where the route stands, and its counts so far.</summary>
+/// <summary>Worker → client, every second: where the route stands — its first lane's phase, and each lane's — and its
+/// counts so far.</summary>
 public sealed record RouteState(RoutePhase Phase, int Generation, long Routed, long HandedUp, long Direct, long Unowned, long HeldWhileDown,
     long DirectWhileDown, long LateFlows, long Blocked, long Stale, long RoutedFlows, int Selected, int Unreadable,
-    IReadOnlyList<ProgramRouted>? Programs = null) : RouterMessage;
+    IReadOnlyList<ProgramRouted>? Programs = null, IReadOnlyList<LaneRoute>? Lanes = null) : RouterMessage
+{
+    /// <summary>A lane's phase; a lane the worker has not said is waiting for its first tunnel.</summary>
+    public RoutePhase PhaseOf(int lane) => Lanes?.FirstOrDefault(l => l.Lane == lane)?.Phase ?? (lane == 0 ? Phase : RoutePhase.Armed);
+}
+
+/// <summary>One lane of a route: its phase, and its generation now (0 while it has no tunnel).</summary>
+public sealed record LaneRoute(int Lane, RoutePhase Phase, int Generation);
 
 /// <summary>What one selected executable has had routed since the route began: the processes seen running it, the flows
 /// that went to the tunnel and the packets it sent into them. A path, never what was sent.</summary>

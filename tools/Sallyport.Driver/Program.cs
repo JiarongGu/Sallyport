@@ -79,7 +79,7 @@ switch (args.FirstOrDefault())
             Option("--cut-after", 0), Option("--cut-for", 0), Option("--ping-restart", 0), Option("--proxy", 0),
             Text("--child2"), new LossPolicy(Text("--loss2") switch { "direct" => LossMode.Direct, "stop" => LossMode.Stop, _ => LossMode.Hold },
                 Option("--direct-after2", 0) is > 0 and var directAfter2 ? TimeSpan.FromSeconds(directAfter2) : null),
-            Text("--start") ?? "12", Option("--select-after", 0), Text("--select") ?? "12");
+            Text("--start") ?? "12", Option("--select-after", 0), Text("--select") ?? "12", args.Contains("--lane2"), Option("--end-lane2-after", 0));
     case "service-hello":
         return await ServiceHelloAsync();
     case "service-malformed":
@@ -1262,10 +1262,11 @@ static async Task BoundariesAsync(IPAddress? tunnelGateway, IPAddress? lanGatewa
 // refuses to route Sallyport's own), or a game folder's programs (--folder). The profile is never printed (rule 2).
 // --child2: a second copy, its own loss policy (--loss2), both in one run (D23); --start 1 prepares the run with the first
 // alone, and --select-after S --select 1|2|12 gives the worker another selection S seconds after the children start —
-// an app turned on or off while its profile is connected.
+// an app turned on or off while its profile is connected. --lane2: the second copy in a lane of its own, through a second
+// session of the profile — two profiles' tunnels in one run (D24), measured with the one server there is.
 async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? childExe, string? folder, string? workload, LossPolicy loss,
     int cutAfter, int cutFor, int pingRestart, int proxyPort, string? child2Exe = null, LossPolicy? loss2 = null, string start = "12",
-    int selectAfter = 0, string select = "12")
+    int selectAfter = 0, string select = "12", bool lane2 = false, int endLane2After = 0)
 {
     if (profilePath is null || (childExe is null && folder is null)) { Console.Error.WriteLine("usage: Sallyport.Driver service-route <profile.ovpn> --child <exe> | --folder <game folder>"); return 2; }
     OvpnProfile profile;
@@ -1274,7 +1275,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     var executables = folder is not null ? GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path).ToList() : [Path.GetFullPath(childExe!)];
     static ProgramRule Rule(string path, LossPolicy policy) => new(path, policy.Mode, policy.DirectAfter is { } after ? (int)after.TotalSeconds : null);
     var rules = executables.Select(e => Rule(e, loss)).ToList();
-    if (child2Exe is not null) rules.Add(Rule(Path.GetFullPath(child2Exe), loss2 ?? new LossPolicy()));
+    if (child2Exe is not null) rules.Add(Rule(Path.GetFullPath(child2Exe), loss2 ?? new LossPolicy()) with { Lane = lane2 ? 1 : 0 });
     List<ProgramRule> Chosen(string which) => [.. rules.Where((_, i) => which.Contains((char)('1' + Math.Min(i, 1))))];
     var clock = Stopwatch.StartNew();
     string T() => $"{Now()} t={clock.Elapsed.TotalSeconds,5:F1}s";
@@ -1286,12 +1287,16 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     await using var run = await client.PrepareAsync(child2Exe is null ? rules : Chosen(start), AppContext.BaseDirectory);
     Console.WriteLine($"{T()}  service: run {run.RunId[..8]} prepared and attached in {prepared.ElapsedMilliseconds} ms, on {run.Attached.Adapter} (MTU {run.Attached.AdapterMtu}),"
         + (child2Exe is null ? $" {executables.Count} program(s), loss {loss.Mode}"
-            : $" child 1 {(start.Contains('1') ? $"selected, loss {loss.Mode}" : "not selected")}, child 2 {(start.Contains('2') ? $"selected, loss {(loss2 ?? new()).Mode}" : "not selected")}"));
+            : $" child 1 {(start.Contains('1') ? $"selected, loss {loss.Mode}" : "not selected")}, child 2 {(start.Contains('2') ? $"selected, loss {(loss2 ?? new()).Mode}" : "not selected")}"
+              + (lane2 ? ", child 2 in lane 1" : "")));
     var lastPhase = (RoutePhase?)null;
+    var lastPhase1 = (RoutePhase?)null;
     run.StateChanged += state =>
     {
         if (state.Phase != lastPhase) Console.WriteLine($"{T()}  route: {state.Phase} (generation {state.Generation})");
         lastPhase = state.Phase;
+        if (lane2 && state.PhaseOf(1) != lastPhase1) Console.WriteLine($"{T()}  route lane 1: {state.PhaseOf(1)}");
+        lastPhase1 = state.PhaseOf(1);
     };
 
     RunPump? current = null;
@@ -1338,11 +1343,25 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             Console.WriteLine($"{T()}  FREED");
         }
     }) : Task.CompletedTask;
-    var sending = RunPump.ForwardAsync(run, () => Volatile.Read(ref current));
+    // The second lane's own session of the profile, and its pump.
+    RunPump? current1 = null;
+    await using var session1 = lane2 ? new TunnelSession(profile, new TunnelSessionOptions { Policy = policy }) : null;
+    if (session1 is not null)
+    {
+        session1.DispatcherUp += dispatcher => Volatile.Write(ref current1, new RunPump(dispatcher, run, lane: 1));
+        session1.TunnelUp += (tunnel, generation) => Console.WriteLine($"{T()}  tunnel lane 1: generation {generation} up, tunnel address {tunnel.Config.Address}");
+        session1.StatusChanged += status => Console.WriteLine($"{T()}  tunnel lane 1: {status.State} {status.Remote ?? "-"}, attempts {status.Attempts}, reconnects {status.Reconnects}"
+            + (status.LastError is { } error ? $" ({error})" : ""));
+    }
+    // --end-lane2-after S: the second session ended alone, S seconds after the children start: its lane holds, and only the
+    // copy in it should lose its answers.
+    using var stop1 = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+    var tunnelling1 = session1?.RunAsync(stop1.Token) ?? Task.CompletedTask;
+    var sending = RunPump.ForwardAsync(run, lane => lane == 1 ? Volatile.Read(ref current1) : Volatile.Read(ref current));
 
     if (childExe is not null)
     {
-        while (lastPhase != RoutePhase.Routing && !stop.IsCancellationRequested) await Task.Delay(100);
+        while ((lastPhase != RoutePhase.Routing || lane2 && lastPhase1 != RoutePhase.Routing) && !stop.IsCancellationRequested) await Task.Delay(100);
         Console.WriteLine("direct — this process, not selected:");
         string go;
         Task proxying = Task.CompletedTask;
@@ -1373,6 +1392,13 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             while (await process.StandardOutput.ReadLineAsync() is { } line) Console.WriteLine($"{T()} {label}{line}");
             await process.WaitForExitAsync();
         }
+        var ending = endLane2After > 0 && session1 is not null ? Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(endLane2After));
+            await stop1.CancelAsync();
+            if (Interlocked.Exchange(ref current1, null) is { } pump) await pump.DisposeAsync();
+            Console.WriteLine($"{T()}  LANE 1 ENDED: its session stopped, its generation retired");
+        }) : Task.CompletedTask;
         var selecting = selectAfter > 0 && child2Exe is not null ? Task.Run(async () =>
         {
             await Task.Delay(TimeSpan.FromSeconds(selectAfter));
@@ -1382,6 +1408,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         if (child2Exe is null) await ChildAsync(childExe, "");
         else await Task.WhenAll(ChildAsync(childExe, "[1] "), ChildAsync(child2Exe, "[2] "));
         await selecting;
+        await ending;
         await proxying;
         await Task.Delay(500);
         if (lastDispatcher is { } d)
@@ -1406,6 +1433,7 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
         }
     }
     await tunnelling;
+    await tunnelling1;
     await cut;
     var final = run.State;
     await client.StopAsync(run.RunId);

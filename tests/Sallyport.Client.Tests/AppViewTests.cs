@@ -12,92 +12,130 @@ public class AppViewTests
 
     private static readonly StoredProfile Jp = new("ad50a53b0da826ad", "jp", ["udp/1194", "tcp/443"], At, null);
 
-    private static RoutedItem Zenless(bool included = true, bool on = false) => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", At, Jp.Id, LossMode.Hold, null,
+    private static readonly StoredProfile Us = new("0b1c2d3e4f5a6b7c", "us", ["udp/1194"], At, null);
+
+    // Zenless in jp's section, switched on or off there; or in the sections given.
+    private static RoutedItem Zenless(bool included = true, bool on = false, params AppUse[] uses) => new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ", At, null, LossMode.Hold, null,
         [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", included, null, false, true, null),
-         new("000000000002", @"E:\Games\ZZZ\unins000.exe", false, "installs or removes software", false, true, null)], UseVpn: on);
+         new("000000000002", @"E:\Games\ZZZ\unins000.exe", false, "installs or removes software", false, true, null)], Uses: uses.Length > 0 ? uses : [new AppUse(Jp.Id, on)]);
 
     private static RouteState Route(RoutePhase phase, int selected = 2, long late = 0, int unreadable = 0, IReadOnlyList<ProgramRouted>? programs = null) =>
         new(phase, phase == RoutePhase.Routing ? 1 : 0, 100, 120, 5000, 3, 0, 0, late, 0, 0, 7, selected, unreadable, programs);
 
-    // The route through jp, carrying the apps named (Zenless when none is), each since At.
-    private static RunFacts Facts(RouteState? route, string? ended = null, DateTimeOffset? phaseSince = null, params string[] apps) =>
-        new(Jp.Id, (apps.Length == 0 ? ["0123456789abcdef"] : apps).ToDictionary(a => a, _ => At), At, route is null && ended is null, null, route, phaseSince, ended, null);
+    // A profile's lane carrying the apps named (Zenless when none is), each since At.
+    private static LaneFacts Lane(StoredProfile profile, RoutePhase phase, DateTimeOffset? since = null, params string[] apps) =>
+        new(profile.Id, profile == Jp ? 0 : 1, (apps.Length == 0 ? ["0123456789abcdef"] : apps).ToDictionary(a => a, _ => At), null, phase, since);
 
-    private static AppItemView View(RunFacts? run = null, StoredProfile? profile = null, bool connected = false, bool driverReady = true,
-        RoutedItem? item = null, AppPhase? launching = null, string? carriedBy = null, string? failure = null) =>
-        AppViews.Item(new ItemFacts(item ?? Zenless(), profile ?? Jp, run, connected, driverReady, false, launching, _ => ["--proxy-server=socks5://127.0.0.1:1088"],
-            CarriedBy: carriedBy, Failure: failure));
+    private static RunFacts Facts(RouteState? route, params LaneFacts[] lanes) => new(lanes, At, route is null, route, null, null);
 
-    [Fact]
-    public void Its_page_says_its_setup_label_by_label()
-    {
-        // No Launch for what is routed by packets, so nothing said of what Launch starts; its folder is the page's own line.
-        Assert.Equal(
-            [new Fact("VPN profile", "jp"), new Fact("Uses the VPN", "All traffic of 1 program"), new Fact("If the VPN drops", GameViews.LossShort(new GameChoice(null, LossMode.Hold, null)))],
-            View().Setup!);
-        var none = AppViews.Item(new ItemFacts(Zenless() with { ProfileId = null }, null, null, false, true, false, null, _ => []));
-        Assert.Equal(new Fact("VPN profile", "None chosen"), none.Setup![0]);
-    }
+    private static ItemFacts F(RoutedItem? item = null, RunFacts? run = null, string[]? connected = null, bool driverReady = true, AppPhase? launching = null,
+        string? failure = null) =>
+        new(item ?? Zenless(), [Jp, Us], run, id => connected?.Contains(id) == true, id => id == Jp.Id ? failure : null, driverReady, false, launching,
+            _ => ["--proxy-server=socks5://127.0.0.1:1088"]);
+
+    private static AppItemView View(RoutedItem? item = null, RunFacts? run = null, string[]? connected = null, bool driverReady = true, AppPhase? launching = null,
+        string? failure = null) => AppViews.Item(F(item, run, connected, driverReady, launching, failure));
 
     [Fact]
-    public void An_app_whose_switch_is_off_says_so_and_can_be_turned_on_connected_or_not()
+    public void Its_page_says_its_setup_and_lists_every_vpn_with_a_switch_of_its_own()
     {
         var view = View();
 
-        Assert.Equal(("VPN off", Tone.Off, false), (view.StatusText, view.Tone, view.VpnOn));
+        // No Launch for what is routed by packets, so nothing said of what Launch starts; its VPNs are a section of their own.
+        Assert.Equal([new Fact("Uses the VPN", "All traffic of 1 program"), new Fact("If the VPN drops", GameViews.LossShort(new GameChoice(null, LossMode.Hold, null)))],
+            view.Setup!);
+        // The one it is in first, then every other profile it could be put in (D24).
+        Assert.Equal(["jp", "us"], view.Vpns!.Select(v => v.Name));
+        Assert.True(view.Vpns![0] is { Member: true, On: false, StatusText: "Off" });
+        Assert.True(view.Vpns[1] is { Member: false, On: false, StatusText: "Not used" });
+        Assert.All(view.Vpns, v => Assert.True(v.Vpn is { Visible: true, Enabled: true, Label: "Use VPN" }));
+    }
+
+    [Fact]
+    public void An_app_switched_off_says_so_and_names_the_vpns_it_is_in()
+    {
+        var view = View();
+
+        Assert.Equal(("VPN off", Tone.Off), (view.StatusText, view.Tone));
         Assert.Equal("Through jp", view.ThroughText);
+        Assert.Equal("Through jp, us", View(Zenless(uses: [new AppUse(Jp.Id), new AppUse(Us.Id, false)])).ThroughText);
         Assert.Equal("All traffic of 1 program", view.MethodText);
         Assert.Equal("Using the VPN: 1 program of 2.", view.ProgramsText);
-        // A choice, not a connection (D23): it may be turned on whether jp is connected or not.
-        Assert.True(view.Actions.Vpn is { Visible: true, Enabled: true, Label: "Use VPN" });
-        Assert.True(View(connected: true).Actions.Vpn is { Visible: true, Enabled: true });
         Assert.Equal("Left out — installs or removes software", view.Programs[1].StatusText);
         Assert.Equal("All traffic", view.Programs[0].StatusText);
         // A game is started as the person always starts it: Sallyport offers no Launch for what it routes by packets.
         Assert.False(view.Actions.Launch.Visible);
         Assert.False(view.Programs[0].LaunchTarget);
         Assert.Null(view.LaunchText);
-        Assert.DoesNotContain(view.Setup!, f => f.Label == "Launch starts");
+    }
+
+    [Fact]
+    public void An_app_in_no_vpn_says_where_to_put_it()
+    {
+        var view = View(Zenless() with { Uses = [] });
+
+        Assert.Equal(("In no VPN yet", "In no VPN yet"), (view.StatusText, view.ThroughText));
+        Assert.Equal("Turn on Use VPN for a profile below, or add it to a VPN on Overview.", view.DetailText);
+        Assert.All(view.Vpns!, v => Assert.False(v.Member));
     }
 
     [Theory]
-    [InlineData(false, true, null, null, "Waiting for jp", "Info", "Connect jp and it goes through the VPN.")]
-    [InlineData(true, false, null, null, "Cannot use the VPN", "Trouble",
+    [InlineData(false, true, null, "Waiting for jp", "Off", "Connect jp and it goes through the VPN.")]
+    [InlineData(true, false, null, "Cannot use the VPN", "Trouble",
         "Turning on an app's VPN needs the driver and the Sallyport service. Open Settings to see what is missing.")]
-    [InlineData(true, true, "us", null, "Waiting for jp", "Info",
-        "Apps go through us now: one profile carries apps at a time. Disconnect it and this app goes through jp.")]
-    [InlineData(true, true, null, "The packet driver is not installed.", "Not using the VPN", "Trouble",
-        "The packet driver is not installed. Turn Use VPN off and on to try again.")]
-    [InlineData(true, true, null, null, "Connecting jp…", "Busy", null)]
-    public void An_app_turned_on_says_what_its_traffic_waits_for(bool connected, bool driverReady, string? carriedBy, string? failure, string status, string tone, string? detail)
+    [InlineData(true, true, "The packet driver is not installed.", "Not using the VPN", "Trouble",
+        "The packet driver is not installed. Turn it off and on to try again.")]
+    [InlineData(true, true, null, "Connecting jp…", "Busy", null)]
+    public void An_app_switched_on_in_a_section_says_what_its_traffic_waits_for(bool connected, bool driverReady, string? failure, string status, string tone, string? detail)
     {
-        var view = View(item: Zenless(on: true), connected: connected, driverReady: driverReady, carriedBy: carriedBy, failure: failure);
+        var facts = F(Zenless(on: true), connected: connected ? [Jp.Id] : [], driverReady: driverReady, failure: failure);
 
-        Assert.Equal((status, tone, detail), (view.StatusText, view.Tone.ToString(), view.DetailText));
-        // On stays on, and can always be turned off.
-        Assert.True(view.VpnOn);
-        Assert.True(view.Actions.Vpn is { Visible: true, Enabled: true, Reason: null });
+        var row = AppViews.InSection(facts, Jp, forApp: true);
+
+        Assert.Equal((status, tone, detail), (row.StatusText, row.Tone.ToString(), row.DetailText));
+        // On stays on, and can always be turned off; the card says the same as the row that waits.
+        Assert.True(row is { On: true, Vpn: { Visible: true, Enabled: true, Reason: null } });
+        Assert.Equal(status, AppViews.Item(facts).StatusText);
+    }
+
+    [Fact]
+    public void An_app_on_in_two_connected_vpns_goes_through_the_one_that_carries_it_and_the_other_says_so()
+    {
+        var both = Zenless(uses: [new AppUse(Jp.Id), new AppUse(Us.Id)]);
+        var run = Facts(Route(RoutePhase.Routing), Lane(Us, RoutePhase.Routing, At));
+        var facts = F(both, run, connected: [Jp.Id, Us.Id]);
+
+        var jp = AppViews.InSection(facts, Jp, forApp: false);
+        var us = AppViews.InSection(facts, Us, forApp: false);
+
+        Assert.Equal(("Through us now", Tone.Info, "It goes through jp when us is disconnected."), (jp.StatusText, jp.Tone, jp.DetailText));
+        Assert.Null(jp.Run);
+        Assert.Equal("VPN on · us", us.StatusText);
+        Assert.NotNull(us.Run);
+        // On the Overview, a section's app is the app, by name and icon; the tunnel's facts are the section's.
+        Assert.Equal("Zenless Zone Zero", us.Name);
+        Assert.DoesNotContain(us.Run!.Facts, f => f.Label is "Connected over" or "Tunnel address");
+        Assert.True(us.Remove is { Visible: true, Label: "Remove from us" });
+        Assert.Equal("VPN on · us", AppViews.Item(facts).StatusText);
     }
 
     [Fact]
     public void An_app_with_nothing_included_cannot_be_turned_on_but_one_on_can_be_turned_off()
     {
-        Assert.True(View(item: Zenless(included: false)).Actions.Vpn is { Enabled: false, Reason: "Include at least one program sending all its traffic." });
-        var on = View(item: Zenless(included: false, on: true));
-        Assert.True(on.Actions.Vpn is { Enabled: true, Reason: null });
-        Assert.Equal("No program included", on.StatusText);
+        Assert.True(AppViews.InSection(F(Zenless(included: false)), Jp, true).Vpn is { Enabled: false, Reason: "Include at least one program sending all its traffic." });
+        Assert.True(AppViews.InSection(F(Zenless(included: false, on: true)), Jp, true).Vpn is { Enabled: true, Reason: null });
+        Assert.Equal("No program included", View(Zenless(included: false, on: true)).StatusText);
     }
 
     [Fact]
-    public void An_app_its_profile_carries_says_so_and_can_still_be_changed()
+    public void An_app_its_vpn_carries_says_so_and_can_still_be_changed()
     {
-        var view = View(Facts(Route(RoutePhase.Routing), phaseSince: At), item: Zenless(on: true), connected: true);
+        var view = View(Zenless(on: true), Facts(Route(RoutePhase.Routing), Lane(Jp, RoutePhase.Routing, At)), connected: [Jp.Id]);
 
         Assert.Equal("VPN on · jp", view.StatusText);
         Assert.Equal(Tone.Up, view.Tone);
         Assert.Equal(RunPhase.Routing, view.Run!.Phase);
         Assert.Equal(At, view.Run.Since);
-        Assert.True(view.VpnOn);
         // Its programs and setup change while it goes through the VPN: the route's selection follows at once (D23).
         Assert.True(view.Actions.Edit.Enabled);
         Assert.True(view.Programs[0].Actions.Toggle.Enabled);
@@ -106,9 +144,9 @@ public class AppViewTests
     }
 
     [Fact]
-    public void A_route_that_does_not_carry_the_app_is_not_its_own()
+    public void A_lane_that_does_not_carry_the_app_is_not_its_own()
     {
-        var view = View(Facts(Route(RoutePhase.Routing), phaseSince: At, apps: "a1b2c3d4e5f6"), item: Zenless(on: true), connected: true);
+        var view = View(Zenless(on: true), Facts(Route(RoutePhase.Routing), Lane(Jp, RoutePhase.Routing, At, "a1b2c3d4e5f6")), connected: [Jp.Id]);
 
         Assert.Null(view.Run);
         Assert.Equal("Connecting jp…", view.StatusText);
@@ -119,7 +157,8 @@ public class AppViewTests
     {
         var route = Route(RoutePhase.Routing, programs:
             [new(@"E:\Games\ZZZ\ZenlessZoneZero.exe", 1, 4, 300), new(@"C:\Other\other.exe", 2, 9, 900)]);
-        var run = GameViews.Run(Zenless(on: true), Jp, Facts(route, phaseSince: At, apps: ["0123456789abcdef", "a1b2c3d4e5f6"]));
+        var lane = Lane(Jp, RoutePhase.Routing, At, "0123456789abcdef", "a1b2c3d4e5f6");
+        var run = GameViews.Run(Zenless(on: true), Jp, Facts(route, lane), lane);
 
         Assert.Contains(new Fact("Its processes", "1"), run.Facts);
         Assert.Contains(new Fact("Connections through the VPN", "4"), run.Facts);
@@ -129,13 +168,15 @@ public class AppViewTests
     }
 
     [Fact]
-    public void A_lost_tunnel_reads_by_the_apps_own_policy()
+    public void A_lost_tunnel_reads_by_the_apps_own_policy_on_its_own_lane()
     {
-        var lost = Facts(Route(RoutePhase.Held), phaseSince: DateTimeOffset.Now);
-        var held = GameViews.Run(Zenless() with { DirectAfterSeconds = 60 }, Jp, lost);
-        var direct = GameViews.Run(Zenless() with { Loss = LossMode.Direct }, Jp, lost);
-        var waitedOut = GameViews.Run(Zenless() with { DirectAfterSeconds = 60 }, Jp, Facts(Route(RoutePhase.Held), phaseSince: DateTimeOffset.Now.AddSeconds(-90)));
+        var lost = Lane(Jp, RoutePhase.Held, DateTimeOffset.Now);
+        var held = GameViews.Run(Zenless() with { DirectAfterSeconds = 60 }, Jp, Facts(Route(RoutePhase.Routing), lost), lost);
+        var direct = GameViews.Run(Zenless() with { Loss = LossMode.Direct }, Jp, Facts(Route(RoutePhase.Routing), lost), lost);
+        var longAgo = Lane(Jp, RoutePhase.Held, DateTimeOffset.Now.AddSeconds(-90));
+        var waitedOut = GameViews.Run(Zenless() with { DirectAfterSeconds = 60 }, Jp, Facts(Route(RoutePhase.Routing), longAgo), longAgo);
 
+        // The route's first lane is up; this lane is the one lost, and its own phase is what the app reads.
         Assert.Equal("Reconnecting — its internet is blocked meanwhile", held.StatusText);
         Assert.Matches(@"Your own connection in (59|60) s if it is not back\.", held.DetailText);
         Assert.Equal("Reconnecting — on your own connection meanwhile", direct.StatusText);
@@ -143,16 +184,18 @@ public class AppViewTests
     }
 
     [Fact]
-    public void A_browser_launched_with_proxy_settings_offers_launch_and_no_switch()
+    public void A_browser_launched_with_proxy_settings_is_launched_through_its_section_and_has_no_switch()
     {
-        var edge = new RoutedItem("a1b2c3d4e5f6", "Edge", null, At, Jp.Id, LossMode.Hold, null,
-            [new("000000000003", @"C:\nowhere\msedge.exe", true, null, true, false, new ProxyLaunch(AppKind.Chromium, "", "a1b2c3d4e5f6"))]);
+        var edge = new RoutedItem("a1b2c3d4e5f6", "Edge", null, At, null, LossMode.Hold, null,
+            [new("000000000003", @"C:\nowhere\msedge.exe", true, null, true, false, new ProxyLaunch(AppKind.Chromium, "", "a1b2c3d4e5f6"))], Uses: [new AppUse(Jp.Id)]);
 
-        var view = View(item: edge);
+        var view = View(edge);
+        var row = AppViews.InSection(F(edge), Jp, forApp: false);
 
         Assert.Equal("Launched with proxy settings", view.MethodText);
         Assert.Equal("Ready to launch", view.StatusText);
-        Assert.False(view.Actions.Vpn.Visible);
+        Assert.False(row.Vpn.Visible);
+        Assert.True(row.Launch is { Visible: true, Enabled: false, Reason: "msedge.exe is not where it was added from." });
         Assert.Null(view.LossText);
         Assert.Equal("Launched with proxy settings (Chromium browser)", view.Programs[0].StatusText);
         Assert.Equal(["--proxy-server=socks5://127.0.0.1:1088"], view.Programs[0].StartupSettings);
@@ -170,11 +213,11 @@ public class AppViewTests
             Programs = [new("000000000001", @"E:\Games\ZZZ\ZenlessZoneZero.exe", true, null, false, true, new ProxyLaunch(AppKind.Environment, "", "x"))],
         };
 
-        var view = View(item: both, launching: AppPhase.Connecting);
+        var view = View(both, launching: AppPhase.Connecting);
 
         Assert.Equal("All traffic of 1 program · 1 launched with proxy settings", view.MethodText);
         Assert.Equal("All traffic · launched with proxy settings (Proxy environment)", view.Programs[0].StatusText);
-        Assert.Equal("Connecting jp before launch…", view.StatusText);
+        Assert.Equal("Connecting before launch…", view.StatusText);
         // Its own Launch, on its row: the app routes its packets, so the app has none of its own.
         Assert.False(view.Actions.Launch.Visible);
         Assert.True(view.Programs[0].Actions.Launch is { Visible: true, Enabled: false });
@@ -182,13 +225,20 @@ public class AppViewTests
     }
 
     [Fact]
-    public void An_app_without_a_profile_says_so()
+    public void An_apps_sections_are_kept_switched_and_taken_out_and_an_earlier_clients_one_profile_is_read_as_one()
     {
-        var view = AppViews.Item(new ItemFacts(Zenless() with { ProfileId = null }, null, null, false, true, false, null, _ => []));
+        var earlier = new RoutedItem("0123456789abcdef", "Zenless", null, At, Jp.Id, LossMode.Hold, null, [], UseVpn: true);
+        Assert.Equal([new AppUse(Jp.Id, true)], earlier.Sections);
 
-        Assert.Equal("Choose a VPN profile", view.StatusText);
-        Assert.Equal("No VPN profile chosen", view.ThroughText);
-        Assert.Equal("Choose a VPN profile for it first (Edit).", view.Actions.Vpn.Reason);
+        var both = earlier.WithUse(Us.Id, null);
+        Assert.Equal([new AppUse(Jp.Id, true), new AppUse(Us.Id, true)], both.Sections);
+        // Written as sections from then on, never as the one profile.
+        Assert.Null(both.ProfileId);
+        Assert.Equal([new AppUse(Jp.Id, false), new AppUse(Us.Id, true)], both.WithUse(Jp.Id, false).Sections);
+        Assert.Equal([new AppUse(Us.Id, true)], both.WithUse(Jp.Id, null, remove: true).Sections);
+        // Launched through the first of its sections that is connected, else its first.
+        Assert.Equal(Us.Id, both.LaunchProfile(id => id == Us.Id));
+        Assert.Equal(Jp.Id, both.LaunchProfile(_ => false));
     }
 
     [Fact]
@@ -217,18 +267,21 @@ public class AppViewTests
     }
 
     [Fact]
-    public void A_plan_routes_every_apps_programs_and_the_strictest_rule_wins_a_shared_one()
+    public void A_plan_puts_each_vpns_programs_in_its_lane_and_the_strictest_rule_wins_a_shared_one()
     {
-        var plan = new RoutePlan(Jp.Id,
+        var plan = new RoutePlan(
         [
-            new PlannedApp("a1b2c3d4e5f6", [new(@"C:\Launcher\launcher.exe", LossMode.Direct), new(@"E:\Games\ZZZ\ZenlessZoneZero.exe", LossMode.Direct)]),
-            new PlannedApp("0123456789abcdef", [new(@"E:\Games\ZZZ\ZenlessZoneZero.exe", LossMode.Hold)]),
+            new PlannedLane(Us.Id, [new PlannedApp("a1b2c3d4e5f6", [new(@"C:\Launcher\launcher.exe", LossMode.Direct), new(@"E:\Games\ZZZ\ZenlessZoneZero.exe", LossMode.Direct)])]),
+            new PlannedLane(Jp.Id, [new PlannedApp("0123456789abcdef", [new(@"E:\Games\ZZZ\ZenlessZoneZero.exe", LossMode.Hold)])]),
         ]);
 
-        Assert.Equal(2, plan.Programs.Count);
-        Assert.Equal(LossMode.Hold, plan.Programs.Single(p => p.Path.EndsWith("ZenlessZoneZero.exe", StringComparison.Ordinal)).Loss);
-        Assert.True(plan.Same(plan with { Apps = [.. plan.Apps] }));
-        Assert.False(plan.Same(plan with { Apps = [plan.Apps[0]] }));
+        var programs = plan.Programs(id => id == Us.Id ? 0 : 3);
+
+        Assert.Equal(2, programs.Count);
+        Assert.True(programs.Single(p => p.Path.EndsWith("launcher.exe", StringComparison.Ordinal)) is { Lane: 0, Loss: LossMode.Direct });
+        Assert.True(programs.Single(p => p.Path.EndsWith("ZenlessZoneZero.exe", StringComparison.Ordinal)) is { Lane: 3, Loss: LossMode.Hold });
+        Assert.True(plan.Same(plan with { Lanes = [.. plan.Lanes] }));
+        Assert.False(plan.Same(plan with { Lanes = [plan.Lanes[0]] }));
         Assert.False(plan.Same(null));
     }
 
@@ -240,6 +293,14 @@ public class AppViewTests
         Assert.Equal([new ProgramRule(@"E:\Games\ZZZ\ZenlessZoneZero.exe", LossMode.Hold, 30)], game.Rules);
         // A wait means something only while held.
         Assert.Null(Assert.Single((game with { Loss = LossMode.Direct }).Rules).DirectAfterSeconds);
+    }
+
+    [Fact]
+    public void A_lanes_generation_crosses_the_pipe_with_its_lane_and_the_first_lanes_as_the_sessions_own()
+    {
+        Assert.Equal(7, GameRoute.Wire(0, 7));
+        Assert.Equal((3, 7), GameRoute.FromWire(GameRoute.Wire(3, 7)));
+        Assert.Equal((0, 7), GameRoute.FromWire(7));
     }
 
     [Theory]

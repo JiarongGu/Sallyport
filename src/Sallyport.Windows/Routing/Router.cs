@@ -17,11 +17,13 @@ public enum BlockReason { None, Ipv6, Broadcast, Multicast, LinkLocal, OnLink }
 /// (dropped while there is no tunnel — before the first, and while one is lost, as the loss policy says), or direct.</summary>
 public enum SelectedPath { Held, Tunnel, Direct }
 
-public sealed class FlowDecision(Verdict verdict, int pid, BlockReason reason = BlockReason.None)
+public sealed class FlowDecision(Verdict verdict, int pid, BlockReason reason = BlockReason.None, int lane = 0)
 {
     public Verdict Verdict { get; internal set; } = verdict;
     public int Pid { get; internal set; } = pid;
     public BlockReason Reason { get; internal set; } = reason;
+    /// <summary>The route a routed flow goes into: its program's profile, one lane each (D24).</summary>
+    public int Lane { get; internal set; } = lane;
     public long Packets { get; internal set; }
     /// <summary>Environment.TickCount64 of its last packet.</summary>
     public long LastSeen { get; internal set; } = Environment.TickCount64;
@@ -65,18 +67,22 @@ public sealed class Router : IDisposable
     private readonly PacketDriver _driver;
     private readonly Interception _interception;
     private readonly OwnerTable _owners = new();
+    /// <summary>Routes at once in one router: one lane per profile whose apps it carries (D24).</summary>
+    public const int Lanes = 8;
+
     private readonly Func<int, bool> _selects;
-    private readonly Action<byte[]> _toTunnel;
+    private readonly Action<int, byte[]> _toTunnel;
     private readonly Func<DriverPacket, bool>? _discard;
-    private volatile Nat? _nat;
-    private volatile SelectedPath _path = SelectedPath.Held;
+    // Each lane's tunnel, as the other threads commit and retire it: read with Volatile, written whole.
+    private readonly Nat?[] _nats = new Nat?[Lanes];
+    private readonly int[] _paths = Enumerable.Repeat((int)SelectedPath.Held, Lanes).ToArray();
     private readonly (uint Network, uint Mask)[] _onLink;
     private readonly Dictionary<Flow, FlowDecision> _flows = [];
     private readonly Dictionary<Flow6, FlowDecision> _flows6 = [];
     // What the first piece of a datagram Windows sent in pieces was decided: its later pieces carry no ports.
     private readonly Dictionary<(uint, uint, byte, ushort), (FlowDecision Decision, long Since)> _pieces = [];
     private readonly Dictionary<(UInt128, UInt128, uint), (FlowDecision Decision, long Since)> _pieces6 = [];
-    private readonly List<(uint Source, byte Protocol, ushort Id, byte[] Packet, long At)> _ahead = [];
+    private readonly List<(int Lane, uint Source, byte Protocol, ushort Id, byte[] Packet, long At)> _ahead = [];
     private readonly long[] _blocked = new long[Enum.GetValues<BlockReason>().Length];
     private readonly Lock _injectLock = new();
     private readonly PacketBatch _inject = new(1);
@@ -96,7 +102,8 @@ public sealed class Router : IDisposable
     /// addresses): a selected program's packets to them are blocked, the tunnel having no way back to them.</param>
     /// <param name="discard">A measurement's cut: packets it picks are dropped before anything else, both ways when
     /// <paramref name="receivePath"/> takes what arrives too. Null in use.</param>
-    public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Action<byte[]> toTunnel,
+    /// <param name="toTunnel">Where a routed packet goes: its lane, and the packet.</param>
+    public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Action<int, byte[]> toTunnel,
         IEnumerable<(uint Network, uint Mask)>? onLink = null, Func<DriverPacket, bool>? discard = null, bool receivePath = false)
     {
         _driver = driver;
@@ -109,25 +116,37 @@ public sealed class Router : IDisposable
         _interception = new Interception(driver, adapter, 64, receivePath);
     }
 
-    /// <summary>The current generation's NAT; null while there is no tunnel.</summary>
-    public Nat? Nat => _nat;
+    /// <summary>The first lane's current NAT; null while it has no tunnel.</summary>
+    public Nat? Nat => NatOf(0);
 
-    public SelectedPath Path => _path;
+    public SelectedPath Path => PathOf(0);
 
-    /// <summary>A new tunnel's NAT: routed flows go into it from their next packet. Mappings start afresh — the tunnel's
-    /// address may have changed, and the server forgot the old ones.</summary>
-    public void Commit(Nat nat)
+    public Nat? NatOf(int lane) => Volatile.Read(ref _nats[lane]);
+
+    public SelectedPath PathOf(int lane) => (SelectedPath)Volatile.Read(ref _paths[lane]);
+
+    /// <summary>A lane's which program goes into, by its process: its app's profile (D24). Null: every one the first.
+    /// Asked on the router's thread when a flow is decided.</summary>
+    public Func<int, int>? LaneOf { get; set; }
+
+    /// <summary>A new tunnel's NAT for a lane: its routed flows go into it from their next packet. Mappings start afresh —
+    /// the tunnel's address may have changed, and the server forgot the old ones.</summary>
+    public void Commit(int lane, Nat nat)
     {
-        _nat = nat;
-        _path = SelectedPath.Tunnel;
+        Volatile.Write(ref _nats[lane], nat);
+        Volatile.Write(ref _paths[lane], (int)SelectedPath.Tunnel);
     }
 
-    /// <summary>The tunnel has gone: routed flows are held until the next, or sent direct.</summary>
-    public void Retire(bool direct)
+    public void Commit(Nat nat) => Commit(0, nat);
+
+    /// <summary>A lane's tunnel has gone: its routed flows are held until the next, or sent direct.</summary>
+    public void Retire(int lane, bool direct)
     {
-        _path = direct ? SelectedPath.Direct : SelectedPath.Held;
-        _nat = null;
+        Volatile.Write(ref _paths[lane], (int)(direct ? SelectedPath.Direct : SelectedPath.Held));
+        Volatile.Write(ref _nats[lane], null);
     }
+
+    public void Retire(bool direct) => Retire(0, direct);
 
     /// <summary>Which selected processes go direct while the route holds the rest: their program's own loss policy, where
     /// the programs of one route differ (D23). Null: every one held. Asked on the router's thread, per packet while held.</summary>
@@ -270,10 +289,10 @@ public sealed class Router : IDisposable
         }
     }
 
-    /// <summary>A packet the tunnel returned: turned back and handed up, or refused and counted.</summary>
-    public void FromTunnel(byte[] packet)
+    /// <summary>A packet a lane's tunnel returned: turned back and handed up, or refused and counted.</summary>
+    public void FromTunnel(int lane, byte[] packet)
     {
-        if (_nat is not { } nat)
+        if (NatOf(lane) is not { } nat)
         {
             NoTunnel++;
             return;
@@ -283,7 +302,7 @@ public sealed class Router : IDisposable
         {
             if (refusal == InboundRefusal.PieceAhead)
             {
-                HoldAhead(packet);
+                HoldAhead(lane, packet);
                 return;
             }
             if (refusal != InboundRefusal.None)
@@ -310,9 +329,11 @@ public sealed class Router : IDisposable
                 else Answered(packet);
             }
             // A first piece names the mapping its later pieces follow: any that came before it can go now.
-            if ((packet[6] & 0x20) != 0 && _ahead.Count > 0) ReleaseAhead(packet);
+            if ((packet[6] & 0x20) != 0 && _ahead.Count > 0) ReleaseAhead(lane, packet);
         }
     }
+
+    public void FromTunnel(byte[] packet) => FromTunnel(0, packet);
 
     private bool Decide(DriverPacket packet)
     {
@@ -345,8 +366,9 @@ public sealed class Router : IDisposable
             case Verdict.Blocked: Block(decision.Reason, frame[..link], ip, flow.Protocol == Flow.Tcp ? (ip[0] & 0x0F) * 4 : -1); return true;
         }
 
-        if (WhileDown(decision.Pid) is { } passed) return passed;
-        var nat = _nat;
+        var lane = decision.Lane;
+        if (WhileDown(decision.Pid, lane) is { } passed) return passed;
+        var nat = NatOf(lane);
         if (nat is null) { HeldWhileDown++; return true; }
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
         // A frame shorter than the packet it says it holds — a segmentation offload's, which none measured was (gate 5).
@@ -361,7 +383,7 @@ public sealed class Router : IDisposable
         var copy = ip[..total].ToArray();
         if (nat.Outbound(copy, frame[..link]) is null) { HeldBack++; return true; }
         Asked(flow, ip);
-        ToTunnel(copy, nat.Mtu);
+        ToTunnel(lane, copy, nat.Mtu);
         return true;
     }
 
@@ -404,15 +426,16 @@ public sealed class Router : IDisposable
             case Verdict.Unowned: UnownedPackets++; return false;
             case Verdict.Blocked: Block(set.Decision.Reason, frame[..link], ip, tcpAt: -1); return true;
         }
-        if (WhileDown(set.Decision.Pid) is { } passed) return passed;
-        var nat = _nat;
+        var lane = set.Decision.Lane;
+        if (WhileDown(set.Decision.Pid, lane) is { } passed) return passed;
+        var nat = NatOf(lane);
         if (nat is null) { HeldWhileDown++; return true; }
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
         if (total > ip.Length) { HeldBack++; return true; }
         var copy = ip[..total].ToArray();
         nat.OutboundPiece(copy);
         PiecesRouted++;
-        ToTunnel(copy, nat.Mtu);
+        ToTunnel(lane, copy, nat.Mtu);
         return true;
     }
 
@@ -479,9 +502,9 @@ public sealed class Router : IDisposable
     }
 
     // A routed packet with no tunnel to take it: true, dropped (held); false, passed on direct; null, there is a tunnel.
-    private bool? WhileDown(int pid)
+    private bool? WhileDown(int pid, int lane)
     {
-        switch (_path)
+        switch (PathOf(lane))
         {
             case SelectedPath.Held when DirectWhileHeld?.Invoke(pid) != true: HeldWhileDown++; return true;
             case SelectedPath.Held or SelectedPath.Direct: DirectWhileDown++; return false;
@@ -490,7 +513,7 @@ public sealed class Router : IDisposable
     }
 
     // A packet routed, split first if it is too big for the tunnel in one piece and the policy splits.
-    private void ToTunnel(byte[] packet, int mtu)
+    private void ToTunnel(int lane, byte[] packet, int mtu)
     {
         if (packet.Length > mtu && SplitOversized && (packet[0] & 0x0F) != 5) { HeldBack++; return; }
         RoutedPackets++;
@@ -498,11 +521,11 @@ public sealed class Router : IDisposable
         if (packet.Length <= mtu || !SplitOversized)
         {
             if (packet.Length > mtu) OversizedWhole++;
-            _toTunnel(packet);
+            _toTunnel(lane, packet);
             return;
         }
         SplitPackets++;
-        foreach (var piece in Replies.Split(packet, mtu)) _toTunnel(piece);
+        foreach (var piece in Replies.Split(packet, mtu)) _toTunnel(lane, piece);
     }
 
     // A blocked packet is dropped; a connection it opens is refused at once (a reset), so the program goes on to another
@@ -552,7 +575,7 @@ public sealed class Router : IDisposable
     {
         if (!_selects(pid)) return new(Verdict.Direct, pid);
         var reason = Beyond(remote);
-        return reason == BlockReason.None ? new(Verdict.Routed, pid) : new(Verdict.Blocked, pid, reason);
+        return reason == BlockReason.None ? new(Verdict.Routed, pid, lane: Math.Clamp(LaneOf?.Invoke(pid) ?? 0, 0, Lanes - 1)) : new(Verdict.Blocked, pid, reason);
     }
 
     // Where the tunnel cannot take a selected program's packet. Addresses as Flow holds them: the first octet lowest.
@@ -601,7 +624,7 @@ public sealed class Router : IDisposable
 
     private void Turn(FlowDecision decision, FlowDecision now, byte protocol)
     {
-        if (decision.Verdict == now.Verdict && decision.Reason == now.Reason) return;
+        if (decision.Verdict == now.Verdict && decision.Reason == now.Reason && decision.Lane == now.Lane) return;
         if (now.Verdict == Verdict.Routed)
         {
             RoutedFlows++;
@@ -611,6 +634,7 @@ public sealed class Router : IDisposable
         decision.Verdict = now.Verdict;
         decision.Pid = now.Pid;
         decision.Reason = now.Reason;
+        decision.Lane = now.Lane;
     }
 
     private void Reconsider(FlowDecision decision, FlowDecision now)
@@ -624,6 +648,7 @@ public sealed class Router : IDisposable
         decision.Verdict = now.Verdict;
         decision.Pid = now.Pid;
         decision.Reason = now.Reason;
+        decision.Lane = now.Lane;
     }
 
     // Decisions and mappings idle past Idle go, unless a socket still holds their local end: a game's UDP socket quiet in
@@ -654,10 +679,11 @@ public sealed class Router : IDisposable
             foreach (var key in _synSent.Where(s => s.Value < stale).Select(s => s.Key).ToList()) _synSent.Remove(key);
             foreach (var key in _udpWaiting.Where(s => s.Value < stale).Select(s => s.Key).ToList()) _udpWaiting.Remove(key);
         }
-        if (_nat is { } nat) ExpiredMappings += nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));
+        for (var lane = 0; lane < Lanes; lane++)
+            if (NatOf(lane) is { } nat) ExpiredMappings += nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));
     }
 
-    private void HoldAhead(byte[] packet)
+    private void HoldAhead(int lane, byte[] packet)
     {
         var now = Environment.TickCount64;
         PiecesAheadLost += _ahead.RemoveAll(a => now - a.At > AheadLifeMs);
@@ -666,18 +692,18 @@ public sealed class Router : IDisposable
             _ahead.RemoveAt(0);
             PiecesAheadLost++;
         }
-        _ahead.Add((BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(12)), packet[9], BinaryPrimitives.ReadUInt16BigEndian(packet.AsSpan(4)), packet, now));
+        _ahead.Add((lane, BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(12)), packet[9], BinaryPrimitives.ReadUInt16BigEndian(packet.AsSpan(4)), packet, now));
         PiecesAhead++;
     }
 
-    private void ReleaseAhead(byte[] first)
+    private void ReleaseAhead(int lane, byte[] first)
     {
         var source = BinaryPrimitives.ReadUInt32LittleEndian(first.AsSpan(12));
         var id = BinaryPrimitives.ReadUInt16BigEndian(first.AsSpan(4));
-        foreach (var held in _ahead.Where(a => a.Source == source && a.Protocol == first[9] && a.Id == id).ToList())
+        foreach (var held in _ahead.Where(a => a.Lane == lane && a.Source == source && a.Protocol == first[9] && a.Id == id).ToList())
         {
             _ahead.Remove(held);
-            if (_nat?.Inbound(held.Packet, out var mapping) == InboundRefusal.None && Inject(Nat.Frame(mapping!, held.Packet))) HandedUp++;
+            if (NatOf(lane)?.Inbound(held.Packet, out var mapping) == InboundRefusal.None && Inject(Nat.Frame(mapping!, held.Packet))) HandedUp++;
             else PiecesAheadLost++;
         }
     }

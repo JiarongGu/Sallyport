@@ -238,9 +238,9 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
       it…", confirmed → nothing connected, childbin "jp was disconnected.", the proxy gone, the service's run ended and
       the adapter `None -> None`; jp not connected, childbin run → jp brought up (its proxy listening too), childbin's
       traffic the VPN; Stop routing → jp down again.
-   5. **Many channels in the service's one run:** selections on different profiles at once; one channel's outage;
-      the adapters back when the last ends. Several apps on one profile's route, each program with its own loss
-      policy and changed while it runs, is D23 (measured); several profiles at once is not yet.
+   5. **Many channels in the service's one run — measured 2026-10-20 (D24):** a lane per connected profile, two at
+      once through the client and the tool, one lane ended while the other carried on. Not yet: two different servers
+      (only one exists to measure against), and an outage of one lane while the other's server stays up.
    6. **The Apps editors — measured 2026-10-20** (`AppViews`): one card per app — a program or a folder — with Launch,
       Route / Stop, its profile, methods and loss policy; Add a program… (a browser launched with proxy settings, anything
       else all its traffic) and Add a folder…; each program's row with its methods, Methods… (all traffic, proxy settings

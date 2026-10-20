@@ -59,23 +59,23 @@ internal static class GameViews
 
     /// <summary>One app's part of the route: its own words for a loss (its policy, not the route's), its own programs'
     /// counts, and the route's own figures only when it carries this app alone.</summary>
-    public static RunView Run(RoutedItem app, StoredProfile? profile, RunFacts run)
+    public static RunView Run(RoutedItem app, StoredProfile? profile, RunFacts run, LaneFacts lane)
     {
         var name = profile?.Name ?? L.T("its profile");
         var route = run.Route;
-        var tunnel = run.Tunnel;
-        var held = run.PhaseSince is { } lostAt && app.Loss == LossMode.Hold
+        var tunnel = lane.Tunnel;
+        var held = lane.PhaseSince is { } lostAt && app.Loss == LossMode.Hold
             && (app.DirectAfterSeconds is not { } after || lostAt + TimeSpan.FromSeconds(after) > DateTimeOffset.Now);
         var (phase, tone, text, detail) = run switch
         {
             { Ended: GameRunner.StoppedByPerson } => (RunPhase.Ended, Tone.Off, L.T("VPN off"), (string?)null),
             { Ended: { } why } => (RunPhase.Ended, Tone.Trouble, L.T("VPN turned off"), why),
             { Preparing: true } => (RunPhase.Preparing, Tone.Busy, L.T("Preparing…"), L.T("Asking the Sallyport service to send the app's programs through the VPN.")),
-            _ => route?.Phase switch
+            _ => (route is null ? (RoutePhase?)null : lane.Phase) switch
             {
                 RoutePhase.Routing => (RunPhase.Routing, Tone.Up, L.T("VPN on · {0}", name), L.T("Every connection of the app's programs goes through the VPN.")),
                 RoutePhase.Held when held => (RunPhase.Held, Tone.Busy, L.T("Reconnecting — its internet is blocked meanwhile"),
-                    Join(Attempts(tunnel), DirectAfter(app, run))),
+                    Join(Attempts(tunnel), DirectAfter(app, lane))),
                 RoutePhase.Held or RoutePhase.Direct => (RunPhase.Direct, Tone.Busy, L.T("Reconnecting — on your own connection meanwhile"),
                     Join(Attempts(tunnel), L.T("It goes back through the VPN once it is up."))),
                 _ => (RunPhase.Connecting, Tone.Busy, L.T("Connecting {0}…", name), L.T("Its internet is blocked until the VPN is up.")),
@@ -86,7 +86,8 @@ internal static class GameViews
         if (route is { } s)
         {
             var mine = (s.Programs ?? []).Where(p => app.PacketPrograms.Any(a => string.Equals(a.Path, p.Path, StringComparison.OrdinalIgnoreCase))).ToList();
-            var alone = run.Apps.Count == 1;
+            // The route's own figures are every lane's and app's: said as this app's only when it is the route's one app.
+            var alone = run.Lanes.Sum(l => l.Apps.Count) == 1;
             facts.Add(new(L.T("Its processes"), (alone ? s.Selected : mine.Sum(p => p.Processes)).ToString("N0", English)));
             facts.Add(new(L.T("Connections through the VPN"), (alone ? s.RoutedFlows : mine.Sum(p => p.Flows)).ToString("N0", English)));
             if (alone)
@@ -105,8 +106,8 @@ internal static class GameViews
             if (tunnel.Reconnects > 0) facts.Add(new(L.T("Reconnects"), tunnel.Reconnects.ToString("N0", English)));
         }
         // Since it joined, or since the route came back, whichever is later.
-        var since = phase != RunPhase.Routing ? null : run.Apps.GetValueOrDefault(app.Id) is var joined && joined > run.PhaseSince ? joined : run.PhaseSince;
-        return new RunView(phase, tone, text, detail, since, facts, Coverage(route, run.Apps.Count));
+        var since = phase != RunPhase.Routing ? null : lane.Apps.GetValueOrDefault(app.Id) is var joined && joined > lane.PhaseSince ? joined : lane.PhaseSince;
+        return new RunView(phase, tone, text, detail, since, facts, Coverage(route, run.Lanes.Sum(l => l.Apps.Count)));
     }
 
     /// <summary>Whether everything of the app went through the VPN: holds, failed (with how many), or could not be
@@ -212,8 +213,8 @@ internal static class GameViews
     private static string? Attempts(SessionStatus? tunnel) => tunnel is null ? null
         : tunnel.LastError is { } why ? L.T("Last attempt: {0}", why) : null;
 
-    private static string? DirectAfter(RoutedItem app, RunFacts run) =>
-        app.DirectAfterSeconds is { } after && run.PhaseSince is { } since
+    private static string? DirectAfter(RoutedItem app, LaneFacts lane) =>
+        app.DirectAfterSeconds is { } after && lane.PhaseSince is { } since
             ? L.T("Your own connection in {0} s if it is not back.", Math.Max(0, (int)Math.Ceiling((since + TimeSpan.FromSeconds(after) - DateTimeOffset.Now).TotalSeconds)))
             : null;
 

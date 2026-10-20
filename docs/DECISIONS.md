@@ -580,3 +580,43 @@ the driver tool as stand-ins (`childbin`, `childbin2`) and the guard outside (0 
   every request answered; the stand-in turned off at 40 s ("selection now 3 program(s)") — one HTTPS request failed at
   the switch, then home every round; Zenless off at 60 s — the run ended, "stopped by the client", 5 flows decided
   again, 0 late.
+
+## D24 — Apps and profiles are many to many: each profile a section of its own, each lane of the one route (2026-10-20; measured)
+
+The owner: "split the config of which profile use for the app in the app section so we make a turly N2M relationship
+for app and profile and combine them in the overview so we can have a vpn section with multiple apps and multiple
+configuration of profile + apps"; of the tray, "we dont need the app selection in the tray menu", "the tray menu just
+simplily connect with the configured profile + apps config".
+
+- **An app is in profiles' sections** (`RoutedItem.Uses`: a profile and the switch beside the app there, D23's
+  choice kept per section). An app may be in many sections and a section holds many apps. An earlier client's one
+  profile and switch read as one section and are never written again. An app has no profile field of its own any
+  more: Add an app puts it in a first section ("Goes through", or none for now); more are set on the Overview or on
+  its page. Removing a profile takes it out of every section; the apps stay.
+- **The Overview is one section per profile** (`SectionView`), in import order, connected or not: the profile's switch,
+  its traffic, ping and details while connected, its apps each with their own switch, Launch for a browser (launched
+  through that section's proxy), a remove, and a picker of the apps not in it. **An app's page** lists every profile
+  under *Goes through*, the same switch as its row in that section. The Apps list says where each app goes, without a
+  switch of its own. **The tray** connects and disconnects profiles; what goes through each is the section's.
+- **One route, a lane per profile** (`Router.Lanes`, eight): each connected profile whose section has an app switched
+  on is a lane of the service's one run, with its own NAT, path and generations (`GameRoute` per lane; a generation on
+  the pipe carries its lane in its top byte, so lane 0's are the session's own numbers — `RouterProtocol` version 3).
+  Each program's rule names its lane (`ProgramRule.Lane`), so a flow is decided into its program's profile's tunnel and
+  stays there; a lane is lost, held or let go on its own, the others untouched. The client's runner (`GameRunner`)
+  joins a lane to each profile the person connected and lets it go when its profile is disconnected or carries nothing.
+  An app switched on in two connected sections goes through the first, the one already carrying it first; the other
+  section says "Through us now".
+
+Measured 2026-10-20 against jp's server, with the guard outside (0 failed):
+- *Two lanes, one run* (`service-route --child … --child2 … --lane2 --end-lane2-after 22`: the second copy in lane 1,
+  through a second session of the profile — the server took two at once): both lanes "Routing", generation 1 each;
+  both copies answered 4 of 4, the far end seeing the VPN. The second session ended alone at 26 s: lane 1 "Held", its
+  copy 0 of 4 from then (53 held), the first copy 4 of 4 throughout; lane 0's dispatcher carried only its own (88).
+- *Through the client* (UI Automation, the window in Chinese; jp imported a second time to have a second profile,
+  removed after): the stand-in put in the second section from its picker; Zenless on in the first; both connected —
+  the service's run: "selection now 6 program(s)", "generation 1 of lane 1 committed"; the stand-in's `mixed-to`, 25
+  rounds, every request answered, the far end the VPN. The second jp disconnected — "断开 jp? childbin2 正在经由它…" —
+  and confirmed: "generation 1 of lane 1 retired", "selection now 3 program(s)", the run going on with Zenless; the
+  stand-in at home every round after. The first section showed Zenless "VPN 已开启 · jp", the second the stand-in
+  "等待 jp" with its switch still on, and the stand-in's page both profiles under 经由. Zenless off, jp disconnected:
+  the run ended, "stopped by the client".

@@ -17,9 +17,6 @@ internal enum Page { Apps, Network, Profiles, Settings }
 /// <summary>A page to show, once per request; <see cref="App"/>, an app's own page on Apps.</summary>
 internal sealed record NavigationView(Page Page, long Request, string? App = null);
 
-/// <summary>An app the channel carries now, as the channel shows it: its part of the route, and its switch (on).</summary>
-internal sealed record SelectionView(string Id, string Name, RunView Run, UiAction Vpn, string? IconUrl = null);
-
 internal sealed record ChannelActions(UiAction Disconnect, UiAction CheckLatency);
 
 internal enum ProbePhase { Unchecked, Checking, Available, Unavailable }
@@ -27,12 +24,17 @@ internal enum ProbePhase { Unchecked, Checking, Available, Unavailable }
 /// <summary>A channel's latency as Network shows it: each path's round trip, or why there is none.</summary>
 internal sealed record LatencyView(ProbePhase Phase, string StatusText, IReadOnlyList<Fact> Paths, DateTimeOffset? CheckedAt);
 
-/// <summary>One profile's connection as Network shows it: what it is, what it carries — its proxy, the apps routed
-/// through it — and how to end it.</summary>
+/// <summary>One profile's connection as Network shows it: what it is, its proxy, its traffic and ping, and how to end it.</summary>
 internal sealed record ChannelView(
     string Id, string ProfileId, string Name, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    IReadOnlyList<Fact> Facts, string? ProxyText, IReadOnlyList<SelectionView> Selections, ChannelActions Actions,
+    IReadOnlyList<Fact> Facts, string? ProxyText, ChannelActions Actions,
     DateTimeOffset? NextAttemptAt = null, LatencyView? Latency = null, TrafficView? Traffic = null);
+
+/// <summary>A profile's section on the Overview (D24): the profile and its switch, its connection while it has one, the
+/// apps in it, each with its own switch, and the apps that could be put in it (<see cref="Add"/> posts
+/// ADD_APP_TO_PROFILE with one of <see cref="Addable"/>).</summary>
+internal sealed record SectionView(ProfileView Profile, ChannelView? Channel, IReadOnlyList<AppSectionView> Apps, IReadOnlyList<EditorOption> Addable,
+    UiAction Add, string? HintText);
 
 /// <summary>A channel's traffic for its card: what it has received and sent, as figures with the rate now, and the rates
 /// a second apart over the last minute (bytes per second, oldest first) for its graph.</summary>
@@ -40,7 +42,8 @@ internal sealed record TrafficView(Fact Received, Fact Sent, IReadOnlyList<doubl
 
 internal sealed record NetworkEmpty(string Title, string Text);
 
-internal sealed record NetworkView(string StatusText, Tone Tone, NetworkEmpty? Empty, IReadOnlyList<ChannelView> Channels, DriverView Routing);
+internal sealed record NetworkView(string StatusText, Tone Tone, NetworkEmpty? Empty, IReadOnlyList<ChannelView> Channels, DriverView Routing,
+    IReadOnlyList<SectionView>? Sections = null);
 
 internal sealed record StartupView(bool On, string Label, string Text, UiAction Toggle);
 
@@ -65,13 +68,13 @@ internal static class WindowViews
     /// <summary>What is connected and what goes through it now: one channel per profile in use — its proxy and the apps
     /// routed through it on one card, as they share one login — failure first. <paramref name="proxyProblems"/>: why a
     /// channel's proxy is not listening, by profile.</summary>
+    /// <param name="sections">Each profile's apps and the apps that could join it, by profile (D24).</param>
     public static NetworkView Network(IReadOnlyList<ProfileView> profiles, IReadOnlyList<AppItemView> games, RunFacts? run,
         IReadOnlyList<StoredProfile> stored, DriverView routing, IReadOnlyDictionary<string, string?> proxyProblems,
-        IReadOnlyDictionary<string, (Latency? Last, bool Checking)>? latencies = null, IReadOnlyDictionary<string, Traffic?>? traffic = null)
+        IReadOnlyDictionary<string, (Latency? Last, bool Checking)>? latencies = null, IReadOnlyDictionary<string, Traffic?>? traffic = null,
+        IReadOnlyDictionary<string, (IReadOnlyList<AppSectionView> Apps, IReadOnlyList<EditorOption> Addable)>? sections = null)
     {
         var channels = new List<ChannelView>();
-        // The apps the route carries: only ever through a profile the person connected (D23), so on its channel's card.
-        var carried = run is { Ended: null } ? games.Where(g => g.Run is not null && run.Carries(g.Id)).ToList() : [];
         // What never changes is on the Profiles page; who routes through it is said by the apps the channel carries.
         string[] notHere = [L.T("Transport"), L.T("Imported"), L.T("SOCKS5 port"), L.T("Connection settings"), L.T("Used by")];
         foreach (var p in profiles)
@@ -81,12 +84,11 @@ internal static class WindowViews
             // The counts are the traffic's figures when there are any.
             string[] counted = flow is null ? [] : [L.T("Downloaded"), L.T("Uploaded")];
             var facts = p.Facts.Where(f => !notHere.Contains(f.Label) && !counted.Contains(f.Label)).ToList();
-            var selections = run?.ProfileId == p.Id ? carried.Select(Selection).ToList() : [];
             var proxy = p.Phase is ProfilePhase.Refused or ProfilePhase.Stopped ? null
                 : proxyProblems.GetValueOrDefault(p.Id) is { } problem ? L.T("SOCKS5 proxy not listening: {0}", problem)
                 : L.T("SOCKS5 proxy on {0}", p.EndpointText);
             var (last, checking) = latencies?.GetValueOrDefault(p.Id) ?? (null, false);
-            channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy, selections,
+            channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy,
                 new ChannelActions(p.Actions.Disconnect,
                     p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? L.T("Check ping") : L.T("Check again"), busy: checking) : UiAction.Hidden),
                 p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null, flow));
@@ -94,14 +96,22 @@ internal static class WindowViews
 
         // Trouble first, then work under way: one healthy channel must not hide another's failure.
         channels = [.. channels.OrderBy(c => c.Tone switch { Tone.Trouble => 0, Tone.Busy => 1, Tone.Up => 2, _ => 3 })];
-        var routedApps = channels.Sum(c => c.Selections.Count);
+        var routedApps = run is { Ended: null } ? run.Lanes.Sum(l => l.Apps.Count) : 0;
         var worst = channels.Select(c => c.Tone).DefaultIfEmpty(Tone.Off)
             .MinBy(t => t switch { Tone.Trouble => 0, Tone.Busy => 1, Tone.Up => 2, _ => 3 });
         var connections = L.Count(channels.Count, "1 connection", "{0} connections");
         var status = channels.Count == 0 ? L.T("Nothing is connected")
             : routedApps > 0 ? L.T("{0} · {1} using the VPN", connections, L.Count(routedApps, "1 app", "{0} apps")) : connections;
+        // Every profile that can connect, in the order they were imported: its section stays where it is whether connected or not.
+        var views = profiles.Where(p => p.Phase != ProfilePhase.Unsupported).Select(p =>
+        {
+            var (apps, addable) = sections?.GetValueOrDefault(p.Id) ?? ([], []);
+            return new SectionView(p, channels.FirstOrDefault(c => c.ProfileId == p.Id), apps, addable,
+                addable.Count == 0 ? UiAction.Hidden : UiAction.Shown(L.T("Add an app to {0}", p.Name)),
+                apps.Count == 0 ? addable.Count == 0 ? L.T("Add a game or a program on Apps, then put it here.") : L.T("Put an app here and it goes through {0} whenever it is connected.", p.Name) : null);
+        }).ToList();
         return new NetworkView(status, worst, channels.Count == 0 ? new(L.T("Nothing is connected"), L.T("Connect a profile to begin: the apps whose Use VPN is on go through it.")) : null,
-            channels, routing);
+            channels, routing, views);
     }
 
     public static TrafficView Traffic(Traffic t) => new(
@@ -140,11 +150,12 @@ internal static class WindowViews
                 : L.T("Nothing answered, so ping could not be checked. The VPN itself may still work."), paths, last.Checked);
     }
 
-    // The tunnel's own facts are the channel's, said once above the apps it carries.
-    private static SelectionView Selection(AppItemView game)
+    /// <summary>An app's part of the route as its section shows it: the tunnel's own facts are the section's, said once
+    /// above the apps it carries.</summary>
+    public static RunView InSection(RunView run)
     {
         string[] channels = [L.T("Connected over"), L.T("Tunnel address"), L.T("Reconnects")];
-        return new(game.Id, game.Name, game.Run! with { Facts = [.. game.Run!.Facts.Where(f => !channels.Contains(f.Label))] }, game.Actions.Vpn, game.IconUrl);
+        return run with { Facts = [.. run.Facts.Where(f => !channels.Contains(f.Label))] };
     }
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
