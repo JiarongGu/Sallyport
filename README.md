@@ -27,7 +27,7 @@ not OpenVPN Connect and is not affiliated with OpenVPN Inc.
   OpenVPN Access Server address, signing in when it asks). Profiles that sign in with a username and password are
   supported; the password is remembered only if you ask.
 - **Browsers too.** A browser can be started with the profile's proxy instead, in a profile folder of its own.
-- **See what it is doing.** Traffic, ping to 1.1.1.1 directly and through the VPN, the exit location, and for each
+- **See what it is doing.** Traffic and the VPN's ping on one graph, the exit location, and for each
   program whether it is running and going through the VPN.
 - **Move to another computer.** Export your profiles, apps and settings to one file, with or without a password, and
   import them there. Apps installed somewhere else are found on the other drives, or located by you.
@@ -83,8 +83,8 @@ other programs to use.
   folder; the original `.ovpn` file is not needed afterwards. A password is kept the same way, and only when you choose
   **Remember password**.
 - Sallyport talks to nothing but your VPN server, except: NT Kernel's release on GitHub, to download the packet driver
-  when you install it (checked against a pinned SHA-256); 1.1.1.1, directly and through the VPN, every 30 seconds while a
-  VPN is connected, to show its latency; ipinfo.io, through the VPN, when you check the exit location; and a link you
+  when you install it (checked against a pinned SHA-256); 1.1.1.1, through the VPN, every 30 seconds while a VPN is
+  connected, to show its latency; ipinfo.io, through the VPN, when you check the exit location; and a link you
   type to import a profile. There is no telemetry and no account.
 - To report a security problem, see [SECURITY.md](SECURITY.md).
 

@@ -21,13 +21,15 @@ internal sealed record ChannelActions(UiAction Disconnect);
 
 internal enum ProbePhase { Unchecked, Checking, Available, Unavailable }
 
-/// <summary>A channel's latency as Network shows it: each path's round trip, or why there is none.</summary>
-internal sealed record LatencyView(ProbePhase Phase, string StatusText, IReadOnlyList<Fact> Paths, DateTimeOffset? CheckedAt);
+/// <summary>A channel's round trip as its traffic graph carries it: <see cref="Figure"/>, "48 ms", or none yet or none
+/// answered; <see cref="Text"/>, what it is, or why there is none.</summary>
+internal sealed record LatencyView(ProbePhase Phase, string? Figure, string Text, DateTimeOffset? CheckedAt);
 
-/// <summary>One profile's connection as Network shows it: what it is, its proxy, its traffic and ping, and how to end it.</summary>
+/// <summary>One profile's connection as Network shows it: what it is, its traffic and round trip, one line for the rest
+/// (<see cref="Line"/>: "UDP", its proxy, what is open through it, its reconnects), and how to end it.</summary>
 internal sealed record ChannelView(
     string Id, string ProfileId, string Name, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    IReadOnlyList<Fact> Facts, string? ProxyText, ChannelActions Actions,
+    IReadOnlyList<string> Line, ChannelActions Actions,
     DateTimeOffset? NextAttemptAt = null, LatencyView? Latency = null, TrafficView? Traffic = null);
 
 /// <summary>A profile's section on the Overview (D24): the profile and its switch, its connection while it has one, the
@@ -79,20 +81,25 @@ internal static class WindowViews
         IReadOnlyDictionary<string, (IReadOnlyList<AppSectionView> Apps, IReadOnlyList<EditorOption> Addable)>? sections = null)
     {
         var channels = new List<ChannelView>();
-        // What never changes is on the Profiles page; who routes through it is said by the apps the channel carries.
-        string[] notHere = [L.T("SOCKS5 port"), L.T("Used by")];
         foreach (var p in profiles)
         {
             if (p.Phase is ProfilePhase.Idle or ProfilePhase.Unsupported or ProfilePhase.Removing) continue;
             var flow = traffic?.GetValueOrDefault(p.Id) is { } t ? Traffic(t) : null;
-            // The counts are the traffic's figures when there are any.
-            string[] counted = flow is null ? [] : [L.T("Downloaded"), L.T("Uploaded")];
-            var facts = p.Facts.Where(f => !notHere.Contains(f.Label) && !counted.Contains(f.Label)).ToList();
             var proxy = p.Phase is ProfilePhase.Refused or ProfilePhase.Stopped ? null
                 : proxyProblems.GetValueOrDefault(p.Id) is { } problem ? L.T("SOCKS5 proxy not listening: {0}", problem)
                 : L.T("SOCKS5 proxy on {0}", p.EndpointText);
+            // One line for what the section shows nowhere else (the owner: "just display a line for them like connection
+            // number"): how it is connected, its proxy and what is open through it, and its reconnects, if any. The
+            // tunnel's address and its port are not for the person to read; the counts are the graph's.
+            List<string> line =
+            [
+                .. p.Tunnel?.Transport is { } transport ? [transport] : Array.Empty<string>(),
+                .. proxy is null ? Array.Empty<string>() : [proxy],
+                .. p.Tunnel is { } figures ? [L.Count(figures.OpenConnections, "1 open connection", "{0} open connections")] : Array.Empty<string>(),
+                .. p.Tunnel is { Reconnects: > 0 and var again } ? [L.Count(again, "Reconnected once", "Reconnected {0} times")] : Array.Empty<string>(),
+            ];
             var (last, checking) = latencies?.GetValueOrDefault(p.Id) ?? (null, false);
-            channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy,
+            channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, line,
                 new ChannelActions(p.Actions.Disconnect),
                 p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null, flow));
         }
@@ -123,35 +130,18 @@ internal static class WindowViews
         new(L.T("Sent"), L.T("{0}/s", ClientView.Bytes((long)t.OutPerSecond.LastOrDefault())), ClientView.Bytes(t.BytesOut)),
         t.InPerSecond, t.OutPerSecond);
 
-    /// <summary>A channel's latency, in words: each path's median round trip and how many of its echoes were answered,
-    /// or that none was — which says nothing of the tunnel (rule 6) — and only a hop's answer marked as the estimate it is.</summary>
+    /// <summary>A channel's round trip for its graph: the VPN server's own when it answers an echo to its tunnel side
+    /// (many do not), else the way through it to the public address — a hop's answer is only an estimate, so not shown. A
+    /// figure kept while it is checked again; none answered said as that, which says nothing of the tunnel (rule 6).</summary>
     public static LatencyView Latency(Latency? last, bool checking)
     {
-        if (last is null) return new(checking ? ProbePhase.Checking : ProbePhase.Unchecked,
-            checking ? L.T("Checking ping…") : L.T("Ping to {0}: straight from this computer, through the VPN, and to the VPN server itself.", Connections.LatencyTarget), [], null);
-        // The round trip is the figure; how many answered, and from where, qualifies it.
-        Fact Path(string label, PathSample s) => s.MedianMs is { } ms
-            ? new(label, s.FromDestination
-                    ? L.T("{0} of {1} answered", s.Answered, s.Sent)
-                    : L.T("{0} of {1} answered; farthest responding hop {2} — estimate", s.Answered, s.Sent, s.Responder),
-                L.T("{0} ms", ms.ToString("F0", English)))
-            : new(label, L.T("No reply — no ping"));
-        Fact ToServer()
-        {
-            if (last.ToGateway is not { } g || last.Gateway is not { } gateway) return new(L.T("To the VPN server"), L.T("The server named no tunnel gateway."));
-            var path = Path(L.T("To the VPN server"), g);
-            return path with { Value = L.T("{0} — tunnel gateway {1}", path.Value, gateway) };
-        }
-        var paths = new List<Fact>
-        {
-            Path(L.T("Direct to {0}", last.Target), last.Direct),
-            Path(L.T("Through the VPN to {0}", last.Target), last.Vpn),
-            ToServer(),
-        };
-        var any = last.Direct.Answered + last.Vpn.Answered + (last.ToGateway?.Answered ?? 0) > 0;
-        return new(checking ? ProbePhase.Checking : any ? ProbePhase.Available : ProbePhase.Unavailable,
-            checking ? L.T("Checking ping…") : any ? L.T("Ping")
-                : L.T("Nothing answered, so ping could not be checked. The VPN itself may still work."), paths, last.Checked);
+        var phase = checking ? ProbePhase.Checking : ProbePhase.Unchecked;
+        if (last is null) return new(phase, null, checking ? L.T("Checking ping…") : L.T("Not measured yet"), null);
+        var (figure, text) = last.ToGateway is { MedianMs: { } server, FromDestination: true } ? (server, L.T("To the VPN server"))
+            : last.Vpn is { MedianMs: { } through, FromDestination: true } ? (through, L.T("Through the VPN to {0}", last.Target))
+            : ((double?)null, L.T("Nothing answered, so ping could not be checked. The VPN itself may still work."));
+        return new(checking ? phase : figure is null ? ProbePhase.Unavailable : ProbePhase.Available,
+            figure is { } ms ? L.T("{0} ms", ms.ToString("F0", English)) : null, text, last.Checked);
     }
 
     /// <summary>An app's part of the route as its section shows it: the tunnel's own facts are the section's, said once

@@ -76,8 +76,6 @@ export interface ProfileView {
   endpointText: string;
   /** The port its proxy listens on, chosen when it connects; null while it does not. */
   port: number | null;
-  /** Overview's details while it is connected: SOCKS5 port, Connected over, Tunnel address, Open connections, Downloaded, Uploaded, Used by. */
-  facts: Fact[];
   /** Its row on Profiles: VPN protocol, If it cannot connect, More settings (each Settings' or its own), Imported. */
   details: Fact[] | null;
   location: LocationView;
@@ -161,14 +159,13 @@ export interface ChannelView {
   detailText: string | null;
   /** ISO time the tunnel came up; the page shows "Connected for {duration}" from it. */
   connectedSince: string | null;
-  facts: Fact[];
-  /** "SOCKS5 proxy on 127.0.0.1:1088", when the channel serves one. */
-  proxyText: string | null;
+  /** One line, its parts joined: "UDP", "SOCKS5 proxy on 127.0.0.1:1088", "2 open connections", "Reconnected once". */
+  line: string[];
   /** Disconnect posts DISCONNECT with the channel's profileId. Its latency is checked on its own while it is up. */
   actions: { disconnect: Action };
   /** ISO time the next round of attempts starts, while the channel waits for it. */
   nextAttemptAt: string | null;
-  /** Round trips, when the channel is up or was checked. */
+  /** Its round trip on the traffic graph, when the channel is up or was checked. */
   latency: LatencyView | null;
   /** What it has received and sent, and the rates over the last minute, while it is open. */
   traffic: TrafficView | null;
@@ -185,10 +182,10 @@ export interface TrafficView {
 
 export interface LatencyView {
   phase: 'unchecked' | 'checking' | 'available' | 'unavailable';
-  statusText: string;
-  /** Each path and its result: "Direct to 1.1.1.1" — figure "14 ms", value "4 of 4 answered"; or no figure and
-   *  "No reply — latency unavailable". */
-  paths: Fact[];
+  /** "48 ms": the VPN's round trip; null when there is none yet or none answered. */
+  figure: string | null;
+  /** What the figure is ("Through the VPN to 1.1.1.1"), or why there is none. */
+  text: string;
   checkedAt: string | null;
 }
 

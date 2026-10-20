@@ -165,6 +165,17 @@ public class AppViewTests
     }
 
     [Fact]
+    public void An_apps_page_says_the_type_its_vpn_is_connected_over_never_its_port()
+    {
+        var up = new SessionStatus(SessionState.Up, At, "udp/1194", 1, 0, null, "10.8.0.2", 0, 0);
+        var lane = Lane(Jp, RoutePhase.Routing, At) with { Tunnel = up };
+
+        var run = GameViews.Run(Zenless(on: true), Jp, Facts(Route(RoutePhase.Routing), lane), lane);
+
+        Assert.Contains(new Fact("Connected over", "UDP"), run.Facts);
+    }
+
+    [Fact]
     public void Of_several_apps_in_one_route_each_counts_its_own_programs()
     {
         var route = Route(RoutePhase.Routing, programs:
@@ -332,7 +343,6 @@ public class AppViewTests
         Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Reason: null });
         Assert.False(view.Actions.Remove.Enabled);
         Assert.Equal("Disconnect it on Overview first.", view.Actions.Remove.Reason);
-        Assert.Contains(view.Facts, f => f.Label == "Used by" && f.Value == "Zenless Zone Zero");
     }
 
     [Fact]
@@ -376,7 +386,7 @@ public class AppViewTests
         Assert.Equal([new Fact("VPN protocol", "TCP (this profile only)"), new Fact("If it cannot connect", "Stop after 5 failed rounds (this profile only)"),
             new Fact("More settings", "Changed for this profile")], own.Details!.SkipLast(1));
         Assert.Equal(new Fact("VPN protocol", "UDP only"), udpOnly.Details![0]);
-        Assert.All(new[] { settings, own, udpOnly }, v => Assert.DoesNotContain(v.Facts.Concat(v.Details!), f => f.Value.Contains("1194") || f.Value.Contains("443")));
+        Assert.All(new[] { settings, own, udpOnly }, v => Assert.DoesNotContain(v.Details!, f => f.Value.Contains("1194") || f.Value.Contains("443")));
     }
 
     [Fact]

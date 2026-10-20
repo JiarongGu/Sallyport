@@ -38,8 +38,9 @@ list of quick toggles is what its users asked back for — never from code of th
 - **Overview** (the Network page, renamed: *"the first page is more like the overview (main control for toggle)"*), where
   the window opens once a profile exists, shows one connection first, as Connect does: a profile picker, a large switch, its state in capitals with
   its time and proxy, received and sent as figures with the rate now over a minute's graph of both (`Connections`
-  samples each channel once a second and publishes when a rate moves), round trips as figures (`"19 ms"` over `"4 of 4
-  answered"`), the routed app with Stop, the apps through it with Launch and a route switch; other open channels after.
+  samples each channel once a second and publishes when a rate moves), its round trip as a figure in the graph's corner (the owner: *"in the chart (as a
+  number not the line)"*), one line under it — UDP or TCP, its proxy, what is open through it, nothing folded (*"make
+  the ui simple"*) — the routed app with Stop, the apps through it with Launch and a route switch; other open channels after.
 - **Profiles**: a switch per profile, the address under the name with a copy icon once its proxy has a port ("a free
   port when it connects" in plain text until then), the details' chevron centred in its square; Connection settings…
   opens the profile's own view. **Apps**: one "Add an app…"; a tile, Launch, a route switch, the routing check, and an

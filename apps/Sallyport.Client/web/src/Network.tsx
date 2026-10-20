@@ -1,10 +1,9 @@
 import { t } from './i18n';
-import { useId, useState } from 'react';
-import type { AppSectionView, ClientState, Page, SectionView, TrafficView } from './contract';
+import type { AppSectionView, ClientState, LatencyView, Page, SectionView, TrafficView } from './contract';
 import { post } from './commands';
 import { clock, countdown, duration } from './format';
 import { RunLine } from './Run';
-import { ActionButton, AppIcon, Disclosure, EmptyView, Facts, Icon, Monogram, StatusPill, Switch } from './ui/shared';
+import { ActionButton, AppIcon, EmptyView, Icon, Monogram, StatusPill, Switch } from './ui/shared';
 import { RoutingCard } from './Settings';
 
 /**
@@ -29,8 +28,6 @@ export function Network({ state, now, go }: { state: ClientState; now: number; g
 function Section({ section, now, go }: { section: SectionView; now: number; go: (page: Page) => void }) {
   const profile = section.profile;
   const channel = section.channel;
-  const detailsId = useId();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const on = profile.actions.disconnect.visible;
   const since = profile.connectedSince ?? channel?.connectedSince;
   const wait = countdown(profile.nextAttemptAt ?? channel?.nextAttemptAt ?? null, now);
@@ -49,24 +46,12 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
     {(channel?.detailText ?? profile.detailText) && <p className="supporting secondary">{channel?.detailText ?? profile.detailText}</p>}
     {wait && <p className="supporting secondary countdown" role="timer">{wait}</p>}
 
-    {channel?.traffic && <Traffic traffic={channel.traffic} />}
+    {/* Its round trip is a figure on its graph, not a section of its own (the owner: "as a number not the line"). */}
+    {channel?.traffic && <Traffic traffic={channel.traffic} latency={channel.latency} />}
 
-    {channel?.latency && <section className="latency" aria-label={t('Ping')}>
-      <div className="latency-head">
-        <p className={channel.latency.phase === 'unavailable' ? 'location-unavailable' : 'secondary'} role="status">{channel.latency.statusText}</p>
-      </div>
-      <Facts facts={channel.latency.paths} figures />
-      {channel.latency.checkedAt && <p className="metadata secondary">{t('Checked')} <time dateTime={channel.latency.checkedAt}>{clock(channel.latency.checkedAt)}</time></p>}
-    </section>}
-
-    {/* How it is connected, for those who look: folded, so the section says what a person needs at a glance. */}
-    {channel && (channel.facts.length > 0 || channel.proxyText) && <div className="hero-details">
-      <Disclosure open={detailsOpen} controls={detailsId} onClick={() => setDetailsOpen(!detailsOpen)}>{t('Details')}</Disclosure>
-      <div id={detailsId} hidden={!detailsOpen}>
-        {channel.proxyText && <p className="secondary metadata">{channel.proxyText}</p>}
-        <Facts facts={channel.facts} />
-      </div>
-    </div>}
+    {/* The rest in one line, nothing folded (the owner: "make the ui simple"): how it is connected, its proxy, what is
+        open through it. */}
+    {channel && channel.line.length > 0 && <p className="channel-line metadata secondary">{channel.line.join(' · ')}</p>}
 
     {/* Its apps, each with its own switch here, and below them the apps not in it, to put in. No heading: the card is
         the profile's and its apps say what they are (the owner: "do we really need this line?"); the name stays for a
@@ -116,15 +101,30 @@ function SectionApp({ app, now }: { app: AppSectionView; now: number }) {
   </li>;
 }
 
-/** Received and sent, as figures with the rate now, over a minute's graph of the two. */
-export function Traffic({ traffic }: { traffic: TrafficView }) {
+/** Received and sent, as figures with the rate now, over a minute's graph of the two; with `latency`, the connection's
+ *  round trip as a figure in the graph's corner. */
+export function Traffic({ traffic, latency }: { traffic: TrafficView; latency?: LatencyView | null }) {
   return <section className="traffic" aria-label={t('Traffic')}>
     <div className="traffic-figures">
       <TrafficFigure icon="down" label={traffic.received.label} figure={traffic.received.figure} rate={traffic.received.value} kind="in" />
       <TrafficFigure icon="up" label={traffic.sent.label} figure={traffic.sent.figure} rate={traffic.sent.value} kind="out" />
     </div>
-    <Graph inRates={traffic.inPerSecond} outRates={traffic.outPerSecond} />
+    <div className="graph-box">
+      <Graph inRates={traffic.inPerSecond} outRates={traffic.outPerSecond} />
+      {latency && <GraphLatency latency={latency} />}
+    </div>
   </section>;
+}
+
+/** The round trip over the graph: the figure, or a dash while there is none; what it is (or why there is none) and when
+ *  it was checked on hover and to a screen reader. Not live: it is renewed every half minute, too often to announce. */
+function GraphLatency({ latency }: { latency: LatencyView }) {
+  const about = latency.checkedAt ? `${latency.text} · ${t('Checked')} ${clock(latency.checkedAt)}` : latency.text;
+  return <p className="graph-latency" title={about}>
+    <span className="graph-latency-label" aria-hidden="true">{t('Ping')}</span>
+    <span className={latency.figure ? 'graph-latency-figure' : 'graph-latency-figure none'} aria-hidden="true">{latency.figure ?? '—'}</span>
+    <span className="sr-only">{[t('Ping'), latency.figure, about].filter(Boolean).join(' · ')}</span>
+  </p>;
 }
 
 function TrafficFigure({ icon, label, figure, rate, kind }: { icon: 'down' | 'up'; label: string; figure?: string | null; rate: string; kind: 'in' | 'out' }) {

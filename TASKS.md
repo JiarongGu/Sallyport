@@ -8,6 +8,11 @@ says under **Done when** has been measured — against the real server where a s
 The owner, 2026-10-21: "next session will be a full code review + perpare for nuget release for our core (the MIT
 library for openvpn)". The list of 2026-10-21 is done (its record: the commits from `9b2c8ec` to this one, D30).
 
+The owner's reports since, each first:
+- **An icon when adding an app.** "there is no icon selection for when adding app". **Done when:** Add an app offers the
+  icon choices Edit has (each of its programs' own, one per look), the one it would take by itself chosen first, and the
+  app is added with the one chosen; measured on the installed copy.
+
 1. **A full code review**, before anything is published from it.
    - **Scope:** the library first (`src/Sallyport`: Profile, Protocol, Tunnel, Net, Proxy, Runtime), then
      `src/Sallyport.Windows` (the driver, the router, the service's protocol), then the one program (`apps/Sallyport.Client`

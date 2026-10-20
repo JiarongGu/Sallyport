@@ -40,9 +40,13 @@ internal sealed record LocationView(LocationPhase Phase, string Text, IReadOnlyL
 /// <see cref="Remove"/> (the owner: "put edit/delete button on surface").</summary>
 internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction Locate, UiAction Remove, UiAction? Edit = null);
 
+/// <summary>A connected profile's own figures, for its line on the Overview: how it is connected — UDP or TCP, the type
+/// Settings chooses, never its port — the connections open through its proxy, and how often it has reconnected.</summary>
+internal sealed record TunnelFigures(string? Transport, int OpenConnections, int Reconnects);
+
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    string EndpointText, int? Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null,
+    string EndpointText, int? Port, TunnelFigures? Tunnel, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null,
     IReadOnlyList<Fact>? Details = null);
 
 internal sealed record EditorView(
@@ -113,6 +117,10 @@ internal static class ClientView
 
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
 
+    /// <summary>"udp/1194" as Settings' connection type names it: the type alone (the owner: "isn't we just need to show
+    /// udp/tcp instead?").</summary>
+    public static string? Transport(string? remote) => remote?.Split('/')[0].ToUpperInvariant();
+
     public static string Endpoint(int port) => $"127.0.0.1:{port}";
 
     public static ProfileView Profile(ProfileFacts f)
@@ -144,19 +152,8 @@ internal static class ClientView
         };
 
         var busy = f.Removing || f.Disconnecting;
-        // Overview's details while it is connected; its row on Profiles says how it connects (Details).
-        var facts = new List<Fact>();
-        if (f.Port is { } listening) facts.Add(new(L.T("SOCKS5 port"), listening.ToString(English)));
-        if (up && status is not null)
-        {
-            if (status.Remote is { } remote) facts.Add(new(L.T("Connected over"), remote));
-            if (status.Address is { } address) facts.Add(new(L.T("Tunnel address"), address));
-            facts.Add(new(L.T("Open connections"), status.OpenConnections.ToString("N0", English)));
-            facts.Add(new(L.T("Downloaded"), Bytes(status.BytesDown)));
-            facts.Add(new(L.T("Uploaded"), Bytes(status.BytesUp)));
-        }
-
-        if (f.UsedBy is { } game) facts.Add(new(L.T("Used by"), game));
+        // Its line on the Overview while it is connected; its row on Profiles says how it connects (Details).
+        var tunnel = up && status is not null ? new TunnelFigures(Transport(status.Remote), status.OpenConnections, status.Reconnects) : null;
 
         var location = Located(f, up);
         var actions = new ProfileActions(
@@ -181,7 +178,7 @@ internal static class ClientView
         var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;
         return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null,
             f.Port is { } port ? Endpoint(port) : L.T("a free port when it connects"), f.Port,
-            facts, location, actions, next,
+            tunnel, location, actions, next,
             Details(f.Choices ?? new([.. f.Stored.Remotes.Select(r => r.Split('/')[0]).Distinct()], null, false, 0, false, false), f.Stored.Imported,
                 f.Servers ?? [], f.Stored.NeedsLogin ? (f.Login ?? new LoginState(null, false)).Username ?? L.T("Not set") : f.Account));
     }

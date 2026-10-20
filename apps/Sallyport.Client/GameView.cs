@@ -113,7 +113,7 @@ internal static class GameViews
         }
         if (tunnel is { State: SessionState.Up })
         {
-            if (tunnel.Remote is { } remote) facts.Add(new(L.T("Connected over"), remote));
+            if (ClientView.Transport(tunnel.Remote) is { } transport) facts.Add(new(L.T("Connected over"), transport));
             if (tunnel.Address is { } address) facts.Add(new(L.T("Tunnel address"), address));
             if (tunnel.Reconnects > 0) facts.Add(new(L.T("Reconnects"), tunnel.Reconnects.ToString("N0", English)));
         }

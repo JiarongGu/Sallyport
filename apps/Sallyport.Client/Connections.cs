@@ -14,9 +14,9 @@ internal sealed record Location(string? Ip, string? City, string? Region, string
 /// the destination, or only a hop on the way.</summary>
 internal sealed record PathSample(int Sent, int Answered, double? MedianMs, string? Responder, bool FromDestination);
 
-/// <summary>A channel's latency, checked when asked: to a public address directly and through the tunnel, and to the
-/// tunnel's gateway (the VPN server's side) when the server named one.</summary>
-internal sealed record Latency(string Target, PathSample Direct, PathSample Vpn, string? Gateway, PathSample? ToGateway, DateTimeOffset Checked);
+/// <summary>A channel's latency, checked every half minute: to a public address through the tunnel, and to the tunnel's
+/// gateway (the VPN server's side) when the server named one.</summary>
+internal sealed record Latency(string Target, PathSample Vpn, string? Gateway, PathSample? ToGateway, DateTimeOffset Checked);
 
 /// <summary>A channel's bytes so far and its rates over the last minute, a second apart, oldest first: bytes per second
 /// received (<see cref="InPerSecond"/>) and sent.</summary>
@@ -147,9 +147,8 @@ internal sealed class Connections : IDisposable
         lock (_gate) return _channels.TryGetValue(id, out var channel) ? (channel.Latency, channel.CheckingLatency) : (null, false);
     }
 
-    /// <summary>Round trips now, four of each: to <see cref="LatencyTarget"/> from this computer and through the tunnel
-    /// (both answered by the same server, so the difference is the VPN's), and to the tunnel's gateway. An echo not
-    /// answered is counted, never an error: no answer says nothing of the tunnel itself (rule 6).</summary>
+    /// <summary>Round trips now, four of each: to <see cref="LatencyTarget"/> through the tunnel, and to the tunnel's
+    /// gateway. An echo not answered is counted, never an error: no answer says nothing of the tunnel itself (rule 6).</summary>
     public async Task CheckLatencyAsync(string id, CancellationToken ct)
     {
         Channel? channel;
@@ -164,17 +163,10 @@ internal sealed class Connections : IDisposable
             if (channel.Session.Dispatcher is not { } dispatcher)
                 throw new ShenoraException("NOT_CONNECTED", "id", id, L.T("the profile is not up"));
             var target = IPAddress.Parse(LatencyTarget);
-            var direct = await SampleAsync(async () =>
-            {
-                using var ping = new System.Net.NetworkInformation.Ping();
-                var reply = await ping.SendPingAsync(target, 1500);
-                return reply.Status == System.Net.NetworkInformation.IPStatus.Success
-                    ? new Net.EchoAnswer(reply.Address, reply.RoundtripTime, true) : new Net.EchoAnswer(null, null, false);
-            }, ct);
             var vpn = await SampleAsync(() => dispatcher.Echo.PingAsync(target, TimeSpan.FromSeconds(1.5), ct: ct), ct);
             var gateway = dispatcher.Tunnel.Config.Gateway;
             var toGateway = gateway is null ? null : await SampleAsync(() => dispatcher.Echo.PingAsync(gateway, TimeSpan.FromSeconds(1.5), ct: ct), ct);
-            lock (_gate) channel.Latency = new Latency(LatencyTarget, direct, vpn, gateway?.ToString(), toGateway, DateTimeOffset.Now);
+            lock (_gate) channel.Latency = new Latency(LatencyTarget, vpn, gateway?.ToString(), toGateway, DateTimeOffset.Now);
         }
         finally
         {

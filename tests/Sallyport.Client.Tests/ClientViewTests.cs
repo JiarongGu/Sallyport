@@ -37,7 +37,7 @@ public class ClientViewTests
         Assert.Equal(LocationPhase.Disconnected, view.Location.Phase);
         Assert.Equal("a free port when it connects", view.EndpointText);
         Assert.Null(view.Port);
-        Assert.DoesNotContain(view.Facts, f => f.Label == "SOCKS5 port");
+        Assert.Null(view.Tunnel);
         Assert.Null(view.ConnectedSince);
     }
 
@@ -53,11 +53,10 @@ public class ClientViewTests
         Assert.True(view.Actions.Disconnect is { Visible: true, Enabled: true, Label: "Disconnect" });
         Assert.Equal("127.0.0.1:52114", view.EndpointText);
         Assert.True(view.Actions.Copy is { Visible: true, Enabled: true });
-        Assert.Contains(new Fact("SOCKS5 port", "52114"), view.Facts);
         Assert.True(view.Actions.Remove is { Enabled: false, Reason: "Disconnect it on Overview first." });
         Assert.True(view.Actions.Locate is { Visible: true, Label: "Check location" });
-        Assert.Contains(new Fact("Downloaded", "5.0 MB"), view.Facts);
-        Assert.Contains(new Fact("Tunnel address", "10.8.0.2"), view.Facts);
+        // Its line's figures: the type it is connected over, never its port.
+        Assert.Equal(new TunnelFigures("UDP", 3, 0), view.Tunnel);
     }
 
     [Fact]
