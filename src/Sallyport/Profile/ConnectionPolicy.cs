@@ -25,6 +25,11 @@ public sealed record ConnectionPolicy
     /// <summary><c>remote-random</c>: each round tries the remotes in a new random order, not as listed.</summary>
     public bool RandomOrder { get; init; }
 
+    /// <summary>"udp" or "tcp": only the remotes of that transport are tried. Null, every remote as the profile lists it.
+    /// A profile names a transport per remote (<c>proto</c>, or <c>remote host port proto</c>) and has no directive for
+    /// one transport across all of them; this is its owner's choice, as OpenVPN Connect's "Protocol" setting is.</summary>
+    public string? Protocol { get; init; }
+
     /// <summary><c>server-poll-timeout n</c> (or <c>connect-timeout n</c>): how long one remote has to answer.</summary>
     public TimeSpan AttemptTimeout { get; init; } = TimeSpan.FromSeconds(30);
 

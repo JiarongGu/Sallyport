@@ -11,6 +11,11 @@ export function Settings({ state, expanded, toggle, editorForm }: {
   const settings = state.settings;
   const generalId = useId();
   const languageId = useId();
+  const connectionId = useId();
+  const protocolId = useId();
+  const retryId = useId();
+  const connection = settings.connection;
+  const protocolHelp = connection.protocol.choices.find((choice) => choice.id === connection.protocol.setting)?.help;
   return <section className="page settings" aria-label={t('Settings')}>
     {/* Settings that act the moment they change, as rows: what it is on the left, its control on the right. */}
     <section className="settings-group" aria-labelledby={generalId}>
@@ -31,6 +36,34 @@ export function Settings({ state, expanded, toggle, editorForm }: {
           <input type="checkbox" role="switch" className="switch" checked={settings.startup.on} disabled={!settings.startup.toggle.enabled}
             onChange={() => post('SET_START_WITH_WINDOWS', { enabled: !settings.startup.on })} />
         </label>
+      </div>
+    </section>
+
+    <section className="settings-group" aria-labelledby={connectionId}>
+      <h2 id={connectionId}>{t('Connection')}</h2>
+      <p className="secondary">{t('For every profile, from its next connection. A profile can be changed on its own under Profiles.')}</p>
+      <div className="card setting-rows">
+        <div className="setting-row">
+          <span className="setting-text">
+            <span id={protocolId}>{t('VPN protocol')}</span>
+            <span>{protocolHelp ? t('{0} {1}', t('How it reaches the VPN server. Apps’ TCP and UDP go through the VPN either way.'), protocolHelp)
+              : t('How it reaches the VPN server. Apps’ TCP and UDP go through the VPN either way.')}</span>
+          </span>
+          <select className="setting-choice" aria-labelledby={protocolId} value={connection.protocol.setting}
+            onChange={(event) => post('SET_PROTOCOL', { protocol: event.target.value })}>
+            {connection.protocol.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+          </select>
+        </div>
+        <div className="setting-row">
+          <span className="setting-text">
+            <span id={retryId}>{t('If it cannot connect')}</span>
+            <span>{t('A round tries every server of the profile once, then waits a little longer each time.')}</span>
+          </span>
+          <select className="setting-choice" aria-labelledby={retryId} value={connection.retry.setting}
+            onChange={(event) => post('SET_RETRY', { rounds: Number(event.target.value) })}>
+            {connection.retry.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+          </select>
+        </div>
       </div>
     </section>
 

@@ -189,6 +189,12 @@ export interface SettingsView {
   defaults: { facts: Fact[]; edit: Action };
   /** The language in force ("en", "zh-Hans") and the choices; choosing posts SET_LANGUAGE. */
   language: { setting: string; choices: { id: string; label: string }[] };
+  /** How every profile connects, unless changed for one in its own view. Choosing posts SET_PROTOCOL ('', 'udp', 'tcp')
+   *  or SET_RETRY (failed rounds before it stops, 0 never); `help` says what the choice in force does. */
+  connection: {
+    protocol: { setting: string; choices: { id: string; label: string; help: string | null }[] };
+    retry: { setting: string; choices: { id: string; label: string; help: string | null }[] };
+  };
 }
 
 /** What a new app starts with: a profile (null: the first that can connect) and its loss policy. */
@@ -271,10 +277,14 @@ export interface PolicyValues {
   retryAfterAuthFailure: boolean;
   /** Empty: the server's own. */
   pingRestartText: string;
+  /** '': every server as the profile lists them; 'udp' or 'tcp': only those (the editor's options). */
+  protocol: string;
+  /** On: never give up. Off: stop after roundsMaxText failed rounds. */
+  keepTrying: boolean;
 }
 
 export type EditorField = 'form' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
-  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText';
+  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol';
 
 /** An edit the host opened. Its values seed the fields once (keep what the person types across later STATEs with the
  *  same token); its errors are the host's verdict on the last save. */
@@ -289,8 +299,9 @@ export type Editor = {
   cancel: Action;
   /** The policy editor's "Use the profile's own": posts RESET_POLICY. */
   reset: Action;
-  /** The app editor's choices for what Launch starts. */
-  options: { id: string; label: string }[] | null;
+  /** The app editor's choices for what Launch starts; the policy editor's VPN protocols, null when the profile has
+   *  servers of one only. */
+  options: { id: string; label: string; help: string | null }[] | null;
 } & ({ kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
   | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues });
 
@@ -377,5 +388,7 @@ export interface Commands {
   COPY_GUIDE_EXAMPLE: Record<string, never>;
   SET_START_WITH_WINDOWS: { enabled: boolean };
   SET_LANGUAGE: { language: string };
+  SET_PROTOCOL: { protocol: string };
+  SET_RETRY: { rounds: number };
   DISMISS_NOTICE: { id: string };
 }

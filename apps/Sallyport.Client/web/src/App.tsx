@@ -5,7 +5,7 @@ import { setLanguage, t } from './i18n';
 import { MODULE } from './contract';
 import { Apps } from './Apps';
 import { Network } from './Network';
-import { Profiles } from './Profiles';
+import { ProfileSettings, Profiles } from './Profiles';
 import { Settings } from './Settings';
 import { EditorForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
@@ -100,17 +100,21 @@ export function App() {
     editor={state.editor} draft={currentDraft} onChange={setDraft}
     profileChoices={state.profileChoices} kindChoices={state.kindChoices} lossChoices={state.lossChoices} /> : null;
   const shown = page ?? state?.initialPage ?? 'apps';
+  // A profile's own connection settings take the Profiles page while they are open; back is Cancel.
+  const policyEditor = shown === 'profiles' && state?.editor?.kind === 'policy' ? state.editor : null;
+  const policyName = policyEditor ? state?.profiles.find((profile) => profile.id === policyEditor.subjectId)?.name ?? '' : '';
   // Before anything renders: the page's own words follow the host's language from the same state.
   setLanguage(state?.language ?? 'en');
 
   return <div className="shell">
     <Sidebar state={state} shown={shown} go={setPage} />
     <div className="main">
-      <MainHeader title={t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}>
+      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
+        back={policyEditor ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: policyEditor.token }) } : undefined}>
         {state && shown === 'apps' && <>
           <ActionButton action={state.actions.addApp} glyph="plus" focusKey="add-app" onClick={() => post('ADD_APP', {})} />
         </>}
-        {state && shown === 'profiles' && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
+        {state && shown === 'profiles' && !policyEditor && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
       </MainHeader>
       <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
       <main className="content" id="main-content">
@@ -118,8 +122,8 @@ export function App() {
           shown === 'apps' ? <Apps state={state} now={now} expanded={expanded} toggle={toggle}
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'network' ? <Network state={state} now={now} go={setPage} featured={featured} feature={feature} /> :
-          shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle}
-            editorForm={state.editor?.kind === 'policy' ? editorForm : null} /> :
+          policyEditor ? <ProfileSettings name={policyName} editorForm={editorForm} /> :
+          shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle} /> :
           <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null} />}
       </main>
     </div>

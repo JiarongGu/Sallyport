@@ -5,23 +5,30 @@ import { post } from './commands';
 import { clock, countdown, duration } from './format';
 import { ActionButton, Disclosure, EmptyView, Facts, StatusPill, Switch } from './ui/shared';
 
-export function Profiles({ state, now, expanded, toggle, editorForm }: {
-  state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
+export function Profiles({ state, now, expanded, toggle }: {
+  state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void;
 }) {
   return <section className="page" aria-label={t('Profiles')}>
     <p className="page-intro secondary">{t('Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.')}</p>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}
-    {editorForm && !state.profiles.some((profile) => profile.id === state.editor?.subjectId) && editorForm}
     <div className="rows">
       {state.profiles.map((profile) => <ProfileRow key={profile.id} profile={profile} now={now}
-        expanded={expanded.has(`profile:${profile.id}`)} toggle={() => toggle(`profile:${profile.id}`)}
-        editorForm={state.editor?.subjectId === profile.id ? editorForm : null} />)}
+        expanded={expanded.has(`profile:${profile.id}`)} toggle={() => toggle(`profile:${profile.id}`)} />)}
     </div>
   </section>;
 }
 
-function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
-  profile: ProfileView; now: number; expanded: boolean; toggle: () => void; editorForm: ReactNode;
+/** One profile's connection settings over Settings' — the advanced case, so a view of its own rather than a form in
+ *  its card. Leaving it cancels the edit. */
+export function ProfileSettings({ name, editorForm }: { name: string; editorForm: ReactNode }) {
+  return <section className="page" aria-label={t('Connection settings for {0}', name)}>
+    <p className="page-intro secondary">{t('Only for {0}, over the choices in Settings. Anything left as it is follows Settings and the profile.', name)}</p>
+    <div className="card own-settings">{editorForm}</div>
+  </section>;
+}
+
+function ProfileRow({ profile, now, expanded, toggle }: {
+  profile: ProfileView; now: number; expanded: boolean; toggle: () => void;
 }) {
   const detailsId = useId();
   const headingId = useId();
@@ -52,14 +59,11 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
       <div className="actions">
         <ActionButton action={profile.actions.settings} focusKey={`policy:${profile.id}`} onClick={() => post('BEGIN_POLICY_EDIT', { id: profile.id })} />
       </div>
-      {/* Beside the button that opened it; the row's foot keeps it reachable if the details are folded away. */}
-      {expanded && editorForm}
       <LocationResult profile={profile} />
       <div className="details-footer">
         <ActionButton action={profile.actions.remove} focusKey={`remove:${profile.id}`} danger onClick={() => post('REQUEST_REMOVE_PROFILE', { id: profile.id })} />
       </div>
     </div>
-    {!expanded && editorForm}
   </article>;
 }
 

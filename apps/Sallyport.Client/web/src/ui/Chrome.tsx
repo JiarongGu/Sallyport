@@ -57,7 +57,7 @@ export function Sidebar({ state, shown, go }: { state?: ClientState; shown: Page
 
 /** The page's own header, which is also the window's title bar: its title, its actions, minimize and close — no
  *  maximize: the window keeps the size it is given. The form paints the two buttons where these report they are. */
-export function MainHeader({ title, children }: { title: string; children?: ReactNode }) {
+export function MainHeader({ title, back, children }: { title: string; back?: { label: string; onClick: () => void }; children?: ReactNode }) {
   const buttons = useRef<HTMLDivElement>(null);
   const hosted = isShenoraAvailable();
 
@@ -95,6 +95,8 @@ export function MainHeader({ title, children }: { title: string; children?: Reac
       event.stopPropagation();
       if (event.button === 0) run(commands.startResize('top'));
     }} />}
+    {back && <button type="button" className="subtle icon back" aria-label={back.label} title={back.label}
+      onMouseDown={(event) => event.stopPropagation()} onClick={back.onClick}><Icon name="chevron" /></button>}
     <h1>{title}</h1>
     <div className="head-actions">{children}</div>
     <div className="caption-buttons" ref={buttons} onMouseDown={(event) => event.stopPropagation()}>

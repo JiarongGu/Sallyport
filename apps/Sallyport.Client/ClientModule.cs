@@ -29,6 +29,8 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "CHECK_LATENCY" => () => core.CheckLatencyAsync(Id(), cancellationToken),
             "BEGIN_DEFAULTS_EDIT" => () => Done(core.BeginDefaultsEdit),
             "SET_LANGUAGE" => () => Done(() => core.SetLanguage(Text("language"))),
+            "SET_PROTOCOL" => () => Done(() => core.SetProtocol(Text("protocol"))),
+            "SET_RETRY" => () => Done(() => core.SetRetry(PayloadHelper.GetRequiredValue<int>(request.Payload, "rounds"))),
             "SAVE_DEFAULTS" => () => Done(() => core.SaveDefaults(Token(), PayloadHelper.GetRequiredValue<DefaultsValues>(request.Payload, "values"))),
             "COPY_ENDPOINT" => () => Done(() => core.CopyEndpoint(Id())),
             "ADD_APP" => core.AddAppFromDialogAsync,

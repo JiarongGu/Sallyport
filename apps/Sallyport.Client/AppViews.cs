@@ -24,7 +24,7 @@ internal sealed record AppEditValues(string Name, string? ProfileId, LossMode Lo
 
 internal sealed record ProgramEditValues(bool Packets, bool Proxy, AppKind Kind, string Arguments);
 
-internal sealed record EditorOption(string Id, string Label);
+internal sealed record EditorOption(string Id, string Label, string? Help = null);
 
 /// <summary>What the host knows of an app beyond the store, for <see cref="AppViews.Item"/>.</summary>
 internal sealed record ItemFacts(

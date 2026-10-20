@@ -264,6 +264,37 @@ public class TunnelSessionTests
     }
 
     [Fact]
+    public async Task AProtocolChosenTriesOnlyTheRemotesOfIt()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key) + "\nremote vpn2.example.test 443 tcp\n");
+        await using var farm = new ServerFarm(pki, key) { ServerFor = _ => new FakeServer() };
+        await using var session = new TunnelSession(profile, farm.Options(profile, policy: profile.Policy with { Protocol = "tcp" }));
+        var log = new StatusLog();
+        session.StatusChanged += log.Add;
+        using var stop = new CancellationTokenSource();
+        var running = session.RunAsync(stop.Token);
+
+        var up = await log.WaitAsync(s => s.State == SessionState.Up);
+        await stop.CancelAsync();
+        await running;
+
+        // The UDP remote listed first is passed over without an attempt.
+        Assert.Equal(("tcp/443", 1), (up.Remote, up.Attempts));
+        Assert.Equal(["tcp"], farm.Connected.Select(r => r.Proto));
+    }
+
+    [Fact]
+    public void AProtocolTheProfileHasNoRemoteOfIsRefusedBeforeItRuns()
+    {
+        using var pki = new TestPki();
+        var profile = OvpnProfile.Parse(pki.Profile(TestKeys.StaticKey()));
+
+        Assert.Throws<ArgumentException>(() => new TunnelSession(profile, new TunnelSessionOptions { Policy = profile.Policy with { Protocol = "tcp" } }));
+    }
+
+    [Fact]
     public async Task RemoteRandomShufflesEachRound()
     {
         using var pki = new TestPki();

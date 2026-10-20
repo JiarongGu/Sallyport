@@ -58,6 +58,9 @@ public sealed class TunnelSession : IAsyncDisposable
         _profile = profile;
         _options = options ?? new TunnelSessionOptions();
         _policy = _options.Policy ?? profile.Policy;
+        // A round with no remote in it would fail at once and wait, forever, with nothing tried and nothing to say.
+        if (_policy.Protocol is { } only && !profile.Remotes.Any(r => r.Proto == only))
+            throw new ArgumentException($"The profile has no {only} remote.", nameof(options));
     }
 
     public ConnectionPolicy Policy => _policy;
@@ -209,11 +212,12 @@ public sealed class TunnelSession : IAsyncDisposable
         Report(end, null, attempts, reconnects, lastError, failedRounds);
     }
 
-    // The remotes for one round: as listed, or shuffled afresh (remote-random).
+    // The remotes for one round, of the policy's transport when it names one: as listed, or shuffled afresh (remote-random).
     private IEnumerable<Remote> Order()
     {
-        if (!_policy.RandomOrder) return _profile.Remotes;
-        var order = _profile.Remotes.ToArray();
+        var remotes = _policy.Protocol is { } only ? _profile.Remotes.Where(r => r.Proto == only).ToList() : _profile.Remotes;
+        if (!_policy.RandomOrder) return remotes;
+        var order = remotes.ToArray();
         _options.Random.Shuffle(order);
         return order;
     }

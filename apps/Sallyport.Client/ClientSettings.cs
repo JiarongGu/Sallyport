@@ -26,11 +26,15 @@ internal sealed record GameChoice(string? ProfileId, LossMode Loss, int? DirectA
 internal sealed record AppDefaults(string? ProfileId = null, LossMode Loss = LossMode.Hold, int? DirectAfterSeconds = null);
 
 /// <summary>A profile's connection settings the person changed, each null where the profile's own stands (OpenVPN's
-/// directives, read from it: <see cref="ConnectionPolicy"/>). <see cref="RoundsMax"/> 0 is "never give up".</summary>
+/// directives, read from it: <see cref="ConnectionPolicy"/>). <see cref="RoundsMax"/> 0 is "never give up";
+/// <see cref="Protocol"/> "udp" or "tcp" holds it to those servers, and <see cref="Any"/> lets a profile use all of its
+/// own where Settings holds the others to one.</summary>
 internal sealed record PolicyOverride(
     int? RetryWaitSeconds = null, int? RetryWaitMaxSeconds = null, int? RoundsMax = null, bool? RandomOrder = null,
-    int? AttemptTimeoutSeconds = null, bool? RetryAfterAuthFailure = null, int? PingRestartSeconds = null)
+    int? AttemptTimeoutSeconds = null, bool? RetryAfterAuthFailure = null, int? PingRestartSeconds = null, string? Protocol = null)
 {
+    public const string Any = "any";
+
     public bool IsEmpty => this == new PolicyOverride();
 
     /// <summary>The profile's policy with these over it. A ping-restart of the person's own outranks the server's, as
@@ -41,6 +45,7 @@ internal sealed record PolicyOverride(
         RetryWaitMax = RetryWaitMaxSeconds is { } max ? TimeSpan.FromSeconds(max) : policy.RetryWaitMax,
         RoundsMax = RoundsMax is { } rounds ? rounds == 0 ? null : rounds : policy.RoundsMax,
         RandomOrder = RandomOrder ?? policy.RandomOrder,
+        Protocol = Protocol switch { null => policy.Protocol, Any => null, var only => only },
         AttemptTimeout = AttemptTimeoutSeconds is { } timeout ? TimeSpan.FromSeconds(timeout) : policy.AttemptTimeout,
         RetryAfterAuthFailure = RetryAfterAuthFailure ?? policy.RetryAfterAuthFailure,
         PingRestart = PingRestartSeconds ?? policy.PingRestart,
@@ -72,6 +77,8 @@ internal sealed class ClientSettings
         public List<RoutedApp> Apps { get; set; } = [];
         public Dictionary<string, GameChoice> Games { get; set; } = [];
         public Dictionary<string, PolicyOverride> Policies { get; set; } = [];
+        /// <summary>Settings' connection choices, for every profile; a profile's own changes go over them.</summary>
+        public PolicyOverride Connection { get; set; } = new();
         public AppDefaults Defaults { get; set; } = new();
         /// <summary>"en", "zh-Hans", or null for Windows' own display language.</summary>
         public string? Language { get; set; }
@@ -131,6 +138,45 @@ internal sealed class ClientSettings
     {
         lock (_gate) return _saved.Policies.GetValueOrDefault(profileId) ?? new PolicyOverride();
     }
+
+    /// <summary>How every profile connects unless it is changed for itself (Settings, as OpenVPN Connect's "Protocol" and
+    /// "Connection Timeout" are).</summary>
+    public PolicyOverride Connection
+    {
+        get { lock (_gate) return _saved.Connection ?? new(); }
+        set
+        {
+            lock (_gate)
+            {
+                _saved.Connection = value;
+                Save();
+            }
+        }
+    }
+
+    /// <summary>What a profile connects with before changes of its own: its directives with Settings' choices over them.
+    /// Settings' protocol only where the profile has servers of it — one without keeps all of its own rather than none.</summary>
+    public ConnectionPolicy BaseFor(ConnectionPolicy own, IReadOnlyCollection<string> protocols)
+    {
+        var all = Connection;
+        if (all.Protocol is { } only && !protocols.Contains(only)) all = all with { Protocol = null };
+        return all.Over(own);
+    }
+
+    public ConnectionPolicy PolicyFor(string profileId, ConnectionPolicy own, IReadOnlyCollection<string> protocols) =>
+        PolicyOf(profileId).Over(BaseFor(own, protocols));
+
+    /// <summary>The one transport a profile is held to, or null for all of its servers: known without opening it, since a
+    /// profile itself never holds one (<see cref="ConnectionPolicy.Protocol"/>).</summary>
+    public string? ProtocolFor(string profileId, IReadOnlyCollection<string> protocols) => PolicyOf(profileId).Protocol switch
+    {
+        PolicyOverride.Any => null,
+        { } only => only,
+        null => Connection.Protocol is { } all && protocols.Contains(all) ? all : null,
+    };
+
+    /// <summary>The transports of a stored profile's remotes, which it says as "udp/1194".</summary>
+    public static IReadOnlyCollection<string> ProtocolsOf(IEnumerable<string> remotes) => [.. remotes.Select(r => r.Split('/')[0]).Distinct()];
 
     public void PutPolicy(string profileId, PolicyOverride policy)
     {

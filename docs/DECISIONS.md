@@ -445,3 +445,33 @@ Measured 2026-10-20 against the owner's server (jp, udp/1194). Connected from Pr
 returned 200 in 1.6 s with `loc=JP`, `colo=NRT`. Disconnected and connected again: 127.0.0.1:14962; after a restart
 of the client, 127.0.0.1:2420, which "Copy address" put on the clipboard as `127.0.0.1:2420` and the setup guide
 showed in its curl line. Not connected, the card showed "a free port when it connects" and no copy button.
+
+## D21 — Connection settings are Settings' and every profile's; one profile's changes are a view of their own (2026-10-20; measured)
+
+The owner: "the connection type (more like open vpn does)", "the retry setting should be simplfied", then "this
+connection config should be just for setting not for a single profile only if we need to config for single profile but
+that will be in a seperated view (since this is more advanced)", and of the first wording ("UDP only: udp/1194"): "its
+mostly for all traffic (only port 443 or 1194 is not really the case)".
+
+So Settings has a **Connection** group, as OpenVPN Connect's settings have "Protocol" and "Connection Timeout" (its
+public documentation; a reference for what a person expects, nothing more). **VPN protocol**: Automatic, UDP or TCP —
+the transport of the tunnel to the server, which carries an app's TCP and UDP alike either way, and is said so beside
+it. `ConnectionPolicy.Protocol` holds a session to the remotes of that transport; a profile has no directive for it (a
+transport is named per remote), so it is only ever the person's. A profile without servers of Settings' choice keeps
+all of its own rather than none; one held to a transport on its own that a later import took away is refused before
+anything is tried ("the profile has no TCP servers any more"), and the library refuses a session whose policy leaves it
+no remote, since such a round fails at once and waits forever. **If it cannot connect**: keep trying, or stop after 3,
+5 or 10 failed rounds (`connect-retry-max`; a round tries every server once).
+
+What one profile connects with: its own directives, Settings' choices over them, and its own changes over those. Its
+changes are made in **Connection settings for {profile}**, a view that takes the Profiles page — the same two choices,
+the finer ones (waits, attempt timeout, silence, order, refused login) folded under More settings — and only what
+differs from Settings and the profile is kept, so a later change in Settings is followed where the person did not
+choose. "Automatic" for one profile where Settings say TCP is kept as `any`. Follow Settings clears them.
+
+Measured 2026-10-20 against the owner's server (jp: udp/1194 then tcp/443). Held to TCP on its own: connected over
+tcp/443, the client holding one TCP connection to port 443 and no UDP socket; `curl --socks5-hostname` through its
+proxy: 200, `loc=JP`. Held to UDP: over udp/1194, one UDP socket and no TCP to 443; 200, `loc=JP`. Settings' TCP with
+nothing of jp's own: tcp/443, its card "VPN protocol: TCP"; 200, `loc=JP`. jp's own Automatic over Settings' TCP:
+udp/1194, one UDP socket, "Changed for this profile". Stop after 0 rounds was refused ("Use 1 to 1000 rounds.");
+Follow Settings, then Settings back to Automatic, left jp as it was.

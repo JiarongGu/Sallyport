@@ -369,8 +369,12 @@ internal sealed class Connections : IDisposable
         catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException)
         { throw new ShenoraException("PROFILE_UNREADABLE", "id", id, L.T("the stored profile could not be opened")); }
 
-        // The profile's own connection settings, with the person's changes over them.
-        var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = _settings.PolicyOf(id).Over(profile.Policy) });
+        // The profile's own connection settings, Settings' choices over them, and its own changes over those.
+        var policy = _settings.PolicyFor(id, profile.Policy, [.. profile.Remotes.Select(r => r.Proto).Distinct()]);
+        // Held to a transport the profile no longer has servers of (imported again without them): said, not tried forever.
+        if (policy.Protocol is { } only && !profile.Remotes.Any(r => r.Proto == only))
+            throw new ShenoraException("PROTOCOL_GONE", "id", id, L.T("the profile has no {0} servers any more: change its connection type", only.ToUpperInvariant()));
+        var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = policy });
         var channel = new Channel(session);
         // Bound before the session says "up", and kept across reconnects: the connector follows the session's network.
         session.NetworkUp += _ => Bind(channel);

@@ -24,9 +24,11 @@ internal sealed record RunView(RunPhase Phase, Tone Tone, string StatusText, str
 internal sealed record DriverView(DriverPhase Phase, Tone Tone, string StatusText, string? DetailText, IReadOnlyList<Fact> Facts,
     UiAction Install, UiAction Remove);
 
+/// <summary>The connection settings as the editor holds them. <see cref="Protocol"/>: "" for every server as listed, or
+/// "udp"/"tcp"; <see cref="RoundsMaxText"/> counts only when <see cref="KeepTrying"/> is off.</summary>
 internal sealed record PolicyValues(
     string RetryWaitText, string RetryWaitMaxText, string RoundsMaxText, bool RandomOrder, string AttemptTimeoutText,
-    bool RetryAfterAuthFailure, string PingRestartText);
+    bool RetryAfterAuthFailure, string PingRestartText, string Protocol = "", bool KeepTrying = true);
 
 internal sealed record LossChoice(LossMode Value, string Label, string Help);
 
@@ -140,13 +142,50 @@ internal static class GameViews
     public static string DriverRemoveText =>
         L.T("Windows will ask for permission. While the driver is taken out, this computer's network pauses for a few seconds (about 6 s measured; other computers may differ). Apps can no longer be routed by their packets until it is installed again.");
 
+    // Five rounds is what the field offers when the person turns "keep trying" off: a number to change, not an empty box.
     public static PolicyValues PolicyValuesOf(ConnectionPolicy p) => new(
-        Seconds(p.RetryWait), Seconds(p.RetryWaitMax), p.RoundsMax?.ToString(English) ?? "0", p.RandomOrder, Seconds(p.AttemptTimeout),
-        p.RetryAfterAuthFailure, p.PingRestart?.ToString(English) ?? "");
+        Seconds(p.RetryWait), Seconds(p.RetryWaitMax), p.RoundsMax?.ToString(English) ?? "5", p.RandomOrder, Seconds(p.AttemptTimeout),
+        p.RetryAfterAuthFailure, p.PingRestart?.ToString(English) ?? "", p.Protocol ?? "", p.RoundsMax is null);
 
-    /// <summary>What the profile itself says, under the connection settings, so a change is made knowing what it changes.</summary>
+    // How the tunnel reaches the server, never what it carries: an app's TCP and UDP go through it on either (the owner:
+    // "its mostly for all traffic").
+    private static EditorOption Udp => new("udp", L.T("UDP"), L.T("Usually faster, and what games prefer. Some networks block it."));
+    private static EditorOption Tcp => new("tcp", L.T("TCP"), L.T("Gets through more networks. Slower when packets are lost."));
+
+    /// <summary>Settings' "VPN protocol", OpenVPN Connect's "Protocol": each profile's servers as it lists them, or only
+    /// those of one transport.</summary>
+    public static IReadOnlyList<EditorOption> ProtocolChoices() =>
+        [new("", L.T("Automatic"), L.T("Each profile's servers in the order it lists them.")), Udp, Tcp];
+
+    /// <summary>One profile's: only between transports it has servers for; nothing to choose when it has one.</summary>
+    public static IReadOnlyList<EditorOption>? ProtocolChoices(IReadOnlyList<string> remotes)
+    {
+        var protocols = ClientSettings.ProtocolsOf(remotes);
+        if (!protocols.Contains("udp") || !protocols.Contains("tcp")) return null;
+        return [new("", L.T("Automatic"), L.T("Its servers in the order it lists them.")), Udp, Tcp];
+    }
+
+    /// <summary>Settings' "If it cannot connect": rounds before a connection stops trying, 0 never. A count set
+    /// otherwise (a profile's own view takes any) is offered too, so the choice shows what is in force.</summary>
+    public static IReadOnlyList<EditorOption> RetryChoices(int setting) =>
+    [
+        new("0", L.T("Keep trying")),
+        .. new[] { 3, 5, 10 }.Union(setting > 0 ? [setting] : []).Order()
+            .Select(n => new EditorOption(n.ToString(English), L.Count(n, "Stop after 1 failed round", "Stop after {0} failed rounds"))),
+    ];
+
+    public static string? ProtocolText(string? protocol) => protocol switch
+    {
+        "udp" => L.T("UDP"),
+        "tcp" => L.T("TCP"),
+        _ => null,
+    };
+
+    /// <summary>What applies without changes of the profile's own — its directives with Settings' choices over them —
+    /// under its connection settings, so a change is made knowing what it changes.</summary>
     public static string PolicyHint(ConnectionPolicy p, bool overridden) =>
-        L.T("The profile's own: wait {0} s growing to {1} s, {2}, {3}, {4} s to answer{5}", Seconds(p.RetryWait), Seconds(p.RetryWaitMax),
+        L.T("Without changes here, from Settings and the profile itself: {0}, wait {1} s growing to {2} s, {3}, {4}, {5} s to answer{6}",
+            ProtocolText(p.Protocol) ?? L.T("either protocol"), Seconds(p.RetryWait), Seconds(p.RetryWaitMax),
             p.RoundsMax is { } rounds ? L.Count(rounds, "give up after 1 round", "give up after {0} rounds") : L.T("never give up"),
             p.RandomOrder ? L.T("servers in random order") : L.T("servers in the order listed"), Seconds(p.AttemptTimeout),
             p.PingRestart is { } r ? L.T(", dead after {0} s of silence when the server sets none.", r) : L.T("."))

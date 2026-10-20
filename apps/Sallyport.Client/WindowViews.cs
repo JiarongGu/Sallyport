@@ -49,7 +49,10 @@ internal sealed record DefaultsView(IReadOnlyList<Fact> Facts, UiAction Edit);
 internal sealed record LanguageView(string Setting, IReadOnlyList<EditorOption> Choices);
 
 internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About, DefaultsView Defaults,
-    LanguageView Language);
+    LanguageView Language, ConnectionSettingsView Connection);
+
+/// <summary>Settings' connection choices, each applied the moment it is chosen: SET_PROTOCOL, SET_RETRY.</summary>
+internal sealed record ConnectionSettingsView(LanguageView Protocol, LanguageView Retry);
 
 internal sealed record DefaultsValues(string? ProfileId, LossMode Loss, string DirectAfterText);
 
@@ -175,7 +178,7 @@ internal static class WindowViews
     }
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
-        AppDefaults defaults, StoredProfile? defaultProfile, bool editing, string? languageSetting = null)
+        AppDefaults defaults, StoredProfile? defaultProfile, bool editing, string? languageSetting = null, PolicyOverride? connection = null)
     {
         // The driver and the service are said once, under Packet routing.
         var about = new List<Fact>
@@ -194,7 +197,10 @@ internal static class WindowViews
                 new(L.T("VPN profile"), defaultProfile?.Name ?? (defaults.ProfileId is null ? L.T("The first that can connect") : L.T("Not chosen (the one chosen was removed)"))),
                 new(L.T("If the VPN drops"), GameViews.LossShort(new GameChoice(null, defaults.Loss, defaults.DirectAfterSeconds))),
             ], UiAction.Shown(L.T("Change…"), !editing, L.T("Finish the open edit first."))),
-            Language(languageSetting));
+            Language(languageSetting),
+            // Never given "keep trying" stands until something else is chosen.
+            new ConnectionSettingsView(new(connection?.Protocol ?? "", GameViews.ProtocolChoices()),
+                new((connection?.RoundsMax ?? 0).ToString(CultureInfo.InvariantCulture), GameViews.RetryChoices(connection?.RoundsMax ?? 0))));
     }
 
     /// <summary>The language choice, each named in itself; until the person picks one, the one setup ran in, or Windows'.</summary>

@@ -84,7 +84,8 @@ internal sealed record ClientState(
 /// proxy listens on now, none while it does not. <see cref="UsedBy"/>: the app being routed through it.</summary>
 internal sealed record ProfileFacts(
     StoredProfile Stored, int? Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
-    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false, DateTimeOffset? NextAttemptAt = null);
+    int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false, DateTimeOffset? NextAttemptAt = null,
+    string? Protocol = null);
 
 internal static class ClientView
 {
@@ -134,6 +135,7 @@ internal static class ClientView
             new(L.T("Transport"), string.Join(", ", f.Stored.Remotes)),
             new(L.T("Imported"), L.Date(f.Stored.Imported.ToLocalTime())),
         };
+        if (GameViews.ProtocolText(f.Protocol) is { } held) facts.Add(new(L.T("VPN protocol"), held));
         if (f.Port is { } listening) facts.Add(new(L.T("SOCKS5 port"), listening.ToString(English)));
         if (up && status is not null)
         {
@@ -145,7 +147,7 @@ internal static class ClientView
         }
 
         if (f.UsedBy is { } game) facts.Add(new(L.T("Routing through it"), game));
-        if (f.PolicyChanged) facts.Add(new(L.T("Connection settings"), L.T("Changed by you")));
+        if (f.PolicyChanged) facts.Add(new(L.T("Connection settings"), L.T("Changed for this profile")));
 
         var location = Located(f, up);
         var actions = new ProfileActions(
@@ -163,7 +165,7 @@ internal static class ClientView
                 : UiAction.Hidden,
             Remove: UiAction.Shown(L.T("Remove profile"), !running && !busy && f.UsedBy is null,
                 f.UsedBy is not null ? L.T("Stop routing what goes through it first.") : running ? L.T("Disconnect before removing it.") : null),
-            Settings: UiAction.Shown(L.T("Connection settings"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")));
+            Settings: UiAction.Shown(L.T("Connection settings…"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")));
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.
         var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;

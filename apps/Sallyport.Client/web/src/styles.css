@@ -185,6 +185,8 @@ pre { white-space: pre-wrap; min-width: 0; }
 
 .main { display: grid; grid-template-rows: 48px auto minmax(0, 1fr); min-width: 0; min-height: 0; }
 .main-head { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 24px; user-select: none; }
+.main-head .back { flex: none; margin-right: -4px; }
+.main-head .back .glyph { transform: rotate(90deg); }
 .main-head h1 { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .head-actions { flex: 1; min-width: 0; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .head-actions .action { flex: none; }
@@ -410,6 +412,7 @@ summary:hover { background: var(--hover); color: var(--text); }
 .setting-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
 .setting-text > :last-child { font: var(--font-caption); color: var(--secondary); }
 .language-choice { flex: none; width: 12rem; max-width: 50%; }
+.setting-choice { flex: none; width: 16rem; max-width: 50%; }
 .steps { display: grid; gap: 16px; margin: 0 0 16px; padding-left: 28px; }
 .steps li { padding-left: 8px; }
 .steps li::marker { color: var(--accent); font-weight: 600; }
@@ -472,6 +475,10 @@ legend { padding: 0; margin-bottom: 4px; }
 .field-error { font: var(--font-caption); color: var(--trouble); }
 .kind-help { font: var(--font-caption); }
 .editor .actions { margin-top: 4px; }
+/* A text-only toggle hangs its padding outside, so its words line up with the fields' labels. */
+.more-toggle > .disclosure { margin-left: -12px; }
+/* A view of its own: the card is the form's surface, not a box inside it. */
+.own-settings > .editor { margin-top: 0; padding: 8px; background: none; }
 .programs li .editor { margin: 8px 0 4px; }
 
 /* notices: a bar tinted by how much it matters, a glyph, the words, a dismiss */
@@ -513,7 +520,7 @@ legend { padding: 0; margin-bottom: 4px; }
   .row-head { flex-wrap: wrap; }
   .row-primary { order: 2; width: 100%; justify-content: flex-start; flex-wrap: wrap; }
   .setting-row { flex-wrap: wrap; }
-  .language-choice { width: 100%; max-width: none; }
+  .language-choice, .setting-choice { width: 100%; max-width: none; }
   .program-line { flex-wrap: wrap; }
   .confirmation .actions { grid-template-columns: 1fr; }
 }

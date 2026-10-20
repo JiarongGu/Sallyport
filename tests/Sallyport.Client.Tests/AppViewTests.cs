@@ -199,5 +199,72 @@ public class AppViewTests
         Assert.Equal((5, 20, true), (mine.Ping, mine.PingRestart, mine.KeepaliveOverridesServer));
         Assert.True(new PolicyOverride().IsEmpty);
         Assert.Equal(own, new PolicyOverride().Over(own));
+        Assert.Equal("tcp", new PolicyOverride(Protocol: "tcp").Over(own).Protocol);
+    }
+
+    [Fact]
+    public void A_profiles_own_protocol_is_offered_only_between_transports_it_has_and_never_by_port()
+    {
+        var both = GameViews.ProtocolChoices(["udp/1194", "tcp/443"])!;
+
+        Assert.Equal(["", "udp", "tcp"], both.Select(c => c.Id));
+        Assert.Equal(["Automatic", "UDP", "TCP"], both.Select(c => c.Label));
+        // How the tunnel reaches the server, not what goes through it: no port in the words (the owner).
+        Assert.DoesNotContain(both, c => c.Help!.Contains("1194") || c.Help.Contains("443"));
+        Assert.Null(GameViews.ProtocolChoices(["udp/1194", "udp/1195"]));
+    }
+
+    [Fact]
+    public void A_profile_held_to_one_protocol_says_so_among_its_details()
+    {
+        var held = ClientView.Profile(new ProfileFacts(Jp, null, null, null, false, false, null, false, false, Protocol: "tcp"));
+        var free = ClientView.Profile(new ProfileFacts(Jp, null, null, null, false, false, null, false, false));
+
+        Assert.Contains(new Fact("VPN protocol", "TCP"), held.Facts);
+        Assert.DoesNotContain(free.Facts, f => f.Label == "VPN protocol");
+    }
+
+    [Fact]
+    public void Settings_choices_go_over_every_profiles_own_and_a_profiles_changes_over_them()
+    {
+        var file = Path.Combine(Path.GetTempPath(), "sallyport-tests", Guid.NewGuid().ToString("N"), "settings.json");
+        try
+        {
+            var settings = new ClientSettings(file) { Connection = new PolicyOverride(RoundsMax: 5, Protocol: "tcp") };
+            var own = new ConnectionPolicy { RetryWait = TimeSpan.FromSeconds(7) };
+
+            var plain = settings.PolicyFor("a", own, ["udp", "tcp"]);
+            Assert.Equal(("tcp", 5, TimeSpan.FromSeconds(7)), (plain.Protocol, plain.RoundsMax, plain.RetryWait));
+            // A profile without TCP servers keeps all of its own rather than none.
+            Assert.Null(settings.PolicyFor("b", own, ["udp"]).Protocol);
+            Assert.Null(settings.ProtocolFor("b", ["udp"]));
+
+            // One profile let back to all of its servers, and to keep trying, while Settings hold the rest to TCP.
+            settings.PutPolicy("a", new PolicyOverride(RoundsMax: 0, Protocol: PolicyOverride.Any));
+            var mine = settings.PolicyFor("a", own, ["udp", "tcp"]);
+            Assert.Equal((null, null), (mine.Protocol, mine.RoundsMax));
+            Assert.Null(settings.ProtocolFor("a", ["udp", "tcp"]));
+            Assert.Equal("tcp", settings.ProtocolFor("c", ["udp", "tcp"]));
+
+            // Kept across a restart.
+            Assert.Equal(new PolicyOverride(RoundsMax: 5, Protocol: "tcp"), new ClientSettings(file).Connection);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(file)!, recursive: true); }
+    }
+
+    [Fact]
+    public void Settings_offer_keep_trying_and_a_few_counts_and_show_one_set_otherwise()
+    {
+        Assert.Equal(["0", "3", "5", "10"], GameViews.RetryChoices(0).Select(c => c.Id));
+        Assert.Equal("Keep trying", GameViews.RetryChoices(0)[0].Label);
+        Assert.Equal(["0", "3", "5", "7", "10"], GameViews.RetryChoices(7).Select(c => c.Id));
+        Assert.Equal("Stop after 7 failed rounds", GameViews.RetryChoices(7)[3].Label);
+    }
+
+    [Fact]
+    public void The_editor_starts_from_keep_trying_with_a_number_ready_and_the_type_as_saved()
+    {
+        Assert.True(GameViews.PolicyValuesOf(new ConnectionPolicy()) is { KeepTrying: true, RoundsMaxText: "5", Protocol: "" });
+        Assert.True(GameViews.PolicyValuesOf(new ConnectionPolicy { RoundsMax = 3, Protocol = "udp" }) is { KeepTrying: false, RoundsMaxText: "3", Protocol: "udp" });
     }
 }

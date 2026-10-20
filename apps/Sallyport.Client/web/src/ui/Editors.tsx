@@ -1,8 +1,8 @@
-import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, PolicyValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
-import { ActionButton } from './shared';
+import { ActionButton, Disclosure } from './shared';
 import { paintCaptionButtons } from './Chrome';
 
 export type Draft =
@@ -45,6 +45,9 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
   const prefix = useId();
   useEditorFocus(form);
   const saving = editor.phase === 'saving';
+  // The finer settings stay folded until asked for, or until one of them is what a save refused.
+  const [moreAsked, setMoreAsked] = useState(false);
+  const moreOpen = moreAsked || (['retryWaitText', 'retryWaitMaxText', 'attemptTimeoutText', 'pingRestartText'] as const).some((f) => editor.errors[f]);
   const description = (field: EditorField) =>
     [editor.hint ? `${prefix}-hint` : '', editor.errors[field] ? `${prefix}-${field}-error` : ''].filter(Boolean).join(' ') || undefined;
   const error = (field: EditorField) => editor.errors[field]
@@ -195,14 +198,41 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         {error('directAfterText')}
       </div>}
     </div> : draft.kind === 'policy' ? <div className="editor-fields">
-      {text('retryWaitText', 'Wait between attempts', 'seconds')}
-      {text('retryWaitMaxText', 'Longest wait', 'seconds')}
-      {text('roundsMaxText', 'Give up after (0: never)', 'rounds')}
-      {text('attemptTimeoutText', 'Time for a server to answer', 'seconds')}
-      {text('pingRestartText', 'Lost after silence of', 'seconds')}
-      <div className="field checks">
-        {check('randomOrder', 'Try the servers in random order')}
-        {check('retryAfterAuthFailure', 'Keep trying after the server refuses the login')}
+      {editor.options && <fieldset className="field full-field" aria-describedby={description('protocol')}>
+        <legend>{t('VPN protocol')}</legend>
+        {editor.options.map((choice) => <label key={choice.id} className="radio-field">
+          <input type="radio" name={`${prefix}-protocol`} value={choice.id} checked={draft.values.protocol === choice.id} disabled={saving}
+            onChange={() => onChange({ ...draft, values: { ...draft.values, protocol: choice.id } })} />
+          <span><span>{choice.label}</span>{choice.help && <span className="secondary metadata">{choice.help}</span>}</span>
+        </label>)}
+        {error('protocol')}
+      </fieldset>}
+      <fieldset className="field full-field">
+        <legend>{t('When it cannot connect')}</legend>
+        <label className="radio-field">
+          <input type="radio" name={`${prefix}-retry`} checked={draft.values.keepTrying} disabled={saving}
+            onChange={() => onChange({ ...draft, values: { ...draft.values, keepTrying: true } })} />
+          <span><span>{t('Keep trying until I disconnect')}</span></span>
+        </label>
+        <label className="radio-field">
+          <input type="radio" name={`${prefix}-retry`} checked={!draft.values.keepTrying} disabled={saving}
+            onChange={() => onChange({ ...draft, values: { ...draft.values, keepTrying: false } })} />
+          <span><span>{t('Stop after a number of rounds')}</span><span className="secondary metadata">{t('A round tries every server once.')}</span></span>
+        </label>
+      </fieldset>
+      {!draft.values.keepTrying && text('roundsMaxText', 'Stop after', 'rounds')}
+      <div className="full-field more-toggle">
+        <Disclosure open={moreOpen} controls={`${prefix}-more`} onClick={() => setMoreAsked(!moreOpen)}>{t('More settings')}</Disclosure>
+      </div>
+      <div id={`${prefix}-more`} hidden={!moreOpen} className="editor-fields full-field">
+        {text('retryWaitText', 'Wait between attempts', 'seconds')}
+        {text('retryWaitMaxText', 'Longest wait', 'seconds')}
+        {text('attemptTimeoutText', 'Time for a server to answer', 'seconds')}
+        {text('pingRestartText', 'Lost after silence of', 'seconds')}
+        <div className="field full-field">
+          {check('randomOrder', 'Try the servers in random order')}
+          {check('retryAfterAuthFailure', 'Keep trying after the server refuses the login')}
+        </div>
       </div>
     </div> : null}
     {editor.hint && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
