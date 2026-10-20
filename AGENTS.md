@@ -24,7 +24,8 @@ and tray, its page in `web/`, hosting the next two), `Sallyport.Service` (the ro
 `Sallyport.Host` (one profile's tunnel and proxy, headless, for another app); `Sallyport.Observer` and `Sallyport.Vpn`
 are the driverless route, kept but not in the product; `tools/Sallyport.Probe` and `tools/Sallyport.Driver` drive a phase
 against a real server; `tests/` one project per area. Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work
-left: `TASKS.md` (open items only); what each version brings: `CHANGELOG.md`, under `## Unreleased` until it ships.
+left: `TASKS.md` (open items only), and what was finished, with how it was measured, `docs/TASKS-DONE.md`; what each
+version brings: `CHANGELOG.md`, under `## Unreleased` until it ships.
 
 Build and check: `dotnet build Sallyport.slnx`, `dotnet test Sallyport.slnx` (all must pass; look for "Failed!"), and
 `npm run build` in `apps/Sallyport.Client/web` after changing the page. Every word a person reads goes through `L.T` (C#)
