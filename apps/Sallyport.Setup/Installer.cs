@@ -176,12 +176,27 @@ sealed class Installer
         say(L.T("Closing Sallyport…"), 0.01);
         CloseClients();
         say(L.T("Stopping the Sallyport service…"), 0.04);
-        try { ServiceControl.Stop(RouterProtocol.ServiceName, TimeSpan.FromSeconds(20)); }
-        catch (Win32Exception) { }
+        StopService();
+        var staged = _folder + ".new";
+        try { return await InstallStoppedAsync(payload, version, choices, staged, ct); }
+        catch (Exception e)
+        {
+            // A failed install leaves the Sallyport that was there as it was: its service running again (stopped above,
+            // it would stay stopped until someone started it), nothing half-made beside it, and why in the log — a
+            // quiet run has no window to say it in.
+            Log($"failed: {e.GetType().Name}: {e.Message}");
+            try { if (Directory.Exists(staged)) Directory.Delete(staged, recursive: true); }
+            catch (Exception left) when (left is IOException or UnauthorizedAccessException) { Log($"{staged} was not removed: {left.Message}"); }
+            try { if (ServiceControl.Status(RouterProtocol.ServiceName).State == ServiceState.Stopped) ServiceControl.Start(RouterProtocol.ServiceName); }
+            catch (Win32Exception started) { Log($"the service was not started again: {started.Message}"); }
+            throw;
+        }
+    }
 
+    private async Task<IReadOnlyList<string>> InstallStoppedAsync(Stream payload, string version, SetupChoices choices, string staged, CancellationToken ct)
+    {
         if (Unfit(_folder) is { } why) throw new SetupFailed(why);
         say(L.T("Copying files…"), 0.08);
-        var staged = _folder + ".new";
         var previous = _folder + ".old";
         // The folder it goes in is not setup's to protect: only Sallyport's own is.
         Directory.CreateDirectory(Path.GetDirectoryName(_folder)!);
@@ -196,7 +211,7 @@ sealed class Installer
             File.Copy(Environment.ProcessPath!, Path.Combine(staged, "Sallyport.Setup.exe"), overwrite: true);
         if (Directory.Exists(previous)) Directory.Delete(previous, recursive: true);
         var hadPrevious = Directory.Exists(_folder);
-        if (hadPrevious) Directory.Move(_folder, previous);
+        if (hadPrevious) MoveWhenFree(_folder, previous);
         try { Directory.Move(staged, _folder); }
         catch
         {
@@ -351,6 +366,46 @@ sealed class Installer
 
     // Every client of this user is asked to leave as its own tray's Exit does (routing stopped, tunnels closed), and any
     // left after a few seconds is ended.
+    // Stopped is what the service manager says; the service's process may still be closing its files a moment after,
+    // and a folder with a file open in it cannot be moved.
+    private static void StopService()
+    {
+        try
+        {
+            var (_, processId) = ServiceControl.Status(RouterProtocol.ServiceName);
+            ServiceControl.Stop(RouterProtocol.ServiceName, TimeSpan.FromSeconds(20));
+            if (processId != 0)
+            {
+                using var process = Process.GetProcessById(processId);
+                process.WaitForExit(10_000);
+            }
+        }
+        // Not installed, or already gone.
+        catch (Exception e) when (e is Win32Exception or ArgumentException or InvalidOperationException) { }
+    }
+
+    // The old folder moved aside once nothing has a file open in it. WebView2's processes outlive the client by a few
+    // seconds and keep their cache in data (measured 2026-10-20: still running 3 s after the client had gone, and the
+    // folder could not be moved until the last of them had); an indexer or a scanner may hold a file a moment too.
+    private void MoveWhenFree(string from, string to)
+    {
+        var deadline = Environment.TickCount64 + 30_000;
+        for (var waiting = false; ; Thread.Sleep(500))
+            try
+            {
+                Directory.Move(from, to);
+                if (waiting) Log($"{from} moved aside once free");
+                return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                if (Environment.TickCount64 > deadline)
+                    throw new SetupFailed(L.T("A file in {0} is still open in another program. Close it, or restart Windows, and run setup again.", from));
+                if (!waiting) Log($"{from} is in use ({e.Message}); waiting for it");
+                waiting = true;
+            }
+    }
+
     private void CloseClients()
     {
         if (File.Exists(Client))

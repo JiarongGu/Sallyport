@@ -105,5 +105,6 @@ internal static class Chinese
         ["Update"] = "更新",
         ["Reinstall"] = "重新安装",
         ["{0} could not be moved into {1} ({2})."] = "无法把 {0} 移入 {1}（{2}）。",
+        ["A file in {0} is still open in another program. Close it, or restart Windows, and run setup again."] = "{0} 中仍有文件被其他程序打开。请关闭该程序（或重启 Windows），然后重新运行安装程序。",
     };
 }
