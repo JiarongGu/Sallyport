@@ -3,6 +3,7 @@ import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, 
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
 import { ActionButton } from './shared';
+import { paintCaptionButtons } from './Chrome';
 
 export type Draft =
   | { token: string; kind: 'port'; values: PortValues }
@@ -235,10 +236,12 @@ export function RemovalConfirmation({ confirmation }: { confirmation: Confirmati
     const trigger = getFocusOrigin() ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     const element = dialog.current;
     element?.showModal();
+    paintCaptionButtons(true);
     if (cancel.current && !cancel.current.disabled) cancel.current.focus();
     else element?.focus();
     return () => {
       element?.close();
+      paintCaptionButtons(false);
       queueMicrotask(() => {
         if (!element?.isConnected) (getFocusOrigin() ?? (trigger?.isConnected ? trigger : null))?.focus();
       });
@@ -255,7 +258,7 @@ export function RemovalConfirmation({ confirmation }: { confirmation: Confirmati
     <p id={`${prefix}-text`}>{confirmation.text}</p>
     <div className="actions">
       <ActionButton buttonRef={cancel} action={confirmation.cancel} onClick={() => post('CANCEL_CONFIRMATION', { token: confirmation.token })} />
-      <ActionButton action={confirmation.confirm} danger onClick={() => post('CONFIRM', { token: confirmation.token })} />
+      <ActionButton action={confirmation.confirm} primary onClick={() => post('CONFIRM', { token: confirmation.token })} />
     </div>
   </dialog>;
 }

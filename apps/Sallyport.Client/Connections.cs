@@ -18,6 +18,10 @@ internal sealed record PathSample(int Sent, int Answered, double? MedianMs, stri
 /// tunnel's gateway (the VPN server's side) when the server named one.</summary>
 internal sealed record Latency(string Target, PathSample Direct, PathSample Vpn, string? Gateway, PathSample? ToGateway, DateTimeOffset Checked);
 
+/// <summary>A channel's bytes so far and its rates over the last minute, a second apart, oldest first: bytes per second
+/// received (<see cref="InPerSecond"/>) and sent.</summary>
+internal sealed record Traffic(long BytesIn, long BytesOut, IReadOnlyList<double> InPerSecond, IReadOnlyList<double> OutPerSecond);
+
 /// <summary>
 /// The client's channels (docs/design/window.md): one per profile in use, one login each, in this process (D14). A
 /// channel carries its profile's SOCKS5 proxy on the profile's loopback port and the apps routed through it
@@ -37,6 +41,7 @@ internal sealed class Connections : IDisposable
     private readonly Dictionary<string, TunnelServiceStatus> _ended = [];
     private readonly System.Threading.Timer _poll;
     private Dictionary<string, TunnelServiceStatus> _shown = [];
+    private Dictionary<string, (double In, double Out)> _shownRates = [];
 
     /// <summary>One channel, from the first who needed it to the last who let it go. What is learned about it lives
     /// here, so a new channel starts with none of it and a late answer for an old one has nowhere to land.</summary>
@@ -58,6 +63,8 @@ internal sealed class Connections : IDisposable
         public bool CheckingLatency { get; set; }
         /// <summary>The session's attempt count when it was last up: its count runs across the whole run.</summary>
         public int? AttemptsAtUp { get; set; }
+        /// <summary>The byte counts once a second, newest last, for the traffic graph: a minute's worth and one more.</summary>
+        public List<(DateTimeOffset At, long In, long Out)> Samples { get; } = [];
 
         // The proxy's own counts beside the tunnel's: the bytes are the channel's whole, its proxy and its routes alike.
         public TunnelServiceStatus Status
@@ -104,6 +111,28 @@ internal sealed class Connections : IDisposable
     public DateTimeOffset? NextAttemptOf(string id)
     {
         lock (_gate) return _channels.TryGetValue(id, out var channel) ? channel.Session.Status.NextAttemptAt : null;
+    }
+
+    /// <summary>The channel's traffic: its byte counts and its rates a second apart over the last minute.</summary>
+    public Traffic? TrafficOf(string id)
+    {
+        lock (_gate) return _channels.TryGetValue(id, out var channel) ? Rates(channel) : null;
+    }
+
+    private static Traffic Rates(Channel channel)
+    {
+        var samples = channel.Samples;
+        var inRates = new List<double>(samples.Count);
+        var outRates = new List<double>(samples.Count);
+        for (var i = 1; i < samples.Count; i++)
+        {
+            var seconds = (samples[i].At - samples[i - 1].At).TotalSeconds;
+            // A reconnect starts the counts again: a fall is a new session, not traffic running backwards.
+            inRates.Add(seconds <= 0 ? 0 : Math.Max(0, samples[i].In - samples[i - 1].In) / seconds);
+            outRates.Add(seconds <= 0 ? 0 : Math.Max(0, samples[i].Out - samples[i - 1].Out) / seconds);
+        }
+        var last = samples.Count > 0 ? samples[^1] : default;
+        return new Traffic(last.In, last.Out, inRates, outRates);
     }
 
     /// <summary>The channel's last latency check, and whether one is under way.</summary>
@@ -428,15 +457,28 @@ internal sealed class Connections : IDisposable
         lock (_gate)
         {
             var now = new Dictionary<string, TunnelServiceStatus>(_ended);
+            var rates = new Dictionary<string, (double, double)>();
+            var at = DateTimeOffset.UtcNow;
             foreach (var (id, channel) in _channels)
             {
                 var status = channel.Status;
                 // Every state change polls, so an up between two losses is never missed.
                 if (status.State == TunnelServiceStatus.Up) channel.AttemptsAtUp = status.Attempts;
                 now[id] = status;
+                // A sample a second, however often a state change polls in between.
+                if (channel.Samples.Count == 0 || at - channel.Samples[^1].At >= TimeSpan.FromMilliseconds(900))
+                {
+                    channel.Samples.Add((at, status.BytesDown, status.BytesUp));
+                    if (channel.Samples.Count > 61) channel.Samples.RemoveAt(0);
+                }
+                var traffic = Rates(channel);
+                rates[id] = (traffic.InPerSecond.LastOrDefault(), traffic.OutPerSecond.LastOrDefault());
             }
-            changed = force || now.Count != _shown.Count || now.Any(p => !_shown.TryGetValue(p.Key, out var was) || was != p.Value);
+            // Traffic that stops changes no count, but its graph has to fall to nothing: a rate that moved is a change too.
+            changed = force || now.Count != _shown.Count || now.Any(p => !_shown.TryGetValue(p.Key, out var was) || was != p.Value)
+                || rates.Any(r => !_shownRates.TryGetValue(r.Key, out var was) || was != r.Value);
             _shown = now;
+            _shownRates = rates;
         }
         if (changed) Changed?.Invoke();
     }

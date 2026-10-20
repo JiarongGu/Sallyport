@@ -4,7 +4,7 @@ import type { AppItemView, ClientState, ProgramView } from './contract';
 import { post } from './commands';
 import { duration } from './format';
 import { RunDetails } from './Run';
-import { ActionButton, Disclosure, EmptyView, Facts, PageHeader, StatusPill } from './ui/shared';
+import { ActionButton, Disclosure, EmptyView, Facts, Monogram, StatusPill, Switch } from './ui/shared';
 
 /** Everything the person routes, one card per app — a program or a folder — each program with its methods. */
 export function Apps({ state, now, expanded, toggle, editorForm }: {
@@ -13,12 +13,7 @@ export function Apps({ state, now, expanded, toggle, editorForm }: {
   const editing = state.editor;
   const subject = editing?.kind === 'program' ? editing.subjectId.split('/')[0] : editing?.subjectId;
   return <section className="page" aria-label={t('Apps')}>
-    <PageHeader title={t('Apps')} subtitle={t('Programs and games routed through a VPN profile, by all their traffic or by proxy settings at launch. Everything else keeps your own connection.')}>
-      <div className="actions">
-        <ActionButton action={state.actions.addProgram} focusKey="add-program" primary onClick={() => post('ADD_APP', { source: 'program' })} />
-        <ActionButton action={state.actions.addFolder} focusKey="add-folder" onClick={() => post('ADD_APP', { source: 'folder' })} />
-      </div>
-    </PageHeader>
+    <p className="page-intro secondary">{t('Programs and games routed through a VPN profile, by all their traffic or by proxy settings at launch. Everything else keeps your own connection.')}</p>
     {state.appsEmpty && <EmptyView empty={state.appsEmpty} actions={state.actions} />}
     {editorForm && !state.apps.some((app) => app.id === subject) && editorForm}
     <div className="rows">
@@ -39,24 +34,24 @@ function AppCard({ app, now, expanded, toggle, editing, editorForm }: {
   const programEditing = editing?.kind === 'program' ? editing.subjectId.split('/')[1] : null;
   return <article className={`card tone-border-${app.tone}${expanded ? ' expanded' : ''}`} aria-labelledby={headingId}>
     <div className="row-head">
+      <Monogram name={app.name} />
       <div className="row-identity">
         <h3 id={headingId}>{app.name}</h3>
         <div className="profile-status">
           <StatusPill tone={app.tone} announce>{app.statusText}</StatusPill>
-          {app.run?.since && <span className="secondary duration">{t('Routed for {0}', duration(app.run.since, now))}</span>}
+          {app.run?.since && <span className="duration">{t('Routed for {0}', duration(app.run.since, now))}</span>}
+          <span className="summary">{[app.throughText, app.methodText, app.lossText].filter(Boolean).join(' · ')}</span>
         </div>
       </div>
       <div className="actions row-primary">
         <ActionButton action={app.actions.launch} primary onClick={() => post('LAUNCH_APP', { id: app.id })} />
-        <ActionButton action={app.actions.route} onClick={() => post('ROUTE_APP', { id: app.id })} />
-        <ActionButton action={app.actions.stop} onClick={() => post('STOP_RUN', {})} />
+        {/* Routed or not, as a switch: Route turns it on, Stop routing off. */}
+        <Switch on={app.actions.stop.visible} action={app.actions.stop.visible ? app.actions.stop : app.actions.route}
+          onFlip={() => app.actions.stop.visible ? post('STOP_RUN', {}) : post('ROUTE_APP', { id: app.id })} />
       </div>
+      <Disclosure open={expanded} controls={detailsId} onClick={toggle} icon />
     </div>
     {app.run && <RunDetails run={app.run} />}
-    <div className="row-foot">
-      <span className="secondary through">{[app.throughText, app.methodText, app.lossText].filter(Boolean).join(' · ')}</span>
-      <Disclosure open={expanded} controls={detailsId} onClick={toggle} />
-    </div>
     <div id={detailsId} hidden={!expanded} className="row-details">
       <Facts facts={[
         ...(app.folder ? [{ label: t('Folder'), value: app.folder }] : []),
@@ -94,8 +89,8 @@ function ProgramRow({ app, program, editorForm }: { app: AppItemView; program: P
       </div>
       <div className="actions">
         <ActionButton action={program.actions.launch} onClick={() => post('LAUNCH_APP', { id: app.id, programId: program.id })} />
-        <ActionButton action={program.actions.edit} focusKey={`program:${program.id}`} onClick={() => post('BEGIN_PROGRAM_EDIT', { id: app.id, programId: program.id })} />
-        <ActionButton action={program.actions.toggle} onClick={() => post('SET_APP_PROGRAM', { id: app.id, programId: program.id, included: !program.included })} />
+        <ActionButton action={program.actions.edit} subtle focusKey={`program:${program.id}`} onClick={() => post('BEGIN_PROGRAM_EDIT', { id: app.id, programId: program.id })} />
+        <ActionButton action={program.actions.toggle} subtle onClick={() => post('SET_APP_PROGRAM', { id: app.id, programId: program.id, included: !program.included })} />
       </div>
     </div>
     {program.startupSettings.length > 0 && <details className="startup-settings">

@@ -31,7 +31,11 @@ internal sealed record LatencyView(ProbePhase Phase, string StatusText, IReadOnl
 internal sealed record ChannelView(
     string Id, string ProfileId, string Name, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
     IReadOnlyList<Fact> Facts, string? ProxyText, IReadOnlyList<SelectionView> Selections, ChannelActions Actions,
-    DateTimeOffset? NextAttemptAt = null, LatencyView? Latency = null);
+    DateTimeOffset? NextAttemptAt = null, LatencyView? Latency = null, TrafficView? Traffic = null);
+
+/// <summary>A channel's traffic for its card: what it has received and sent, as figures with the rate now, and the rates
+/// a second apart over the last minute (bytes per second, oldest first) for its graph.</summary>
+internal sealed record TrafficView(Fact Received, Fact Sent, IReadOnlyList<double> InPerSecond, IReadOnlyList<double> OutPerSecond);
 
 internal sealed record NetworkEmpty(string Title, string Text);
 
@@ -59,7 +63,7 @@ internal static class WindowViews
     /// channel's proxy is not listening, by profile.</summary>
     public static NetworkView Network(IReadOnlyList<ProfileView> profiles, IReadOnlyList<AppItemView> games, RunFacts? run,
         IReadOnlyList<StoredProfile> stored, DriverView routing, IReadOnlyDictionary<string, string?> proxyProblems,
-        IReadOnlyDictionary<string, (Latency? Last, bool Checking)>? latencies = null)
+        IReadOnlyDictionary<string, (Latency? Last, bool Checking)>? latencies = null, IReadOnlyDictionary<string, Traffic?>? traffic = null)
     {
         var channels = new List<ChannelView>();
         var routedGame = run is { Ended: null } ? games.FirstOrDefault(g => g.Id == run.GameId) : null;
@@ -68,7 +72,10 @@ internal static class WindowViews
         foreach (var p in profiles)
         {
             if (p.Phase is ProfilePhase.Idle or ProfilePhase.Unsupported or ProfilePhase.Removing) continue;
-            var facts = p.Facts.Where(f => !notHere.Contains(f.Label)).ToList();
+            var flow = traffic?.GetValueOrDefault(p.Id) is { } t ? Traffic(t) : null;
+            // The counts are the traffic's figures when there are any.
+            string[] counted = flow is null ? [] : [L.T("Downloaded"), L.T("Uploaded")];
+            var facts = p.Facts.Where(f => !notHere.Contains(f.Label) && !counted.Contains(f.Label)).ToList();
             var selections = routedGame is { Run: { } routedRun } && run!.ProfileId == p.Id
                 ? new List<SelectionView> { Selection(routedGame, routedRun) }
                 : [];
@@ -79,7 +86,7 @@ internal static class WindowViews
             channels.Add(new ChannelView($"channel:{p.Id}", p.Id, p.Name, p.Tone, p.StatusText, p.DetailText, p.ConnectedSince, facts, proxy, selections,
                 new ChannelActions(p.Actions.Disconnect,
                     p.Phase == ProfilePhase.Up ? UiAction.Shown(last is null ? L.T("Check latency") : L.T("Check again"), busy: checking) : UiAction.Hidden),
-                p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null));
+                p.NextAttemptAt, p.Phase == ProfilePhase.Up || last is not null ? Latency(last, checking) : null, flow));
         }
         // A run whose channel is not up yet (the service still preparing it) is shown on its own until it is.
         if (routedGame is { Run: { } routed } game && run is not null && !channels.Any(c => c.ProfileId == run.ProfileId))
@@ -124,23 +131,35 @@ internal static class WindowViews
             channels, routing);
     }
 
+    public static TrafficView Traffic(Traffic t) => new(
+        new(L.T("Received"), L.T("{0}/s", ClientView.Bytes((long)t.InPerSecond.LastOrDefault())), ClientView.Bytes(t.BytesIn)),
+        new(L.T("Sent"), L.T("{0}/s", ClientView.Bytes((long)t.OutPerSecond.LastOrDefault())), ClientView.Bytes(t.BytesOut)),
+        t.InPerSecond, t.OutPerSecond);
+
     /// <summary>A channel's latency, in words: each path's median round trip and how many of its echoes were answered,
     /// or that none was — which says nothing of the tunnel (rule 6) — and only a hop's answer marked as the estimate it is.</summary>
     public static LatencyView Latency(Latency? last, bool checking)
     {
         if (last is null) return new(checking ? ProbePhase.Checking : ProbePhase.Unchecked,
             checking ? L.T("Checking latency…") : L.T("Round trips to {0}: from this computer, through the VPN, and to the VPN server.", Connections.LatencyTarget), [], null);
-        string Line(PathSample s) => s.MedianMs is { } ms
-            ? s.FromDestination
-                ? L.T("{0} ms ({1} of {2} answered)", ms.ToString("F0", English), s.Answered, s.Sent)
-                : L.T("{0} ms ({1} of {2} answered; farthest responding hop {3} — estimate)", ms.ToString("F0", English), s.Answered, s.Sent, s.Responder)
-            : L.T("No reply — latency unavailable");
+        // The round trip is the figure; how many answered, and from where, qualifies it.
+        Fact Path(string label, PathSample s) => s.MedianMs is { } ms
+            ? new(label, s.FromDestination
+                    ? L.T("{0} of {1} answered", s.Answered, s.Sent)
+                    : L.T("{0} of {1} answered; farthest responding hop {2} — estimate", s.Answered, s.Sent, s.Responder),
+                L.T("{0} ms", ms.ToString("F0", English)))
+            : new(label, L.T("No reply — latency unavailable"));
+        Fact ToServer()
+        {
+            if (last.ToGateway is not { } g || last.Gateway is not { } gateway) return new(L.T("To the VPN server"), L.T("The server named no tunnel gateway."));
+            var path = Path(L.T("To the VPN server"), g);
+            return path with { Value = L.T("{0} — tunnel gateway {1}", path.Value, gateway) };
+        }
         var paths = new List<Fact>
         {
-            new(L.T("Direct to {0}", last.Target), Line(last.Direct)),
-            new(L.T("Through the VPN to {0}", last.Target), Line(last.Vpn)),
-            new(L.T("To the VPN server"), last.ToGateway is { } g && last.Gateway is { } gateway
-                ? L.T("{0} — tunnel gateway {1}", Line(g), gateway) : L.T("The server named no tunnel gateway.")),
+            Path(L.T("Direct to {0}", last.Target), last.Direct),
+            Path(L.T("Through the VPN to {0}", last.Target), last.Vpn),
+            ToServer(),
         };
         var any = last.Direct.Answered + last.Vpn.Answered + (last.ToGateway?.Answered ?? 0) > 0;
         return new(checking ? ProbePhase.Checking : any ? ProbePhase.Available : ProbePhase.Unavailable,

@@ -28,7 +28,9 @@ internal sealed record UiAction(bool Visible, bool Enabled, bool Busy, string La
         new(true, enabled && !busy, busy, label, enabled ? null : reason);
 }
 
-internal sealed record Fact(string Label, string Value);
+/// <summary>A labelled value. <see cref="Figure"/>, when there is one, is the part shown large — a round trip's "19 ms",
+/// with what qualifies it in <see cref="Value"/> — so the page never splits a sentence the host wrote.</summary>
+internal sealed record Fact(string Label, string Value, string? Figure = null);
 
 internal sealed record EmptyView(string Title, string Text, string Command);
 

@@ -17,9 +17,9 @@ internal sealed record Start(string[] Arguments, SingleInstance Claim);
 /// </summary>
 internal sealed class MainForm : OptimizedForm
 {
-    /// <summary>The page's title bar height and caption button width in CSS pixels, for the buttons the form paints
-    /// before the page has said where its own are.</summary>
-    private const double TitleBarHeight = 40, CaptionButtonWidth = 46;
+    /// <summary>The page's header height and caption button width in CSS pixels, for the buttons the form paints before
+    /// the page has said where its own are.</summary>
+    private const double TitleBarHeight = 48, CaptionButtonWidth = 46;
 
     private readonly WebViewHost _host;
     private readonly Splash _splash;
@@ -52,6 +52,9 @@ internal sealed class MainForm : OptimizedForm
         _start = start;
         _theme = theme;
         Text = "Sallyport";
+        // Minimize and close only: the window keeps the size it is given (the owner: "we probably don't need the
+        // window max button"), and without the style Windows offers no maximize either — Win+Up, a double click, Snap.
+        MaximizeBox = false;
         MinimumSize = new Size(760, 520);
         Size = new Size(1000, 700);
         _windowIcon = StatusTray.Draw(StatusTray.Brand, 32);
@@ -60,7 +63,7 @@ internal sealed class MainForm : OptimizedForm
 
         _webView = new WebView2Control { Dock = DockStyle.Fill };
         Controls.Add(_webView);
-        _splash = new Splash(theme, ToggleMaximize);
+        _splash = new Splash(theme);
         Controls.Add(_splash);
         _splash.BringToFront();
         Resize += (_, _) => PaintCaptionButtonsUntilThePageDoes();
@@ -191,7 +194,7 @@ internal sealed class MainForm : OptimizedForm
         _splash.Dispose();
     }
 
-    /// <summary>Until the page reports its buttons, the splash still needs a way to close the window: the same three,
+    /// <summary>Until the page reports its buttons, the splash still needs a way to close the window: the same two,
     /// where the page will put them.</summary>
     private void PaintCaptionButtonsUntilThePageDoes()
     {
@@ -203,10 +206,30 @@ internal sealed class MainForm : OptimizedForm
         if (w <= 0 || h <= 0 || right <= 0) return;
         SetCaptionButtons(
         [
-            new CaptionButtonRegion(CaptionButtonKind.Minimize, new Rectangle(right - 3 * w, 0, w, h)),
-            new CaptionButtonRegion(CaptionButtonKind.Maximize, new Rectangle(right - 2 * w, 0, w, h)),
+            new CaptionButtonRegion(CaptionButtonKind.Minimize, new Rectangle(right - 2 * w, 0, w, h)),
             new CaptionButtonRegion(CaptionButtonKind.Close, new Rectangle(right - w, 0, w, h)),
         ]);
+    }
+
+    private const int WS_MAXIMIZEBOX = 0x00010000, WM_SYSCOMMAND = 0x0112, SC_MAXIMIZE = 0xF030;
+
+    /// <summary>The frameless frame keeps the maximize style whatever <see cref="Form.MaximizeBox"/> says; without it,
+    /// Windows offers no maximize — not Win+Up, not dragging to the top, not Snap's maximize.</summary>
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var created = base.CreateParams;
+            created.Style &= ~WS_MAXIMIZEBOX;
+            return created;
+        }
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        // What still asks to maximize (the system menu, another program) is refused: the window keeps its size.
+        if (m.Msg == WM_SYSCOMMAND && ((int)m.WParam & 0xFFF0) == SC_MAXIMIZE) return;
+        base.WndProc(ref m);
     }
 
     protected override void Dispose(bool disposing)

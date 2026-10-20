@@ -900,7 +900,7 @@ internal sealed class ClientCore
             ClientView.ProfilesEmpty(stored.Count),
             AppViews.Empty(stored.Count, apps.Count),
             WindowViews.Network(profiles, apps, run, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id)),
-                stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id))),
+                stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id)), stored.ToDictionary(p => p.Id, p => _connections.TrafficOf(p.Id))),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(), _settings.Defaults,
                 stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null, _settings.Language),
             // Where a first look is useful: with nothing to route through yet, the page that imports one.

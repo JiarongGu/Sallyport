@@ -2,45 +2,47 @@ import { useId, type ReactNode } from 'react';
 import type { ClientState, DriverView } from './contract';
 import { post } from './commands';
 import { t } from './i18n';
-import { ActionButton, Disclosure, Facts, PageHeader, StatusPill } from './ui/shared';
+import { ActionButton, Disclosure, Facts, StatusPill } from './ui/shared';
 
 /** How Sallyport is set up on this computer, and how to use it. */
 export function Settings({ state, expanded, toggle, editorForm }: {
   state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
   const settings = state.settings;
-  const startupId = useId();
+  const generalId = useId();
   const languageId = useId();
   return <section className="page settings" aria-label={t('Settings')}>
-    <PageHeader title={t('Settings')} />
-
-    <section className="settings-group" aria-labelledby={languageId}>
-      <h2 id={languageId}>{t('Language')}</h2>
-      <p className="secondary metadata">{t('The words of this window, the tray and setup.')}</p>
-      <select className="language-choice" aria-labelledby={languageId} value={settings.language.setting}
-        onChange={(event) => post('SET_LANGUAGE', { language: event.target.value })}>
-        {settings.language.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-      </select>
+    {/* Settings that act the moment they change, as rows: what it is on the left, its control on the right. */}
+    <section className="settings-group" aria-labelledby={generalId}>
+      <h2 id={generalId}>{t('General')}</h2>
+      <div className="card setting-rows">
+        <div className="setting-row">
+          <span className="setting-text">
+            <span id={languageId}>{t('Language')}</span>
+            <span>{t('The words of this window, the tray and setup.')}</span>
+          </span>
+          <select className="language-choice" aria-labelledby={languageId} value={settings.language.setting}
+            onChange={(event) => post('SET_LANGUAGE', { language: event.target.value })}>
+            {settings.language.choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+          </select>
+        </div>
+        <label className="setting-row">
+          <span className="setting-text"><span>{settings.startup.label}</span><span>{settings.startup.text}</span></span>
+          <input type="checkbox" role="switch" className="switch" checked={settings.startup.on} disabled={!settings.startup.toggle.enabled}
+            onChange={() => post('SET_START_WITH_WINDOWS', { enabled: !settings.startup.on })} />
+        </label>
+      </div>
     </section>
 
     <section className="settings-group" aria-label={t('Packet routing')}>
       <h2>{t('Packet routing')}</h2>
-      <p className="secondary metadata">{t('Routing a program’s every packet needs NT Kernel’s free Windows Packet Filter driver and the Sallyport service.')}</p>
+      <p className="secondary">{t('Routing a program’s every packet needs NT Kernel’s free Windows Packet Filter driver and the Sallyport service.')}</p>
       <RoutingCard routing={settings.routing} manage />
-    </section>
-
-    <section className="settings-group" aria-labelledby={startupId}>
-      <h2 id={startupId}>{t('Startup')}</h2>
-      <label className="check-field card">
-        <input type="checkbox" checked={settings.startup.on} disabled={!settings.startup.toggle.enabled}
-          onChange={() => post('SET_START_WITH_WINDOWS', { enabled: !settings.startup.on })} />
-        <span><span>{settings.startup.label}</span><span className="secondary metadata">{settings.startup.text}</span></span>
-      </label>
     </section>
 
     <section className="settings-group" aria-label={t('Defaults for new apps')}>
       <h2>{t('Defaults for new apps')}</h2>
-      <p className="secondary metadata">{t('What an app you add starts with. Apps added before keep their own.')}</p>
+      <p className="secondary">{t('What an app you add starts with. Apps added before keep their own.')}</p>
       <div className="card">
         <div className="row-head">
           <Facts facts={settings.defaults.facts} />

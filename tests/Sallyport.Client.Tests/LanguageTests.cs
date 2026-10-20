@@ -150,13 +150,14 @@ public sealed partial class LanguageTests
     [GeneratedRegex("""\b(?:text|check)\('[a-zA-Z]+', '([^']*)'(?:, '([^']*)')?\)""")]
     private static partial Regex PageHelper();
 
-    // The tabs: ['apps', 'Apps'], said through t(label).
-    [GeneratedRegex("""\['(?:apps|network|profiles|settings)', '([^']*)'\]""")]
+    // The menu's pages: ['apps', 'Apps', 'apps'], said through t(label).
+    [GeneratedRegex("""\['(?:apps|network|profiles|settings)', '([^']*)'""")]
     private static partial Regex PageTabs();
 
     // A tag's text that holds a letter: >seconds<, not >{t('seconds')}< nor the space between two tags. Code between a
     // generic's brackets (useState<Page>(null); … useRef<) has a bracket, an equals sign or a line break; text has none.
-    [GeneratedRegex(""">[ \t]*([^<>{}();=&|\s][^<>{}();=&|\r\n]*?[A-Za-z][^<>{}();=&|\r\n]*?)[ \t]*<""")]
+    // An arrow's > (=> rates.length < 2) closes no tag.
+    [GeneratedRegex("""(?<![=\-])>[ \t]*([^<>{}();=&|\s][^<>{}();=&|\r\n]*?[A-Za-z][^<>{}();=&|\r\n]*?)[ \t]*<""")]
     private static partial Regex PageBareText();
 
     [GeneratedRegex("""^\s*'((?:[^'\\]|\\.)*)':""", RegexOptions.Multiline)]

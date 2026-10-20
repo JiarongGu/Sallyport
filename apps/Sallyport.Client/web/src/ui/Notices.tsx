@@ -2,7 +2,7 @@ import { t } from '../i18n';
 import { useId } from 'react';
 import type { Notice } from '../contract';
 import { post } from '../commands';
-import { ActionButton, Disclosure } from './shared';
+import { ActionButton, Disclosure, Icon } from './shared';
 
 export function Notices({ notices, earlierOpen, toggleEarlier }: {
   notices: Notice[]; earlierOpen: boolean; toggleEarlier: () => void;
@@ -21,8 +21,8 @@ export function Notices({ notices, earlierOpen, toggleEarlier }: {
 
 function NoticeView({ notice }: { notice: Notice }) {
   return <div className={`notice notice-${notice.kind}`}>
-    <span className="notice-symbol" aria-hidden="true">{notice.kind === 'error' ? '!' : notice.kind === 'warning' ? '△' : 'i'}</span>
+    <Icon name={notice.kind === 'error' ? 'error' : notice.kind === 'warning' ? 'warning' : 'info'} />
     <p>{notice.text}</p>
-    <ActionButton action={notice.dismiss} onClick={() => post('DISMISS_NOTICE', { id: notice.id })} />
+    <ActionButton action={notice.dismiss} icon="dismiss" onClick={() => post('DISMISS_NOTICE', { id: notice.id })} />
   </div>;
 }

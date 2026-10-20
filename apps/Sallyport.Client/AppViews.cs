@@ -18,7 +18,7 @@ internal sealed record AppItemActions(UiAction Route, UiAction Stop, UiAction La
 /// <summary>An app's card: its profile and methods, its routing now (<see cref="Run"/>), and what can be done with it.</summary>
 internal sealed record AppItemView(
     string Id, string Name, string? Folder, string ThroughText, string MethodText, string? LossText, Tone Tone, string StatusText,
-    string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions);
+    string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions, string? ProfileId = null);
 
 internal sealed record AppEditValues(string Name, string? ProfileId, LossMode Loss, string DirectAfterText, string? LaunchProgramId);
 
@@ -144,7 +144,8 @@ internal static class AppViews
                 Rescan: item.Folder is null ? UiAction.Hidden : UiAction.Shown(L.T("Scan folder again"), !live && !launching, L.T("Stop routing before scanning again.")),
                 AddProgram: UiAction.Shown(L.T("Add a program…"), !live && !launching && !f.Busy,
                     live ? L.T("Stop routing before changing its programs.") : L.T("A file dialog is open.")),
-                Remove: UiAction.Shown(L.T("Remove app"), !live && !launching, L.T("Stop routing before removing it."))));
+                Remove: UiAction.Shown(L.T("Remove app"), !live && !launching, L.T("Stop routing before removing it."))),
+            profile?.Id);
     }
 
     public static EmptyView? Empty(int profiles, int apps) =>

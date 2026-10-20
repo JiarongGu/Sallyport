@@ -241,16 +241,22 @@ internal sealed class StatusTray : IDisposable
 
         public Padding ItemPadding { get; } = new((int)(8 * scale), (int)(5 * scale), (int)(8 * scale), (int)(5 * scale));
 
+        /// <summary>The page's --hover on a card: the text's colour at 6% over the surface.</summary>
+        private Color Hover => Color.FromArgb(
+            Theme.Surface.R + (Theme.Text.R - Theme.Surface.R) * 6 / 100,
+            Theme.Surface.G + (Theme.Text.G - Theme.Surface.G) * 6 / 100,
+            Theme.Surface.B + (Theme.Text.B - Theme.Surface.B) * 6 / 100);
+
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
-            using var surface = new SolidBrush(Theme.Caption.Surface);
+            using var surface = new SolidBrush(Theme.Surface);
             e.Graphics.FillRectangle(surface, e.AffectedBounds);
         }
 
         protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
         {
             if (SystemDrawsBorder) return;
-            using var border = new Pen(Theme.Caption.Pressed);
+            using var border = new Pen(Theme.Rule);
             e.Graphics.DrawRectangle(border, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
         }
 
@@ -260,7 +266,7 @@ internal sealed class StatusTray : IDisposable
             var inset = (int)(4 * scale);
             var bounds = new Rectangle(inset, 1, e.Item.Width - 2 * inset, e.Item.Height - 2);
             using var path = Rounded(bounds, 4 * scale);
-            using var hover = new SolidBrush(Theme.Caption.Hover);
+            using var hover = new SolidBrush(Hover);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             e.Graphics.FillPath(hover, path);
         }
@@ -288,7 +294,7 @@ internal sealed class StatusTray : IDisposable
         {
             var inset = (int)(12 * scale);
             var y = e.Item.Height / 2;
-            using var line = new Pen(Theme.Caption.Pressed);
+            using var line = new Pen(Theme.Rule);
             e.Graphics.DrawLine(line, inset, y, e.Item.Width - inset, y);
         }
 

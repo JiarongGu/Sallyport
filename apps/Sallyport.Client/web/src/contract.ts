@@ -27,6 +27,8 @@ export interface Action {
 export interface Fact {
   label: string;
   value: string;
+  /** The part shown large, when there is one (a round trip's "19 ms"); `value` then qualifies it. */
+  figure?: string | null;
 }
 
 export interface Empty {
@@ -140,12 +142,24 @@ export interface ChannelView {
   nextAttemptAt: string | null;
   /** Round trips, when the channel is up or was checked. */
   latency: LatencyView | null;
+  /** What it has received and sent, and the rates over the last minute, while it is open. */
+  traffic: TrafficView | null;
+}
+
+export interface TrafficView {
+  /** Figure "1.2 MB", value "12 KB/s" — the rate now. */
+  received: Fact;
+  sent: Fact;
+  /** Bytes per second, a second apart, oldest first: the graph's two lines. */
+  inPerSecond: number[];
+  outPerSecond: number[];
 }
 
 export interface LatencyView {
   phase: 'unchecked' | 'checking' | 'available' | 'unavailable';
   statusText: string;
-  /** Each path and its result: "Direct to 1.1.1.1" — "14 ms (4 of 4 answered)", or "No reply — latency unavailable". */
+  /** Each path and its result: "Direct to 1.1.1.1" — figure "14 ms", value "4 of 4 answered"; or no figure and
+   *  "No reply — latency unavailable". */
   paths: Fact[];
   checkedAt: string | null;
 }
@@ -227,6 +241,8 @@ export interface AppItemView {
   programsText: string;
   programs: ProgramView[];
   actions: Record<'route' | 'stop' | 'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
+  /** The profile it goes through, when one is chosen: the Network page lists an app under its profile. */
+  profileId: string | null;
 }
 
 export interface AppEditValues {

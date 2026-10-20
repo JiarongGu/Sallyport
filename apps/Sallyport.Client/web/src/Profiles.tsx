@@ -3,15 +3,13 @@ import { useId, type ReactNode } from 'react';
 import type { ClientState, ProfileView } from './contract';
 import { post } from './commands';
 import { clock, countdown, duration } from './format';
-import { ActionButton, Disclosure, EmptyView, Facts, PageHeader, StatusPill } from './ui/shared';
+import { ActionButton, Disclosure, EmptyView, Facts, StatusPill, Switch } from './ui/shared';
 
 export function Profiles({ state, now, expanded, toggle, editorForm }: {
   state: ClientState; now: number; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode;
 }) {
   return <section className="page" aria-label={t('Profiles')}>
-    <PageHeader title={t('Profiles')} subtitle={t('Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.')}>
-      <ActionButton action={state.actions.import} primary onClick={() => post('IMPORT', {})} />
-    </PageHeader>
+    <p className="page-intro secondary">{t('Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.')}</p>
     {state.profilesEmpty && <EmptyView empty={state.profilesEmpty} actions={state.actions} />}
     {editorForm && !state.profiles.some((profile) => profile.id === state.editor?.subjectId) && editorForm}
     <div className="rows">
@@ -29,25 +27,25 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
   const headingId = useId();
   return <article className={`card tone-border-${profile.tone}${expanded ? ' expanded' : ''}`} aria-labelledby={headingId}>
     <div className="row-head">
+      {/* On or off at once, as Connect's profile list has it. */}
+      <Switch on={profile.actions.disconnect.visible} action={profile.actions.disconnect.visible ? profile.actions.disconnect : profile.actions.connect}
+        onFlip={() => post(profile.actions.disconnect.visible ? 'DISCONNECT' : 'CONNECT', { id: profile.id })} />
       <div className="row-identity">
         <h2 id={headingId}>{profile.name}</h2>
         <div className="profile-status">
           <StatusPill tone={profile.tone} announce>{profile.statusText}</StatusPill>
-          {profile.connectedSince && <span className="secondary duration">{t('Connected for {0}', duration(profile.connectedSince, now))}</span>}
+          {profile.connectedSince && <span className="duration">{t('Connected for {0}', duration(profile.connectedSince, now))}</span>}
         </div>
+        <span className="endpoint">
+          <span className="metadata secondary">{t('SOCKS5')}</span>
+          <code>{profile.endpointText}</code>
+          <ActionButton action={profile.actions.copy} icon="copy" onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
+        </span>
       </div>
-      <div className="actions row-primary">
-        <ActionButton action={profile.actions.connect} primary onClick={() => post('CONNECT', { id: profile.id })} />
-        <ActionButton action={profile.actions.disconnect} onClick={() => post('DISCONNECT', { id: profile.id })} />
-      </div>
+      <Disclosure open={expanded} controls={detailsId} onClick={toggle} icon />
     </div>
     {profile.detailText && <p className="supporting secondary">{profile.detailText}</p>}
     {countdown(profile.nextAttemptAt, now) && <p className="supporting secondary countdown" role="timer">{countdown(profile.nextAttemptAt, now)}</p>}
-    <div className="row-foot">
-      <span className="endpoint"><span className="secondary">{t('SOCKS5 · ')}</span><code>{profile.endpointText}</code></span>
-      <ActionButton action={profile.actions.copy} onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
-      <Disclosure open={expanded} controls={detailsId} onClick={toggle} />
-    </div>
     <div id={detailsId} hidden={!expanded} className="row-details">
       <Facts facts={profile.facts} />
       <div className="actions">

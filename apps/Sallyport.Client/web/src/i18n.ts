@@ -32,8 +32,6 @@ const chinese: Record<string, string> = {
   'Notices': '通知',
   'Earlier notices ({0})': '更早的通知（{0}）',
   'Minimize': '最小化',
-  'Maximize': '最大化',
-  'Restore': '还原',
   'Close': '关闭',
   'Details': '详情',
   // apps
@@ -63,16 +61,23 @@ const chinese: Record<string, string> = {
   // profiles
   'Your OpenVPN profiles. Connect one to use it as a local SOCKS5 proxy; routing an app connects its profile itself.':
     '你的 OpenVPN 配置。连接一个配置即可将其用作本地 SOCKS5 代理；分流应用时会自动连接它的配置。',
-  'SOCKS5 · ': 'SOCKS5 · ',
+  'SOCKS5': 'SOCKS5',
   'Exit location': '出口位置',
   'Previous result': '上一次的结果',
+  // the window's frame and the Network page's connection
+  'Menu': '菜单',
+  'Profile': '配置',
+  'Also connected': '其他连接',
+  'Apps through it': '经由它的应用',
+  'Traffic': '流量',
+  'Show': '显示',
   // settings
+  'General': '常规',
   'Language': '语言',
   'The words of this window, the tray and setup.': '此窗口、托盘和安装程序所用的语言。',
   'Packet routing': '数据包分流',
   'Routing a program’s every packet needs NT Kernel’s free Windows Packet Filter driver and the Sallyport service.':
     '按数据包分流程序需要 NT Kernel 免费的 Windows Packet Filter 驱动以及 Sallyport 服务。',
-  'Startup': '启动',
   'Defaults for new apps': '新应用的默认设置',
   'What an app you add starts with. Apps added before keep their own.': '新添加的应用采用的设置。之前添加的应用保持各自的设置。',
   'How to use': '使用方法',

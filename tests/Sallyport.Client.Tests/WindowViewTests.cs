@@ -62,6 +62,31 @@ public class WindowViewTests
     }
 
     [Fact]
+    public void An_open_channel_shows_its_traffic_as_figures_and_a_minute_of_rates()
+    {
+        var traffic = new Dictionary<string, Traffic?> { [Jp.Id] = new Traffic(1_258_291, 348_160, [0, 2048, 4096], [0, 512, 1024]) };
+
+        var channel = Assert.Single(WindowViews.Network([Profile(Jp, TunnelServiceStatus.Up)], Games(null), null, [Jp, Us], Ready, NoProblems,
+            traffic: traffic).Channels);
+
+        Assert.NotNull(channel.Traffic);
+        Assert.Equal(new Fact("Received", "4.0 KB/s", "1.2 MB"), channel.Traffic.Received);
+        Assert.Equal(new Fact("Sent", "1.0 KB/s", "340 KB"), channel.Traffic.Sent);
+        Assert.Equal([0, 2048, 4096], channel.Traffic.InPerSecond);
+        // The counts are the figures now; not said twice.
+        Assert.DoesNotContain(channel.Facts, f => f.Label is "Downloaded" or "Uploaded");
+    }
+
+    [Fact]
+    public void A_channel_without_traffic_yet_keeps_its_counts_as_facts()
+    {
+        var channel = Assert.Single(WindowViews.Network([Profile(Jp, TunnelServiceStatus.Up)], Games(null), null, [Jp, Us], Ready, NoProblems).Channels);
+
+        Assert.Null(channel.Traffic);
+        Assert.Contains(channel.Facts, f => f.Label == "Downloaded");
+    }
+
+    [Fact]
     public void A_failure_comes_first_and_is_not_hidden_by_a_healthy_channel()
     {
         var view = WindowViews.Network([Profile(Jp, TunnelServiceStatus.Up), Profile(Us, TunnelServiceStatus.Refused, "authentication was refused")],
@@ -139,7 +164,9 @@ public class WindowViewTests
         var view = WindowViews.Latency(last, checking: false);
 
         Assert.Equal(ProbePhase.Available, view.Phase);
-        Assert.Equal(["14 ms (4 of 4 answered)", "48 ms (3 of 4 answered)", "35 ms (2 of 4 answered; farthest responding hop 10.8.0.5 — estimate) — tunnel gateway 10.8.0.1"],
+        // The round trip is the figure the window shows large; the rest qualifies it.
+        Assert.Equal(["14 ms", "48 ms", "35 ms"], view.Paths.Select(p => p.Figure));
+        Assert.Equal(["4 of 4 answered", "3 of 4 answered", "2 of 4 answered; farthest responding hop 10.8.0.5 — estimate — tunnel gateway 10.8.0.1"],
             view.Paths.Select(p => p.Value));
     }
 
@@ -153,6 +180,8 @@ public class WindowViewTests
         Assert.Equal(ProbePhase.Unavailable, view.Phase);
         Assert.Equal("No echo was answered, so latency could not be checked. The tunnel itself may still work.", view.StatusText);
         Assert.Equal("No reply — latency unavailable", view.Paths[0].Value);
+        // No number is not a number shown large.
+        Assert.All(view.Paths, p => Assert.Null(p.Figure));
         Assert.Equal("The server named no tunnel gateway.", view.Paths[2].Value);
     }
 
