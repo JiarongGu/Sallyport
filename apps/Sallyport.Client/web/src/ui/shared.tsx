@@ -106,8 +106,7 @@ export function EmptyView({ empty, actions }: { empty: Empty; actions: ClientSta
     <h2>{empty.title}</h2><p className="secondary">{empty.text}</p>
     {empty.command === 'IMPORT'
       ? <ActionButton action={actions.import} primary onClick={() => post('IMPORT', {})} />
-      : <ActionButton action={empty.command === 'ADD_FOLDER' ? actions.addFolder : actions.addProgram} focusKey="empty-add" primary
-          onClick={() => post('ADD_APP', { source: empty.command === 'ADD_FOLDER' ? 'folder' : 'program' })} />}
+      : <ActionButton action={actions.addApp} focusKey="empty-add" primary onClick={() => post('ADD_APP', {})} />}
   </div>;
 }
 

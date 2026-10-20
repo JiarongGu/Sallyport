@@ -151,5 +151,5 @@ internal static class AppViews
     public static EmptyView? Empty(int profiles, int apps) =>
         apps > 0 ? null :
         profiles == 0 ? new(L.T("No apps yet"), L.T("Import a VPN profile first, then add the programs or the game folder to route through it."), "IMPORT") :
-        new(L.T("No apps yet"), L.T("Add a program, or a game's folder. Its traffic can go through your VPN by the packet driver, or by proxy settings when Sallyport launches it."), "ADD_FOLDER");
+        new(L.T("No apps yet"), L.T("Add a game or a program by choosing its program. A game's whole folder goes through your VPN by the packet driver; a browser by proxy settings when Sallyport launches it."), "ADD_APP");
 }

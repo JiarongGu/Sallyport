@@ -362,19 +362,7 @@ internal sealed class ClientCore
 
     // ---- apps (docs/design/window.md): a program or a folder, each program with its methods
 
-    /// <summary>Asks for a game's or program's folder and makes an app of it: every program found, routed by its
-    /// packets, the utilities left out.</summary>
-    public async Task AddFolderFromDialogAsync()
-    {
-        var picked = await WithDialogAsync("add-folder", () => _dialogs.OpenFolderAsync(new OpenFolderOptions
-        {
-            Title = L.T("Choose the folder of the game or program"),
-            RememberPathKey = "add-game",
-        }));
-        if (picked is { Success: true, FilePath: { } folder }) AddFolder(folder);
-    }
-
-    /// <summary>An app from a folder (the dialog's choice, or a start's <c>--add-game</c>).</summary>
+    /// <summary>An app from a folder (a start's <c>--add-game</c>).</summary>
     public void AddFolder(string folder)
     {
         if (!Directory.Exists(folder)) throw new ShenoraException("APP_FOLDER", "folder", folder, L.T("That folder is not there."));
@@ -391,22 +379,60 @@ internal sealed class ClientCore
             : L.T("Added {0}: {1} of its {2} programs will send all their traffic through the VPN.", item.Name, included, item.Programs.Count), new("app", item.Id));
     }
 
-    /// <summary>Asks for one program and makes an app of it: a browser is launched with proxy settings, its own browser
-    /// profile kept apart; anything else sends all its traffic through the packet driver.</summary>
-    public async Task AddProgramFromDialogAsync()
+    /// <summary>Asks for the app's program and makes an app of it — one way in for a game and a program alike: a browser
+    /// is launched with proxy settings, its own browser profile kept apart; anything else is an app of its folder, every
+    /// program there sending all its traffic through the packet driver, the utilities left out, the one picked what
+    /// Launch starts — unless its folder is one many programs share (Windows', Program Files itself, Downloads), where it
+    /// is the program alone.</summary>
+    public async Task AddAppFromDialogAsync()
     {
-        var path = await PickProgramAsync("add-program", L.T("Choose the program to route"));
+        var path = await PickProgramAsync("add-app", L.T("Choose the app's program"));
         if (path is null) return;
         var info = FileVersionInfo.GetVersionInfo(path);
-        var name = new[] { info.FileDescription, info.ProductName, Path.GetFileNameWithoutExtension(path) }
+        var name = new[] { info.ProductName, info.FileDescription, Path.GetFileNameWithoutExtension(path) }
             .First(n => !string.IsNullOrWhiteSpace(n))!.Trim();
         if (name.Length > LongestName) name = name[..LongestName];
         var kind = AppLauncher.Guess(path);
-        var browser = kind is AppKind.Chromium or AppKind.Firefox;
-        var item = WithDefaults(_items.CreateFromProgram(name, path, kind, DefaultProfile()?.Id, packets: !browser, proxy: browser));
-        Notify(NoticeKind.Info, browser
-            ? L.T("Added {0}: it is launched with proxy settings, in a browser profile of its own.", item.Name)
+        if (kind is AppKind.Chromium or AppKind.Firefox)
+        {
+            var browser = WithDefaults(_items.CreateFromProgram(name, path, kind, DefaultProfile()?.Id, packets: false, proxy: true));
+            Notify(NoticeKind.Info, L.T("Added {0}: it is launched with proxy settings, in a browser profile of its own.", browser.Name), new("app", browser.Id));
+            return;
+        }
+        RoutedItem item;
+        try
+        {
+            item = WithDefaults(OwnFolder(Path.GetDirectoryName(path)!)
+                ? _items.CreateFromProgramFolder(name, path, DefaultProfile()?.Id)
+                : _items.CreateFromProgram(name, path, kind, DefaultProfile()?.Id, packets: true, proxy: false));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        { throw new ShenoraException("APP_FOLDER", "path", path, L.T("{0} could not be read: {1}.", name, e.GetType().Name)); }
+        var included = item.Programs.Count(p => p.Included);
+        Notify(NoticeKind.Info, item.Programs.Count > 1
+            ? L.T("Added {0}: {1} of its {2} programs will send all their traffic through the VPN.", item.Name, included, item.Programs.Count)
             : L.T("Added {0}: all its traffic goes through the VPN while it is routed.", item.Name), new("app", item.Id));
+    }
+
+    /// <summary>Whether a program's folder is its own (a game's, an installed program's) rather than one many share, whose
+    /// other programs are none of the app's business. A folder with very many programs is taken as shared too.</summary>
+    private static bool OwnFolder(string folder)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        if (Path.GetPathRoot(full) is { } root && string.Equals(Path.TrimEndingDirectorySeparator(root), full, StringComparison.OrdinalIgnoreCase)) return false;
+        Environment.SpecialFolder[] shared =
+        [
+            Environment.SpecialFolder.Windows, Environment.SpecialFolder.System, Environment.SpecialFolder.SystemX86,
+            Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86, Environment.SpecialFolder.UserProfile,
+            Environment.SpecialFolder.Desktop, Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.MyDocuments,
+            Environment.SpecialFolder.CommonDesktopDirectory, Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolder.ApplicationData,
+        ];
+        var places = shared.Select(Environment.GetFolderPath).Where(p => p.Length > 0)
+            .Append(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"))
+            .Select(p => Path.TrimEndingDirectorySeparator(p));
+        if (places.Any(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase))) return false;
+        try { return Directory.EnumerateFiles(full, "*.exe", SearchOption.AllDirectories).Take(101).Count() <= 100; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
     }
 
     /// <summary>Adds one more program to an app — a launcher elsewhere, say — sending all its traffic.</summary>
@@ -893,8 +919,7 @@ internal sealed class ClientCore
             ClientView.Summary(profiles),
             new ClientState.TopActions(
                 UiAction.Shown(L.T("Import profile…"), dialog is null, L.T("A file dialog is open."), busy: dialog == "import"),
-                UiAction.Shown(L.T("Add a program…"), dialog is null, L.T("A file dialog is open."), busy: dialog == "add-program"),
-                UiAction.Shown(L.T("Add a folder…"), dialog is null, L.T("A file dialog is open."), busy: dialog == "add-folder")),
+                UiAction.Shown(L.T("Add an app…"), dialog is null, L.T("A file dialog is open."), busy: dialog == "add-app")),
             profiles,
             apps,
             ClientView.ProfilesEmpty(stored.Count),

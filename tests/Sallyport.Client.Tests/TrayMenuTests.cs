@@ -42,14 +42,13 @@ public class TrayMenuTests
         var menu = TrayMenu.Build([], [], "Nothing is connected");
 
         Assert.Equal(
-            [TrayEntryKind.Command, TrayEntryKind.Command, TrayEntryKind.Separator, TrayEntryKind.Note, TrayEntryKind.Separator,
-             TrayEntryKind.Command, TrayEntryKind.Command],
+            [TrayEntryKind.Command, TrayEntryKind.Separator, TrayEntryKind.Note, TrayEntryKind.Separator, TrayEntryKind.Command, TrayEntryKind.Command],
             menu.Select(e => e.Kind));
-        Assert.True(menu[0] is { Text: "Open Sallyport", Verb: TrayVerb.OpenWindow, Default: true });
-        Assert.True(menu[1] is { Text: "Open Overview", Verb: TrayVerb.OpenNetwork, Tip: "Nothing is connected" });
-        Assert.True(menu[3] is { Text: "No profiles yet — open Sallyport to import one", Enabled: false });
-        Assert.True(menu[5] is { Text: "Settings", Verb: TrayVerb.OpenSettings });
-        Assert.True(menu[6] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Tip: "Stops routing, disconnects every profile, then quits." });
+        // One way into the window, on its Overview; what is connected, its tip.
+        Assert.True(menu[0] is { Text: "Open Sallyport", Verb: TrayVerb.OpenWindow, Default: true, Tip: "Nothing is connected" });
+        Assert.True(menu[2] is { Text: "No profiles yet — open Sallyport to import one", Enabled: false });
+        Assert.True(menu[4] is { Text: "Settings", Verb: TrayVerb.OpenSettings });
+        Assert.True(menu[5] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Tip: "Stops routing, disconnects every profile, then quits." });
         // Only one entry is the default (what a double click would do), and it is opening the window.
         Assert.Single(menu, e => e.Default);
     }

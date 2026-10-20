@@ -108,8 +108,7 @@ export function App() {
     <div className="main">
       <MainHeader title={t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}>
         {state && shown === 'apps' && <>
-          <ActionButton action={state.actions.addProgram} glyph="plus" focusKey="add-program" onClick={() => post('ADD_APP', { source: 'program' })} />
-          <ActionButton action={state.actions.addFolder} glyph="folder" focusKey="add-folder" onClick={() => post('ADD_APP', { source: 'folder' })} />
+          <ActionButton action={state.actions.addApp} glyph="plus" focusKey="add-app" onClick={() => post('ADD_APP', {})} />
         </>}
         {state && shown === 'profiles' && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
       </MainHeader>

@@ -1,7 +1,7 @@
 namespace Sallyport.Client;
 
 /// <summary>What choosing a tray entry does; <see cref="TrayEntry.Target"/> names the profile or app it acts on.</summary>
-internal enum TrayVerb { None, OpenWindow, OpenNetwork, OpenSettings, Connect, Disconnect, StopRun, Launch, Route, Exit }
+internal enum TrayVerb { None, OpenWindow, OpenSettings, Connect, Disconnect, StopRun, Launch, Route, Exit }
 
 internal enum TrayEntryKind { Command, Note, Submenu, Separator }
 
@@ -29,8 +29,8 @@ internal static class TrayMenu
     {
         var menu = new List<TrayEntry>
         {
-            new(TrayEntryKind.Command, L.T("Open Sallyport"), TrayVerb.OpenWindow, Default: true),
-            new(TrayEntryKind.Command, L.T("Open Overview"), TrayVerb.OpenNetwork, Tip: networkStatus),
+            // The window on its Overview, where the switch is; what is connected, its tip.
+            new(TrayEntryKind.Command, L.T("Open Sallyport"), TrayVerb.OpenWindow, Tip: networkStatus, Default: true),
             TrayEntry.Separator,
         };
 

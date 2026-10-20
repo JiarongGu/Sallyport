@@ -77,7 +77,7 @@ internal sealed record ClientState(
     string Language = "en")
 {
     internal sealed record SummaryView(string Text, Tone Tone);
-    internal sealed record TopActions(UiAction Import, UiAction AddProgram, UiAction AddFolder);
+    internal sealed record TopActions(UiAction Import, UiAction AddApp);
     internal sealed record ProfileChoice(string Id, string Label, bool Enabled);
     internal sealed record KindChoice(AppKind Value, string Label, string Help);
     internal sealed record GuideView(string EndpointText, string CurlExample, UiAction CopyExample);

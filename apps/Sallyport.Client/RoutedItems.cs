@@ -152,6 +152,25 @@ internal sealed class RoutedItemStore
         return item;
     }
 
+    /// <summary>A new app of a program's folder: every program found there, routed by its packets, the utilities left
+    /// out (<see cref="GameFolder.Scan"/>) — the one picked included whatever the scan says, and what Launch starts.</summary>
+    public RoutedItem CreateFromProgramFolder(string name, string program, string? profileId)
+    {
+        var full = Path.GetFullPath(program);
+        var folder = Path.GetDirectoryName(full)!;
+        var programs = GameFolder.Scan(folder)
+            .Select(e => string.Equals(e.Path, full, StringComparison.OrdinalIgnoreCase)
+                ? new RoutedProgram(NewId(6), e.Path, true, null, true, Packets: true, Proxy: null)
+                : new RoutedProgram(NewId(6), e.Path, e.Included, e.Reason, false, Packets: true, Proxy: null))
+            .ToList();
+        if (!programs.Any(p => string.Equals(p.Path, full, StringComparison.OrdinalIgnoreCase)))
+            programs.Insert(0, new RoutedProgram(NewId(6), full, true, null, true, Packets: true, Proxy: null));
+        var launch = programs.First(p => string.Equals(p.Path, full, StringComparison.OrdinalIgnoreCase)).Id;
+        var item = new RoutedItem(NewId(8), Named(name), folder, DateTimeOffset.UtcNow, profileId, LossMode.Hold, null, programs, launch);
+        Put(item);
+        return item;
+    }
+
     /// <summary>A new app from one program, by its methods: all its traffic by packets, or launched with proxy settings
     /// (its own browser profile folder named for the app), or both.</summary>
     public RoutedItem CreateFromProgram(string name, string path, AppKind kind, string? profileId, bool packets = false, bool proxy = true)

@@ -47,11 +47,11 @@ export function Sidebar({ state, shown, go }: { state?: ClientState; shown: Page
     <nav className="navigation" aria-label={t('Main')}>
       {pages.filter(([value]) => value !== 'settings').map(item)}
       <span className="nav-spacer" />
+      {state && <div className={`rail-status tone-${state.summary.tone}`} role="status" title={state.summary.text}>
+        <span className="rail-dot" aria-hidden="true" /><span className="rail-text">{state.summary.text}</span>
+      </div>}
       {item(pages.find(([value]) => value === 'settings')!)}
     </nav>
-    {state && <div className={`rail-status tone-${state.summary.tone}`} role="status" title={state.summary.text}>
-      <span className="rail-dot" aria-hidden="true" /><span className="rail-text">{state.summary.text}</span>
-    </div>}
   </aside>;
 }
 

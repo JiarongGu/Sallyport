@@ -33,7 +33,7 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "COPY_ENDPOINT" => () => Done(() => core.CopyEndpoint(Id())),
             "BEGIN_PORT_EDIT" => () => Done(() => core.BeginPortEdit(Id())),
             "SET_PORT" => () => Done(() => core.SetPort(Token(), Text("portText"))),
-            "ADD_APP" => Text("source") == "folder" ? core.AddFolderFromDialogAsync : core.AddProgramFromDialogAsync,
+            "ADD_APP" => core.AddAppFromDialogAsync,
             "ADD_APP_PROGRAM" => () => core.AddProgramToAppAsync(Id()),
             "RESCAN_APP" => () => Done(() => core.RescanApp(Id())),
             "SET_APP_PROGRAM" => () => Done(() => core.SetAppProgram(Id(), Text("programId"), PayloadHelper.GetRequiredValue<bool>(request.Payload, "included"))),

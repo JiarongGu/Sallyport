@@ -34,8 +34,8 @@ export interface Fact {
 export interface Empty {
   title: string;
   text: string;
-  /** Pressed through the matching top action (`actions.import`, `actions.addProgram`, `actions.addFolder`), which says its label. */
-  command: 'IMPORT' | 'ADD_PROGRAM' | 'ADD_FOLDER';
+  /** Pressed through the matching top action (`actions.import`, `actions.addApp`), which says its label. */
+  command: 'IMPORT' | 'ADD_APP';
 }
 
 export type ProfilePhase =
@@ -320,7 +320,7 @@ export interface ClientState {
   sequence: number;
   /** The title bar's summary: "1 connected · 1 reconnecting", "Not connected". */
   summary: { text: string; tone: Tone };
-  actions: { import: Action; addProgram: Action; addFolder: Action };
+  actions: { import: Action; addApp: Action };
   profiles: ProfileView[];
   apps: AppItemView[];
   profilesEmpty: Empty | null;
@@ -355,7 +355,8 @@ export interface Commands {
   COPY_ENDPOINT: { id: string };
   BEGIN_PORT_EDIT: { id: string };
   SET_PORT: { token: string; portText: string };
-  ADD_APP: { source: 'program' | 'folder' };
+  /** One way in: the app's program, a game's folder made of it (ClientCore.AddAppFromDialogAsync). */
+  ADD_APP: Record<string, never>;
   ADD_APP_PROGRAM: { id: string };
   RESCAN_APP: { id: string };
   SET_APP_PROGRAM: { id: string; programId: string; included: boolean };

@@ -115,6 +115,28 @@ public sealed class RoutedItemStoreTests : IDisposable
         Assert.True(after.Programs[0].ChosenByPerson);
     }
 
+    [Fact]
+    public void An_app_made_from_its_program_is_its_folder_with_that_program_included_and_launched()
+    {
+        var folder = Path.Combine(_folder, "game");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Game.exe"), "");
+        File.WriteAllText(Path.Combine(folder, "unins000.exe"), "");
+        File.WriteAllText(Path.Combine(folder, "Helper.exe"), "");
+        var store = Open();
+
+        // The one picked is in even where the scan would leave it out: the person chose it.
+        var item = store.CreateFromProgramFolder("Game", Path.Combine(folder, "unins000.exe"), "ad50a53b0da826ad");
+
+        Assert.Equal(Path.GetFullPath(folder), item.Folder);
+        Assert.Equal("ad50a53b0da826ad", item.ProfileId);
+        var picked = Assert.Single(item.Programs, p => p.Path.EndsWith("unins000.exe", StringComparison.Ordinal));
+        Assert.True(picked is { Included: true, ChosenByPerson: true, Packets: true });
+        Assert.Equal(picked.Id, item.LaunchProgramId);
+        Assert.Equal(new[] { "Game.exe", "Helper.exe", "unins000.exe" }, item.Programs.Select(p => Path.GetFileName(p.Path)).Order());
+        Assert.Equal(item, store.Find(item.Id));
+    }
+
     [Theory]
     [InlineData("0123456789abcdef", true)]
     [InlineData("a1b2c3d4e5f6", true)]

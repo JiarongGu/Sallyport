@@ -174,8 +174,7 @@ internal sealed class StatusTray : IDisposable
         var id = entry.Target ?? "";
         switch (entry.Verb)
         {
-            case TrayVerb.OpenWindow: ShowWindow(); return;
-            case TrayVerb.OpenNetwork: ShowPage(Page.Network); return;
+            case TrayVerb.OpenWindow: ShowPage(Page.Network); return;
             case TrayVerb.OpenSettings: ShowPage(Page.Settings); return;
             case TrayVerb.Exit: Exit(); return;
             case TrayVerb.Connect: Run(() => { _core.Connect(id); return Task.CompletedTask; }); return;

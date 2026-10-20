@@ -158,10 +158,10 @@ pre { white-space: pre-wrap; min-width: 0; }
 
 /* The rail, always narrow (Splash.cs draws its head the same: the mark 28 across, centred, 10 from the top): each page
    an icon with its word under it, Settings at the foot, and under the buttons whether anything is connected. */
-.sidebar { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 0; padding: 0 6px 12px; background: var(--sidebar); user-select: none; overflow: hidden; }
+.sidebar { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 0; padding: 0 6px 10px; background: var(--sidebar); user-select: none; overflow: hidden; }
 .sidebar-head { display: flex; align-items: center; justify-content: center; height: 48px; flex: none; }
 .sidebar-head svg { width: 28px; height: 28px; }
-.navigation { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; min-height: 0; width: 100%; margin-top: 8px; }
+.navigation { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; min-height: 0; width: 100%; margin-top: 4px; }
 .nav-spacer { flex: 1; }
 .nav-item { position: relative; flex-direction: column; gap: 3px; width: 100%; height: auto; min-height: 56px; padding: 8px 2px 6px; border: 0; border-radius: 8px;
   background: transparent; color: var(--secondary); }
@@ -175,7 +175,7 @@ pre { white-space: pre-wrap; min-width: 0; }
 .nav-item.selected .nav-label { font-weight: 600; }
 .nav-item:focus-visible { outline-offset: -2px; }
 /* whether anything is connected: a dot in its tone, the host's word for it under */
-.rail-status { display: grid; justify-items: center; gap: 4px; width: 100%; padding: 8px 2px 0; border-top: 1px solid var(--divider); text-align: center; }
+.rail-status { display: grid; justify-items: center; gap: 4px; width: 100%; padding: 6px 2px 8px; text-align: center; }
 .rail-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot) 22%, transparent); }
 .rail-status.tone-busy .rail-dot { animation: breathe 1.6s var(--ease-in-out) infinite; }
 .rail-text { font: 600 10px/13px var(--font-ui); color: var(--secondary); overflow-wrap: anywhere; }
@@ -474,7 +474,8 @@ legend { padding: 0; margin-bottom: 4px; }
 .programs li .editor { margin: 8px 0 4px; }
 
 /* notices: a bar tinted by how much it matters, a glyph, the words, a dismiss */
-.notice-area { min-height: 0; padding: 0 24px; max-height: 28vh; overflow-y: auto; }
+/* Edge to edge with the page's cards: the content keeps room for its scrollbar (12) on the right, so the notices do. */
+.notice-area { min-height: 0; padding: 0 36px 0 24px; max-height: 28vh; overflow-y: auto; }
 .notice-area:has(.notice) { padding-bottom: 12px; }
 .notice { display: flex; align-items: flex-start; gap: 12px; max-width: 1040px; margin: 0 auto; padding: 6px 6px 6px 12px; min-height: 44px; background: var(--surface); border: 1px solid var(--stroke-card); border-radius: var(--radius-card); }
 .notice + .notice { margin-top: 8px; }
@@ -502,7 +503,7 @@ legend { padding: 0; margin-bottom: 4px; }
 
 @media (max-width: 860px) {
   .content { padding: 4px 16px 24px; }
-  .notice-area { padding: 0 16px; }
+  .notice-area { padding: 0 28px 0 16px; }
   .editor-fields { grid-template-columns: minmax(0, 1fr); }
   .traffic { grid-template-columns: minmax(0, 1fr); }
 }
