@@ -30,7 +30,6 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
   const profile = section.profile;
   const channel = section.channel;
   const detailsId = useId();
-  const appsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const on = profile.actions.disconnect.visible;
   const since = profile.connectedSince ?? channel?.connectedSince;
@@ -70,19 +69,18 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
       </div>
     </div>}
 
-    {/* Its apps, each with its own switch here; the apps not in it, to put in. */}
-    <section className="hero-apps" aria-labelledby={appsId}>
-      <div className="hero-apps-head">
-        <h3 id={appsId}>{t('Apps through {0}', profile.name)}</h3>
-        {section.add.visible && <select className="add-to-section" aria-label={section.add.label} value=""
-          onChange={(event) => event.target.value && post('ADD_APP_TO_PROFILE', { id: event.target.value, profileId: profile.id })}>
-          <option value="">{section.add.label}</option>
-          {section.addable.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
-        </select>}
-      </div>
+    {/* Its apps, each with its own switch here, and below them the apps not in it, to put in. No heading: the card is
+        the profile's and its apps say what they are (the owner: "do we really need this line?"); the name stays for a
+        screen reader. */}
+    <section className="hero-apps" aria-label={t('Apps through {0}', profile.name)}>
       {section.hintText && <p className="secondary metadata section-hint">{section.hintText}
         {section.addable.length === 0 && <> <button type="button" className="link" onClick={() => go('apps')}>{t('Open Apps')}</button></>}</p>}
       {section.apps.length > 0 && <ul>{section.apps.map((app) => <SectionApp key={app.appId} app={app} now={now} />)}</ul>}
+      {section.add.visible && <select className="add-to-section" aria-label={section.add.label} value=""
+        onChange={(event) => event.target.value && post('ADD_APP_TO_PROFILE', { id: event.target.value, profileId: profile.id })}>
+        <option value="">{section.add.label}</option>
+        {section.addable.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+      </select>}
     </section>
   </article>;
 }

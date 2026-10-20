@@ -331,15 +331,13 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .latency { display: grid; gap: 12px; }
 .latency-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .hero-apps { display: grid; gap: 8px; }
-.hero-apps-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.hero-apps-head h3 { font: var(--font-body-strong); }
 .hero-apps ul { list-style: none; margin: 0; padding: 0; display: grid; }
 .hero-apps li { display: grid; gap: 4px; padding: 8px 0; border-top: 1px solid var(--divider); }
 .section-app { display: flex; align-items: center; gap: 12px; }
 .section-app-detail, .hero-apps li .run { margin-left: 44px; }
 .hero-apps li .run .supporting { margin: 0; }
 .remove-from-section { margin-left: -4px; }
-.add-to-section { width: auto; max-width: 50%; min-height: 32px; }
+.add-to-section { width: auto; max-width: 50%; min-height: 32px; justify-self: start; }
 /* Settings' export and import: the words at the start, the two buttons at the end, on one line. */
 .move-row { justify-content: space-between; align-items: center; }
 .move-row > .actions { margin-left: auto; flex-wrap: nowrap; }
