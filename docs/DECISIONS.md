@@ -423,3 +423,25 @@ Files\Windows Packet Filter"` — both Windows Installer exit 0; its certificate
 `C:\Program Files\Windows Packet Filter`; the service `Running`, the device answering (`0x06023000`), 1.1.1.1:443
 reachable after each. That folder had inherited `D:\Program Files`' rights and was given Sallyport's; setup now does
 that before it installs the driver. Nothing of Sallyport's left on C: but Windows' own entries and `ndisrd.sys`.
+
+## D20 — A profile's proxy listens on whatever port is free when it connects (2026-10-20; measured; supersedes D14's ports)
+
+D14 gave each profile a port of its own, 1088 upward, kept in the client's settings and changed by hand. The owner:
+"the connection port should be auto setup (not fixed just use any free when connecting)". So the proxy binds
+127.0.0.1 port 0 when the tunnel comes up and Windows gives it a free port from its dynamic range. Nothing is stored;
+the window, the tray's apps, the copy button and the setup guide read the port from the listening proxy, and say "a
+free port when it connects" until there is one. What a fixed port bought — a browser's manual proxy setting that stays
+right across reconnects — is what Sallyport's own launch does for the apps it starts, and those read the port at
+launch. Two profiles can never want the same port, and something else holding one is no longer a reason a profile
+cannot connect. The cost: a manual setting made by hand in another program has to be made again after each connect.
+
+Windows' dynamic range is a machine setting (`netsh int ipv4 show dynamicport tcp`). On the owner's machine it had
+been changed to 1024–15000, so the ports measured are low. A port something already listens on is never given, but
+one given to a profile first is that profile's until it disconnects: a program that wants a fixed port inside the
+range (Kobo's Host, 1080) has to start before, or the range exclude it.
+
+Measured 2026-10-20 against the owner's server (jp, udp/1194). Connected from Profiles: the client listened on
+127.0.0.1:10308 and nothing else; `curl --socks5-hostname 127.0.0.1:10308 https://www.cloudflare.com/cdn-cgi/trace`
+returned 200 in 1.6 s with `loc=JP`, `colo=NRT`. Disconnected and connected again: 127.0.0.1:14962; after a restart
+of the client, 127.0.0.1:2420, which "Copy address" put on the clipboard as `127.0.0.1:2420` and the setup guide
+showed in its curl line. Not connected, the card showed "a free port when it connects" and no copy button.

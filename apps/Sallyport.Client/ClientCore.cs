@@ -188,7 +188,6 @@ internal sealed class ClientCore
         // The store's own reasons never quote the text, so they may cross to the page.
         try { stored = _store.Import(name, File.ReadAllText(file.FullName)); }
         catch (InvalidDataException e) { throw new ShenoraException("PROFILE_INVALID", "file", file.Name, L.T("{0} was not imported: {1}.", file.Name, e.Message)); }
-        _settings.PortOf(stored.Id);
         Notify(NoticeKind.Info, L.T("Imported {0}. Its copy is encrypted for your Windows account.", stored.Name), new("profile", stored.Id));
         return stored;
     }
@@ -253,45 +252,11 @@ internal sealed class ClientCore
 
     public void CopyEndpoint(string id)
     {
-        var endpoint = ClientView.Endpoint(_settings.PortOf(Profile(id).Id));
+        var profile = Profile(id);
+        var endpoint = ClientView.Endpoint(_connections.ProxyPortOf(id)
+            ?? throw new ShenoraException("NOT_CONNECTED", "id", id, L.T("Connect {0} first: its proxy takes a free port when it connects.", profile.Name)));
         Clipboard(endpoint);
         Notify(NoticeKind.Info, L.T("Copied {0}.", endpoint), new("profile", id));
-    }
-
-    public void BeginPortEdit(string id)
-    {
-        Profile(id);
-        if (_connections.IsRunning(id)) throw new ShenoraException("CONNECTED", "id", id, L.T("Disconnect before changing the port."));
-        lock (_gate) _editor = new OpenEditor(NewToken(), "port", id, new PortValues(_settings.PortOf(id).ToString(CultureInfo.InvariantCulture)), Empty);
-        Publish();
-    }
-
-    public void SetPort(string token, string portText)
-    {
-        if (EditorFor(token, "port") is not { } editor) return;
-        var id = editor.SubjectId;
-        var current = _settings.PortOf(id);
-        var errors = new Dictionary<string, string>();
-        if (!int.TryParse(portText.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1024 or > 65535)
-            errors["portText"] = L.T("Use a port from 1024 to 65535.");
-        else if (_connections.IsRunning(id))
-            errors["form"] = L.T("Disconnect before changing the port.");
-        else if (_settings.IsTakenByAnother(id, port))
-            errors["portText"] = L.T("Another profile uses this port.");
-        else if (port != current && !ClientSettings.IsFree(port))
-            errors["portText"] = L.T("Something else on this computer is using this port.");
-
-        lock (_gate)
-        {
-            if (_editor?.Token != token) return;
-            if (errors.Count > 0) { _editor = _editor with { Values = new PortValues(portText), Errors = errors }; }
-            else
-            {
-                _settings.SetPort(id, port);
-                _editor = null;
-            }
-        }
-        Publish();
     }
 
     public void RequestRemoveProfile(string id)
@@ -706,7 +671,9 @@ internal sealed class ClientCore
             try
             {
                 if (target.Proxy is { } proxy)
-                    AppLauncher.Launch(new RoutedApp(item.Id, item.Name, target.Path, proxy.Kind, profileId, target.LaunchArguments), _settings.PortOf(profileId),
+                    // The port its profile's proxy took when the channel opened, just now or before.
+                    AppLauncher.Launch(new RoutedApp(item.Id, item.Name, target.Path, proxy.Kind, profileId, target.LaunchArguments),
+                        _connections.ProxyPortOf(profileId) ?? throw new ShenoraException("PORT_IN_USE", "id", id, L.T("{0}'s proxy is not listening.", profile.Name)),
                         Path.Combine(_paths.DataDir, "apps", proxy.DataKey));
                 else
                     // Started as the person, from its own folder, as Explorer would: its packets are routed by its path.
@@ -880,7 +847,7 @@ internal sealed class ClientCore
         var routedThrough = run is { Ended: null } ? run.ProfileId : null;
         var routedGame = routedThrough is null ? null : items.FirstOrDefault(g => g.Id == run!.GameId)?.Name ?? L.T("an app");
         var profiles = stored.Select(p => ClientView.Profile(new ProfileFacts(
-                p, _settings.PortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
+                p, _connections.ProxyPortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
                 routedThrough == p.Id ? routedGame : null, !_settings.PolicyOf(p.Id).IsEmpty, _connections.NextAttemptOf(p.Id))))
             .ToList();
@@ -892,7 +859,7 @@ internal sealed class ClientCore
                 return AppViews.Item(new ItemFacts(i, profile, run, run is { Ended: null } && run.GameId != i.Id, driver.Phase == DriverPhase.Ready,
                     dialog is not null, _launching.TryGetValue(i.Id, out var phase) ? phase : null,
                     p => profile is null || p.Proxy is not { } proxy ? []
-                        : AppLauncher.Describe(new RoutedApp(i.Id, i.Name, p.Path, proxy.Kind, profile.Id, p.LaunchArguments), _settings.PortOf(profile.Id),
+                        : AppLauncher.Describe(new RoutedApp(i.Id, i.Name, p.Path, proxy.Kind, profile.Id, p.LaunchArguments), _connections.ProxyPortOf(profile.Id),
                             Path.Combine(_paths.DataDir, "apps", proxy.DataKey))));
             })
             .ToList();
@@ -932,12 +899,11 @@ internal sealed class ClientCore
             // where the switch is.
             stored.Count == 0 ? Page.Profiles : Page.Network,
             navigation,
-            [.. stored.Select(p => new ClientState.ProfileChoice(p.Id, L.T("{0} (port {1})", p.Name, _settings.PortOf(p.Id)), p.Unsupported is null))],
+            [.. stored.Select(p => new ClientState.ProfileChoice(p.Id, p.Name, p.Unsupported is null))],
             [.. Enum.GetValues<AppKind>().Select(k => new ClientState.KindChoice(k, ClientView.KindLabel(k), ClientView.KindHelp(k)))],
             GameViews.LossChoices,
             editor is null ? null : new EditorView(editor.Token, editor.SubjectId, "editing", editor.Errors,
                 // The guidance until a save is refused; then the refusal, which says it, alone.
-                editor.Kind == "port" && editor.Errors.Count == 0 ? L.T("Use a port from 1024 to 65535.") :
                 editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : null,
                 UiAction.Shown(L.T("Save")), UiAction.Shown(L.T("Cancel")),
                 editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown(L.T("Use the profile's own")) : UiAction.Hidden,
@@ -958,10 +924,10 @@ internal sealed class ClientCore
         catch (ShenoraException) { return null; }
     }
 
-    /// <summary>The examples use a connected profile's port when there is one, so they can be copied as they are.</summary>
+    /// <summary>The examples use a connected profile's port when there is one, so they can be copied as they are; else PORT,
+    /// where the port its proxy takes when it connects goes.</summary>
     private static string GuideEndpoint(IReadOnlyList<ProfileView> profiles) =>
-        (profiles.FirstOrDefault(p => p.Phase == ProfilePhase.Up) ?? profiles.FirstOrDefault())?.EndpointText
-        ?? ClientView.Endpoint(ClientSettings.FirstPort);
+        profiles.FirstOrDefault(p => p.Port is not null) is { Port: { } port } ? ClientView.Endpoint(port) : "127.0.0.1:PORT";
 
     // ---- helpers
 

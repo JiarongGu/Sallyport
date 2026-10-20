@@ -77,7 +77,7 @@ export function App() {
   useEffect(() => {
     const editor = state?.editor;
     if (editor && editor.token !== editorToken.current)
-      setPage(editor.kind === 'port' || editor.kind === 'policy' ? 'profiles' : editor.kind === 'defaults' ? 'settings' : 'apps');
+      setPage(editor.kind === 'policy' ? 'profiles' : editor.kind === 'defaults' ? 'settings' : 'apps');
     editorToken.current = editor?.token ?? null;
   }, [state?.editor?.token]);
 
@@ -119,7 +119,7 @@ export function App() {
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'network' ? <Network state={state} now={now} go={setPage} featured={featured} feature={feature} /> :
           shown === 'profiles' ? <Profiles state={state} now={now} expanded={expanded} toggle={toggle}
-            editorForm={state.editor?.kind === 'port' || state.editor?.kind === 'policy' ? editorForm : null} /> :
+            editorForm={state.editor?.kind === 'policy' ? editorForm : null} /> :
           <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null} />}
       </main>
     </div>

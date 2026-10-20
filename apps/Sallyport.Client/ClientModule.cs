@@ -31,8 +31,6 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "SET_LANGUAGE" => () => Done(() => core.SetLanguage(Text("language"))),
             "SAVE_DEFAULTS" => () => Done(() => core.SaveDefaults(Token(), PayloadHelper.GetRequiredValue<DefaultsValues>(request.Payload, "values"))),
             "COPY_ENDPOINT" => () => Done(() => core.CopyEndpoint(Id())),
-            "BEGIN_PORT_EDIT" => () => Done(() => core.BeginPortEdit(Id())),
-            "SET_PORT" => () => Done(() => core.SetPort(Token(), Text("portText"))),
             "ADD_APP" => core.AddAppFromDialogAsync,
             "ADD_APP_PROGRAM" => () => core.AddProgramToAppAsync(Id()),
             "RESCAN_APP" => () => Done(() => core.RescanApp(Id())),

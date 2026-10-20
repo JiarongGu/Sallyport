@@ -38,7 +38,8 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
         </div>
         <span className="endpoint">
           <span className="metadata secondary">{t('SOCKS5')}</span>
-          <code>{profile.endpointText}</code>
+          {/* An address to copy only once the proxy has its port; until then, that it takes one. */}
+          {profile.port !== null ? <code>{profile.endpointText}</code> : <span className="metadata secondary">{profile.endpointText}</span>}
           <ActionButton action={profile.actions.copy} icon="copy" onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
         </span>
       </div>
@@ -49,7 +50,6 @@ function ProfileRow({ profile, now, expanded, toggle, editorForm }: {
     <div id={detailsId} hidden={!expanded} className="row-details">
       <Facts facts={profile.facts} />
       <div className="actions">
-        <ActionButton action={profile.actions.editPort} focusKey={`port:${profile.id}`} onClick={() => post('BEGIN_PORT_EDIT', { id: profile.id })} />
         <ActionButton action={profile.actions.settings} focusKey={`policy:${profile.id}`} onClick={() => post('BEGIN_POLICY_EDIT', { id: profile.id })} />
       </div>
       {/* Beside the button that opened it; the row's foot keeps it reachable if the details are folded away. */}

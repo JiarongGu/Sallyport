@@ -36,14 +36,11 @@ internal sealed record EmptyView(string Title, string Text, string Command);
 
 internal sealed record LocationView(LocationPhase Phase, string Text, IReadOnlyList<Fact> Facts, DateTimeOffset? CheckedAt, bool PreviousResult);
 
-internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction EditPort, UiAction Locate, UiAction Remove,
-    UiAction Settings);
+internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction Locate, UiAction Remove, UiAction Settings);
 
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
-    string EndpointText, int Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null);
-
-internal sealed record PortValues(string PortText);
+    string EndpointText, int? Port, IReadOnlyList<Fact> Facts, LocationView Location, ProfileActions Actions, DateTimeOffset? NextAttemptAt = null);
 
 internal sealed record EditorView(
     string Token, string SubjectId, string Phase, IReadOnlyDictionary<string, string> Errors, string? Hint, UiAction Save,
@@ -83,10 +80,10 @@ internal sealed record ClientState(
     internal sealed record GuideView(string EndpointText, string CurlExample, UiAction CopyExample);
 }
 
-/// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>. <see cref="UsedBy"/>: the
-/// app being routed through it.</summary>
+/// <summary>What one profile is, as the host knows it, for <see cref="ClientView.Profile"/>. <see cref="Port"/>: the one its
+/// proxy listens on now, none while it does not. <see cref="UsedBy"/>: the app being routed through it.</summary>
 internal sealed record ProfileFacts(
-    StoredProfile Stored, int Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
+    StoredProfile Stored, int? Port, TunnelServiceStatus? Status, Location? Location, bool Locating, bool LocationFailed,
     int? AttemptsSinceUp, bool Disconnecting, bool Removing, string? UsedBy = null, bool PolicyChanged = false, DateTimeOffset? NextAttemptAt = null);
 
 internal static class ClientView
@@ -136,8 +133,8 @@ internal static class ClientView
         {
             new(L.T("Transport"), string.Join(", ", f.Stored.Remotes)),
             new(L.T("Imported"), L.Date(f.Stored.Imported.ToLocalTime())),
-            new(L.T("SOCKS5 port"), f.Port.ToString(English)),
         };
+        if (f.Port is { } listening) facts.Add(new(L.T("SOCKS5 port"), listening.ToString(English)));
         if (up && status is not null)
         {
             if (status.Remote is { } remote) facts.Add(new(L.T("Connected over"), remote));
@@ -158,8 +155,8 @@ internal static class ClientView
             Disconnect: running || f.Disconnecting
                 ? UiAction.Shown(status?.State == TunnelServiceStatus.Connecting ? L.T("Cancel") : L.T("Disconnect"), busy: f.Disconnecting)
                 : UiAction.Hidden,
-            Copy: UiAction.Shown(L.T("Copy address"), !busy),
-            EditPort: UiAction.Shown(L.T("Change port"), !running && !busy, running ? L.T("Disconnect before changing the port.") : null),
+            // Nothing to copy until the proxy has its port: a disabled button would only repeat the line beside it.
+            Copy: f.Port is null ? UiAction.Hidden : UiAction.Shown(L.T("Copy address"), !busy),
             Locate: up
                 ? UiAction.Shown(location.Phase switch { LocationPhase.Checked => L.T("Check again"), LocationPhase.Unavailable => L.T("Try again"), _ => L.T("Check location") },
                     busy: f.Locating)
@@ -170,7 +167,8 @@ internal static class ClientView
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.
         var next = running && f.NextAttemptAt is { } at && at > DateTimeOffset.UtcNow ? at : (DateTimeOffset?)null;
-        return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null, Endpoint(f.Port), f.Port,
+        return new ProfileView(f.Stored.Id, f.Stored.Name, phase, tone, text, detail, up ? status!.Since : null,
+            f.Port is { } port ? Endpoint(port) : L.T("a free port when it connects"), f.Port,
             facts, location, actions, next);
     }
 

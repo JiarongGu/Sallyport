@@ -19,7 +19,7 @@ route runs `Sallyport.Host` before it is released.
 ## The client
 
 `apps/Sallyport.Client` is the tray and window: import a profile (Sallyport keeps a copy encrypted for your Windows
-account), connect it — each profile is a SOCKS5 port on 127.0.0.1, from 1088 up — and launch apps through it: a browser
+account), connect it — each profile is a SOCKS5 proxy on 127.0.0.1, on a free port taken when it connects — and launch apps through it: a browser
 with a profile of its own, Firefox, an Electron app, or any tool that reads `ALL_PROXY`. Everything else on the machine
 keeps its own connection. Games and programs that ignore proxy settings are not routed yet (`docs/design/architecture.md`).
 

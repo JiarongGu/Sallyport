@@ -98,7 +98,6 @@ const chinese: Record<string, string> = {
   'Closing this window keeps connections and routing running in the notification area. Choose ‘Exit Sallyport’ there to stop routing, disconnect and quit.':
     '关闭此窗口后，连接和分流会在通知区域继续运行。在那里选择“退出 Sallyport”即可停止分流、断开连接并退出。',
   // editors
-  'SOCKS5 port': 'SOCKS5 端口',
   'Connection settings': '连接设置',
   'Program methods': '程序方式',
   'Edit app': '编辑应用',

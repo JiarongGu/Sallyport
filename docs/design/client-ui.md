@@ -94,7 +94,7 @@ For retries before the first successful connection, say **“Retrying connection
 
 Details show “Transport”, “Imported”, “SOCKS5 port”, and, when supplied, “Tunnel address”, “Open connections”, “Downloaded”, “Uploaded”. Traffic is cumulative for the current run; omit charts.
 
-Port is read-only until **“Change port”**. Editing shows `127.0.0.1:` beside a labelled text field, **“Save”**, **“Cancel”** and “Use a port from 1024 to 65535.” Save becomes “Saving…”. Host errors appear below the field, such as “Another profile uses this port.” While running, show “Disconnect before changing the port.” Never save on blur.
+The port is not chosen: the proxy takes a free one when the profile connects (D20). Until then the endpoint line reads “a free port when it connects” in plain text, with no copy button; once it listens, `127.0.0.1:<port>` in code with “Copy address”, and “SOCKS5 port” among the details.
 
 Location section:
 

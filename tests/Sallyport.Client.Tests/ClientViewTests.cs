@@ -16,13 +16,14 @@ public class ClientViewTests
         new(state, At, state == TunnelServiceStatus.Up ? "udp/1194" : null, attempts, 0, error,
             state == TunnelServiceStatus.Up ? "10.8.0.2" : null, 3, 2048, 5 * 1024 * 1024, 1088);
 
+    // A connected profile's proxy listens on the free port it was given; one not connected has none yet.
     private static ProfileView View(TunnelServiceStatus? status = null, StoredProfile? stored = null, Location? location = null,
         bool locating = false, bool locationFailed = false, int? attemptsSinceUp = null, bool disconnecting = false) =>
-        ClientView.Profile(new ProfileFacts(stored ?? Stored(), 1088, status, location, locating, locationFailed, attemptsSinceUp,
-            disconnecting, Removing: false));
+        ClientView.Profile(new ProfileFacts(stored ?? Stored(), status is null ? null : 52114, status, location, locating, locationFailed,
+            attemptsSinceUp, disconnecting, Removing: false));
 
     [Fact]
-    public void An_idle_profile_offers_connect_and_its_port_and_no_location()
+    public void An_idle_profile_offers_connect_and_no_port_until_it_connects()
     {
         var view = View();
 
@@ -30,16 +31,18 @@ public class ClientViewTests
         Assert.Equal("Not connected", view.StatusText);
         Assert.True(view.Actions.Connect is { Visible: true, Enabled: true, Label: "Connect" });
         Assert.False(view.Actions.Disconnect.Visible);
-        Assert.True(view.Actions.EditPort.Enabled);
+        Assert.False(view.Actions.Copy.Visible);
         Assert.True(view.Actions.Remove.Enabled);
         Assert.False(view.Actions.Locate.Visible);
         Assert.Equal(LocationPhase.Disconnected, view.Location.Phase);
-        Assert.Equal("127.0.0.1:1088", view.EndpointText);
+        Assert.Equal("a free port when it connects", view.EndpointText);
+        Assert.Null(view.Port);
+        Assert.DoesNotContain(view.Facts, f => f.Label == "SOCKS5 port");
         Assert.Null(view.ConnectedSince);
     }
 
     [Fact]
-    public void An_up_profile_locks_its_port_and_removal_and_says_why()
+    public void An_up_profile_shows_the_port_it_was_given_and_locks_removal()
     {
         var view = View(Status(TunnelServiceStatus.Up));
 
@@ -48,7 +51,9 @@ public class ClientViewTests
         Assert.Equal(At, view.ConnectedSince);
         Assert.False(view.Actions.Connect.Visible);
         Assert.True(view.Actions.Disconnect is { Visible: true, Enabled: true, Label: "Disconnect" });
-        Assert.True(view.Actions.EditPort is { Visible: true, Enabled: false, Reason: "Disconnect before changing the port." });
+        Assert.Equal("127.0.0.1:52114", view.EndpointText);
+        Assert.True(view.Actions.Copy is { Visible: true, Enabled: true });
+        Assert.Contains(new Fact("SOCKS5 port", "52114"), view.Facts);
         Assert.True(view.Actions.Remove is { Enabled: false, Reason: "Disconnect before removing it." });
         Assert.True(view.Actions.Locate is { Visible: true, Label: "Check location" });
         Assert.Contains(new Fact("Downloaded", "5.0 MB"), view.Facts);
@@ -163,7 +168,8 @@ public class ClientViewTests
         Assert.Equal(JsonValueKind.Null, root.GetProperty("connectedSince").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("actions").GetProperty("connect").GetProperty("reason").ValueKind);
         Assert.Equal("disconnected", root.GetProperty("location").GetProperty("phase").GetString());
-        Assert.True(root.GetProperty("actions").TryGetProperty("editPort", out _));
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("port").ValueKind);
+        Assert.True(root.GetProperty("actions").TryGetProperty("copy", out _));
     }
 }
 

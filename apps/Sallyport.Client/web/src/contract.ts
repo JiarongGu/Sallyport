@@ -72,13 +72,14 @@ export interface ProfileView {
   detailText: string | null;
   /** ISO time the tunnel came up; the page shows "Connected for {duration}" from it, ticking. */
   connectedSince: string | null;
-  /** "127.0.0.1:1088" */
+  /** "127.0.0.1:52114" while its proxy listens; otherwise that it takes a free port when it connects. */
   endpointText: string;
-  port: number;
+  /** The port its proxy listens on, chosen when it connects; null while it does not. */
+  port: number | null;
   /** The details section: Transport, Imported, SOCKS5 port, Tunnel address, Open connections, Downloaded, Uploaded. */
   facts: Fact[];
   location: LocationView;
-  actions: Record<'connect' | 'disconnect' | 'copy' | 'editPort' | 'locate' | 'remove' | 'settings', Action>;
+  actions: Record<'connect' | 'disconnect' | 'copy' | 'locate' | 'remove' | 'settings', Action>;
   /** ISO time the next round of attempts starts, while the connection waits for it: the page counts down to it. */
   nextAttemptAt: string | null;
 }
@@ -197,10 +198,6 @@ export interface DefaultsValues {
   directAfterText: string;
 }
 
-export interface PortValues {
-  portText: string;
-}
-
 /** One program of an app, as its row shows it. */
 export interface ProgramView {
   id: string;
@@ -276,7 +273,7 @@ export interface PolicyValues {
   pingRestartText: string;
 }
 
-export type EditorField = 'form' | 'portText' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
+export type EditorField = 'form' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
   | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText';
 
 /** An edit the host opened. Its values seed the fields once (keep what the person types across later STATEs with the
@@ -286,7 +283,7 @@ export type Editor = {
   subjectId: string;
   phase: 'editing' | 'saving';
   errors: Partial<Record<EditorField, string>>;
-  /** Guidance under the fields: "Use a port from 1024 to 65535." */
+  /** Guidance under the fields: what the profile itself says. */
   hint: string | null;
   save: Action;
   cancel: Action;
@@ -294,7 +291,7 @@ export type Editor = {
   reset: Action;
   /** The app editor's choices for what Launch starts. */
   options: { id: string; label: string }[] | null;
-} & ({ kind: 'port'; values: PortValues } | { kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
+} & ({ kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
   | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues });
 
 export interface Confirmation {
@@ -353,8 +350,6 @@ export interface Commands {
   BEGIN_DEFAULTS_EDIT: Record<string, never>;
   SAVE_DEFAULTS: { token: string; values: DefaultsValues };
   COPY_ENDPOINT: { id: string };
-  BEGIN_PORT_EDIT: { id: string };
-  SET_PORT: { token: string; portText: string };
   /** One way in: the app's program, a game's folder made of it (ClientCore.AddAppFromDialogAsync). */
   ADD_APP: Record<string, never>;
   ADD_APP_PROGRAM: { id: string };

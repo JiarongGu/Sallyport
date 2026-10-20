@@ -349,6 +349,8 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .duration { font: var(--font-caption); color: var(--secondary); font-variant-numeric: tabular-nums; }
 .row-primary { flex: none; justify-content: flex-end; flex-wrap: nowrap; }
 .row-head > .disclosure.icon { flex: none; margin-left: -4px; }
+/* A labelled disclosure reads from its start; the chevron alone sits in the middle of its square. */
+.disclosure.icon { justify-content: center; }
 .supporting { margin: 8px 0 0; white-space: pre-line; }
 .countdown { font-variant-numeric: tabular-nums; }
 .endpoint { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
@@ -465,8 +467,7 @@ legend { padding: 0; margin-bottom: 4px; }
 .editor-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .full-field { grid-column: 1 / -1; }
-.port-field, .unit-field { display: flex; align-items: center; gap: 8px; }
-.port-field input { width: 9rem; max-width: 100%; }
+.unit-field { display: flex; align-items: center; gap: 8px; }
 .unit-field input { width: 7rem; max-width: 100%; }
 .field-error { font: var(--font-caption); color: var(--trouble); }
 .kind-help { font: var(--font-caption); }

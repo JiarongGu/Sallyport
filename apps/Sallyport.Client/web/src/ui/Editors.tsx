@@ -1,12 +1,11 @@
 import { useId, useLayoutEffect, useRef, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, PolicyValues, PortValues, ProgramEditValues } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, PolicyValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
 import { ActionButton } from './shared';
 import { paintCaptionButtons } from './Chrome';
 
 export type Draft =
-  | { token: string; kind: 'port'; values: PortValues }
   | { token: string; kind: 'app'; values: AppEditValues }
   | { token: string; kind: 'program'; values: ProgramEditValues }
   | { token: string; kind: 'defaults'; values: DefaultsValues }
@@ -14,7 +13,6 @@ export type Draft =
 
 export function seedDraft(editor: Editor): Draft {
   switch (editor.kind) {
-    case 'port': return { token: editor.token, kind: 'port', values: { ...editor.values } };
     case 'app': return { token: editor.token, kind: 'app', values: { ...editor.values } };
     case 'program': return { token: editor.token, kind: 'program', values: { ...editor.values } };
     case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
@@ -71,31 +69,20 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
   </label> : null;
 
   return <form ref={form} className="editor" tabIndex={-1}
-    aria-label={t(editor.kind === 'port' ? 'SOCKS5 port' : editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
+    aria-label={t(editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
       : editor.kind === 'defaults' ? 'Defaults for new apps' : 'Edit app')}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
       event.preventDefault();
       if (!editor.save.visible || !editor.save.enabled || editor.save.busy) return;
       switch (draft.kind) {
-        case 'port': post('SET_PORT', { token: editor.token, portText: draft.values.portText }); break;
         case 'app': post('SAVE_APP', { token: editor.token, values: draft.values }); break;
         case 'program': post('SAVE_PROGRAM', { token: editor.token, values: draft.values }); break;
         case 'defaults': post('SAVE_DEFAULTS', { token: editor.token, values: draft.values }); break;
         case 'policy': post('SAVE_POLICY', { token: editor.token, values: draft.values }); break;
       }
     }}>
-    {editor.kind === 'port' && draft.kind === 'port' ? <>
-      <label htmlFor={`${prefix}-port`}>{t('SOCKS5 port')}</label>
-      <div className="port-field">
-        <code>127.0.0.1:</code>
-        <input id={`${prefix}-port`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
-          value={draft.values.portText} disabled={saving}
-          aria-invalid={!!editor.errors.portText} aria-describedby={description('portText')}
-          onChange={(event) => onChange({ ...draft, values: { portText: event.target.value } })} />
-      </div>
-      {error('portText')}
-    </> : draft.kind === 'app' ? <div className="editor-fields">
+    {draft.kind === 'app' ? <div className="editor-fields">
       <div className="field">
         <label htmlFor={`${prefix}-name`}>{t('Name')}</label>
         <input id={`${prefix}-name`} value={draft.values.name} disabled={saving}

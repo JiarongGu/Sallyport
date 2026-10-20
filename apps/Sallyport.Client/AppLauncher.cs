@@ -19,14 +19,19 @@ internal static class AppLauncher
         return AppKind.Environment;
     }
 
-    /// <summary>The proxy settings <paramref name="app"/> starts with, as the window shows them.</summary>
-    public static IReadOnlyList<string> Describe(RoutedApp app, int port, string ownProfile) => app.Kind switch
+    /// <summary>The proxy settings <paramref name="app"/> starts with, as the window shows them: with the port its profile's
+    /// proxy listens on, or PORT where it goes until the profile is connected (it takes a free one then).</summary>
+    public static IReadOnlyList<string> Describe(RoutedApp app, int? port, string ownProfile)
     {
-        AppKind.Chromium => [.. ChromiumFlags(port, ownProfile)],
-        AppKind.Electron => [.. ElectronFlags(port)],
-        AppKind.Firefox => [$"-profile \"{ownProfile}\" -no-remote", .. FirefoxPrefs(port)],
-        _ => [.. ProxyVariables(port).Select(v => $"{v.Key}={v.Value}")],
-    };
+        IReadOnlyList<string> settings = app.Kind switch
+        {
+            AppKind.Chromium => [.. ChromiumFlags(port ?? 0, ownProfile)],
+            AppKind.Electron => [.. ElectronFlags(port ?? 0)],
+            AppKind.Firefox => [$"-profile \"{ownProfile}\" -no-remote", .. FirefoxPrefs(port ?? 0)],
+            _ => [.. ProxyVariables(port ?? 0).Select(v => $"{v.Key}={v.Value}")],
+        };
+        return port is null ? [.. settings.Select(s => s.Replace("127.0.0.1:0", "127.0.0.1:PORT").Replace("\"socks_port\", 0", "\"socks_port\", PORT"))] : settings;
+    }
 
     public static Process Launch(RoutedApp app, int port, string ownProfile)
     {

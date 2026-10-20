@@ -45,11 +45,10 @@ internal sealed class Connections : IDisposable
 
     /// <summary>One channel, from the first who needed it to the last who let it go. What is learned about it lives
     /// here, so a new channel starts with none of it and a late answer for an old one has nowhere to land.</summary>
-    private sealed class Channel(TunnelSession session, int port)
+    private sealed class Channel(TunnelSession session)
     {
         public TunnelSession Session { get; } = session;
         public CancellationTokenSource Stop { get; } = new();
-        public int Port { get; } = port;
         public Task Run { get; set; } = Task.CompletedTask;
         public Socks5Server? Proxy { get; set; }
         /// <summary>Why the proxy is not listening, when it could not: a route through the channel works regardless.</summary>
@@ -232,18 +231,9 @@ internal sealed class Connections : IDisposable
             {
                 existing.Wanted = true;
                 if (existing.Proxy is null && existing.Session.Network is not null) Bind(existing);
-                if (existing.ProxyProblem is { } problem) throw new ShenoraException("PORT_IN_USE", "port", existing.Port.ToString(), L.T("the proxy could not listen: {0}", problem));
+                if (existing.ProxyProblem is { } problem) throw new ShenoraException("PORT_IN_USE", "id", id, L.T("the proxy could not listen: {0}", problem));
             }
-            else
-            {
-                var port = _settings.PortOf(id);
-                if (_channels.Values.Any(c => c.Port == port))
-                    throw new ShenoraException("PORT_TAKEN", "port", port.ToString(), L.T("another connected profile uses port {0}", port));
-                // The proxy binds only once the tunnel is up; a port already taken is said now, not after the handshake.
-                if (!ClientSettings.IsFree(port))
-                    throw new ShenoraException("PORT_IN_USE", "port", port.ToString(), L.T("something else already listens on 127.0.0.1:{0}", port));
-                Open(id, port).Wanted = true;
-            }
+            else Open(id).Wanted = true;
         }
         Poll();
     }
@@ -255,7 +245,7 @@ internal sealed class Connections : IDisposable
         TunnelSession session;
         lock (_gate)
         {
-            if (!_channels.TryGetValue(id, out var channel)) channel = Open(id, _settings.PortOf(id));
+            if (!_channels.TryGetValue(id, out var channel)) channel = Open(id);
             channel.Holders.Add(holder);
             session = channel.Session;
         }
@@ -370,7 +360,7 @@ internal sealed class Connections : IDisposable
     }
 
     // Called under _gate.
-    private Channel Open(string id, int port)
+    private Channel Open(string id)
     {
         Profile.OvpnProfile profile;
         try { profile = _store.Load(id); }
@@ -381,7 +371,7 @@ internal sealed class Connections : IDisposable
 
         // The profile's own connection settings, with the person's changes over them.
         var session = new TunnelSession(profile, new TunnelSessionOptions { Policy = _settings.PolicyOf(id).Over(profile.Policy) });
-        var channel = new Channel(session, port);
+        var channel = new Channel(session);
         // Bound before the session says "up", and kept across reconnects: the connector follows the session's network.
         session.NetworkUp += _ => Bind(channel);
         session.StatusChanged += _ => Poll();
@@ -392,8 +382,10 @@ internal sealed class Connections : IDisposable
         return channel;
     }
 
-    // The proxy on the profile's port, once: a port something else took is the proxy's problem, said, and never the
-    // routes' — they work without it (docs/design/window.md).
+    // The proxy on any free loopback port, once, Windows' choice when the channel opens (the owner: "the connection port
+    // should be auto setup (not fixed just use any free when connecting)"): one profile's port can never be another's or
+    // something else's. A proxy that could not listen is the proxy's problem, said, and never the routes' — they work
+    // without it (docs/design/window.md).
     private static void Bind(Channel channel)
     {
         lock (channel)
@@ -401,13 +393,19 @@ internal sealed class Connections : IDisposable
             if (channel.Proxy is not null) return;
             try
             {
-                var proxy = new Socks5Server(new SessionConnector(channel.Session), new IPEndPoint(IPAddress.Loopback, channel.Port));
+                var proxy = new Socks5Server(new SessionConnector(channel.Session), new IPEndPoint(IPAddress.Loopback, 0));
                 proxy.Start();
                 channel.Proxy = proxy;
                 channel.ProxyProblem = null;
             }
-            catch (SocketException) { channel.ProxyProblem = L.T("port {0} is in use by something else", channel.Port); }
+            catch (SocketException e) { channel.ProxyProblem = e.Message; }
         }
+    }
+
+    /// <summary>The port the profile's proxy listens on now, Windows' choice when it opened; null while it does not.</summary>
+    public int? ProxyPortOf(string id)
+    {
+        lock (_gate) return _channels.TryGetValue(id, out var channel) ? channel.Proxy?.Endpoint.Port : null;
     }
 
     private async Task OnEndedAsync(string id, Channel channel, Task run)

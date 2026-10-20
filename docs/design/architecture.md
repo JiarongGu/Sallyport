@@ -52,9 +52,9 @@ One process per signed-in user (a second start hands its arguments to the first 
 
 - **Profiles** are imported as copies into `%LOCALAPPDATA%\Sallyport\profiles`, sealed with DPAPI for the user (D14).
   A profile is opened only to connect it.
-- **Connections**: a `TunnelService` per connected profile, in this process, each on its own loopback SOCKS5 port
-  (1088 upward; 1080 is the Host's). The port is bound only once the tunnel is up, so "the port answers" means "the
-  route works". Exit tells each server.
+- **Connections**: a `TunnelService` per connected profile, in this process, each on its own loopback SOCKS5 port,
+  a free one Windows gives when the tunnel comes up (D20). The port is bound only once the tunnel is up, so "the port
+  answers" means "the route works". Exit tells each server.
 - **Apps** are started through a profile's port, each family the way it listens (`AppLauncher`): Chromium browsers with
   a profile of their own and the proxy, host-resolver and WebRTC flags; Electron apps with the flags; Firefox with a
   profile whose `user.js` sets SOCKS5 and remote DNS; anything else with `ALL_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY` as
