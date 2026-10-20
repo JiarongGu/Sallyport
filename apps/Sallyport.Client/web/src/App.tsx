@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClientState, Notice, Page } from './contract';
 import { setLanguage, t } from './i18n';
 import { MODULE } from './contract';
-import { Apps } from './Apps';
+import { AppPage, Apps } from './Apps';
 import { Network } from './Network';
 import { ProfileSettings, Profiles } from './Profiles';
 import { Settings } from './Settings';
@@ -17,6 +17,8 @@ export function App() {
   const [state, setState] = useState<ClientState>();
   // Null until the first state says where a first look opens; the person's own choice after that.
   const [page, setPage] = useState<Page | null>(null);
+  // The app whose own page Apps shows, if any.
+  const [appPage, setAppPage] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [earlierOpen, setEarlierOpen] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -76,8 +78,11 @@ export function App() {
 
   useEffect(() => {
     const editor = state?.editor;
-    if (editor && editor.token !== editorToken.current)
+    if (editor && editor.token !== editorToken.current) {
       setPage(editor.kind === 'policy' ? 'profiles' : editor.kind === 'defaults' ? 'settings' : 'apps');
+      // An app's editors open on its page.
+      if (editor.kind === 'app' || editor.kind === 'program') setAppPage(editor.subjectId.split('/')[0]);
+    }
     editorToken.current = editor?.token ?? null;
   }, [state?.editor?.token]);
 
@@ -103,15 +108,24 @@ export function App() {
   // A profile's own connection settings take the Profiles page while they are open; back is Cancel.
   const policyEditor = shown === 'profiles' && state?.editor?.kind === 'policy' ? state.editor : null;
   const policyName = policyEditor ? state?.profiles.find((profile) => profile.id === policyEditor.subjectId)?.name ?? '' : '';
+  const openApp = shown === 'apps' && appPage ? state?.apps.find((app) => app.id === appPage) ?? null : null;
+  // Leaving a view inside a page leaves what was being edited there.
+  const leaveViews = () => {
+    const editor = state?.editor;
+    if (editor && (editor.kind === 'policy' || ((editor.kind === 'app' || editor.kind === 'program') && appPage))) post('CANCEL_EDIT', { token: editor.token });
+    setAppPage(null);
+  };
+  const go = (next: Page) => { leaveViews(); setPage(next); };
   // Before anything renders: the page's own words follow the host's language from the same state.
   setLanguage(state?.language ?? 'en');
 
   return <div className="shell">
-    <Sidebar state={state} shown={shown} go={setPage} />
+    <Sidebar state={state} shown={shown} go={go} />
     <div className="main">
-      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
-        back={policyEditor ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: policyEditor.token }) } : undefined}>
-        {state && shown === 'apps' && <>
+      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : openApp ? openApp.name : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
+        back={policyEditor ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: policyEditor.token }) }
+          : openApp ? { label: t('Back to Apps'), onClick: leaveViews } : undefined}>
+        {state && shown === 'apps' && !openApp && <>
           <ActionButton action={state.actions.addApp} glyph="plus" focusKey="add-app" onClick={() => post('ADD_APP', {})} />
         </>}
         {state && shown === 'profiles' && !policyEditor && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
@@ -119,7 +133,9 @@ export function App() {
       <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
       <main className="content" id="main-content">
         {!state ? <div className="loading" role="status"><span className="spinner" aria-hidden="true" />{t('Loading…')}</div> :
-          shown === 'apps' ? <Apps state={state} now={now} expanded={expanded} toggle={toggle}
+          openApp ? <AppPage app={openApp} state={state} now={now}
+            editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
+          shown === 'apps' ? <Apps state={state} now={now} open={setAppPage}
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'network' ? <Network state={state} now={now} go={setPage} featured={featured} feature={feature} /> :
           policyEditor ? <ProfileSettings name={policyName} editorForm={editorForm} /> :

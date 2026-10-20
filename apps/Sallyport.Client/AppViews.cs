@@ -18,7 +18,8 @@ internal sealed record AppItemActions(UiAction Route, UiAction Stop, UiAction La
 /// <summary>An app's card: its profile and methods, its routing now (<see cref="Run"/>), and what can be done with it.</summary>
 internal sealed record AppItemView(
     string Id, string Name, string? Folder, string ThroughText, string MethodText, string? LossText, Tone Tone, string StatusText,
-    string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions, string? ProfileId = null);
+    string? LaunchText, RunView? Run, string ProgramsText, IReadOnlyList<ProgramView> Programs, AppItemActions Actions, string? ProfileId = null,
+    IReadOnlyList<Fact>? Setup = null);
 
 internal sealed record AppEditValues(string Name, string? ProfileId, LossMode Loss, string DirectAfterText, string? LaunchProgramId);
 
@@ -145,7 +146,15 @@ internal static class AppViews
                 AddProgram: UiAction.Shown(L.T("Add a program…"), !live && !launching && !f.Busy,
                     live ? L.T("Stop routing before changing its programs.") : L.T("A file dialog is open.")),
                 Remove: UiAction.Shown(L.T("Remove app"), !live && !launching, L.T("Stop routing before removing it."))),
-            profile?.Id);
+            profile?.Id,
+            // Its page's setup, label by label, where the card has one line of it.
+            [
+                new(L.T("VPN profile"), profile?.Name ?? L.T("None chosen")),
+                new(L.T("Routes"), methodText),
+                .. item.RoutesPackets ? [new Fact(L.T("If the VPN drops"), GameViews.LossShort(item.Choice))] : Array.Empty<Fact>(),
+                .. item.Folder is { } folder ? [new Fact(L.T("Folder"), folder)] : Array.Empty<Fact>(),
+                .. target is not null ? [new Fact(L.T("Launch starts"), Path.GetFileName(target.Path))] : Array.Empty<Fact>(),
+            ]);
     }
 
     public static EmptyView? Empty(int profiles, int apps) =>

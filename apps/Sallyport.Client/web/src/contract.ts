@@ -246,6 +246,8 @@ export interface AppItemView {
   actions: Record<'route' | 'stop' | 'launch' | 'edit' | 'rescan' | 'addProgram' | 'remove', Action>;
   /** The profile it goes through, when one is chosen: the Network page lists an app under its profile. */
   profileId: string | null;
+  /** Its page's setup, label by label: VPN profile, Routes, If the VPN drops, Folder, Launch starts. */
+  setup: Fact[];
 }
 
 export interface AppEditValues {

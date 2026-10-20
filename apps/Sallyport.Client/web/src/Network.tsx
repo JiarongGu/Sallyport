@@ -105,7 +105,7 @@ function Hero({ profile, channel, profiles, apps, now, feature, go }: {
 }
 
 /** Received and sent, as figures with the rate now, over a minute's graph of the two. */
-function Traffic({ traffic }: { traffic: TrafficView }) {
+export function Traffic({ traffic }: { traffic: TrafficView }) {
   return <section className="traffic" aria-label={t('Traffic')}>
     <div className="traffic-figures">
       <TrafficFigure icon="down" label={traffic.received.label} figure={traffic.received.figure} rate={traffic.received.value} kind="in" />

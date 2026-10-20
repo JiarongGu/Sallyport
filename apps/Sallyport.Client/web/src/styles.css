@@ -350,7 +350,9 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .profile-status .summary { color: var(--secondary); min-width: 0; }
 .duration { font: var(--font-caption); color: var(--secondary); font-variant-numeric: tabular-nums; }
 .row-primary { flex: none; justify-content: flex-end; flex-wrap: nowrap; }
-.row-head > .disclosure.icon { flex: none; margin-left: -4px; }
+.row-head > .disclosure.icon, .row-head > .open-page { flex: none; margin-left: -4px; }
+/* The chevron turned to point on: it opens a page, where a disclosure's points down to unfold. */
+.open-page .glyph { transform: rotate(-90deg); }
 /* A labelled disclosure reads from its start; the chevron alone sits in the middle of its square. */
 .disclosure.icon { justify-content: center; }
 .supporting { margin: 8px 0 0; white-space: pre-line; }
@@ -385,6 +387,12 @@ button.switch:focus-visible { border-radius: var(--radius-pill); outline-offset:
 .driver .facts { margin: 16px 0 0; }
 
 /* the programs inside an app's details: lines, not boxes */
+/* an app's page */
+.app-page > .card:first-child { margin-bottom: 28px; }
+.app-traffic { margin-top: 16px; display: grid; gap: 8px; }
+.app-page .card > .run:first-child { margin-top: 0; }
+.program-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
+.program-list li { padding: 10px 0; border-top: 1px solid var(--divider); }
 .programs { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--divider); display: grid; gap: 8px; }
 .programs ul { list-style: none; margin: 0; padding: 0; display: grid; }
 .programs li { padding: 10px 0; border-top: 1px solid var(--divider); }

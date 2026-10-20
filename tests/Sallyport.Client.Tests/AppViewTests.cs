@@ -27,6 +27,18 @@ public class AppViewTests
         AppViews.Item(new ItemFacts(item ?? Zenless(), profile ?? Jp, run, another, driverReady, false, launching, _ => ["--proxy-server=socks5://127.0.0.1:1088"]));
 
     [Fact]
+    public void Its_page_says_its_setup_label_by_label()
+    {
+        // No launch target chosen in this one: nothing said of what Launch starts.
+        Assert.Equal(
+            [new Fact("VPN profile", "jp"), new Fact("Routes", "All traffic of 1 program"), new Fact("If the VPN drops", GameViews.LossShort(new GameChoice(null, LossMode.Hold, null))),
+             new Fact("Folder", @"E:\Games\ZZZ")],
+            View().Setup!.Take(4));
+        var none = AppViews.Item(new ItemFacts(Zenless() with { ProfileId = null }, null, null, false, true, false, null, _ => []));
+        Assert.Equal(new Fact("VPN profile", "None chosen"), none.Setup![0]);
+    }
+
+    [Fact]
     public void A_folder_ready_to_route_says_what_it_routes()
     {
         var view = View();
