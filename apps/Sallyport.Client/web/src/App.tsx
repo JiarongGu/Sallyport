@@ -7,7 +7,7 @@ import { AppPage, Apps } from './Apps';
 import { Network } from './Network';
 import { ProfileSettings, Profiles } from './Profiles';
 import { Settings } from './Settings';
-import { EditorForm, NewAppForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
+import { EditorForm, NewAppForm, NewProfileForm, RemovalConfirmation, seedDraft, type Draft } from './ui/Editors';
 import { Notices } from './ui/Notices';
 import { MainHeader, pages, Sidebar } from './ui/Chrome';
 import { ActionButton } from './ui/shared';
@@ -79,7 +79,8 @@ export function App() {
   useEffect(() => {
     const editor = state?.editor;
     if (editor && editor.token !== editorToken.current) {
-      setPage(editor.kind === 'policy' ? 'profiles' : editor.kind === 'defaults' || editor.kind === 'export' || editor.kind === 'import' ? 'settings' : 'apps');
+      setPage(editor.kind === 'policy' || editor.kind === 'new-profile' ? 'profiles'
+        : editor.kind === 'defaults' || editor.kind === 'export' || editor.kind === 'import' ? 'settings' : 'apps');
       // An app's editors open on its page.
       if (editor.kind === 'app' || editor.kind === 'program') setAppPage(editor.subjectId.split('/')[0]);
     }
@@ -109,11 +110,13 @@ export function App() {
   const policyEditor = shown === 'profiles' && state?.editor?.kind === 'policy' ? state.editor : null;
   const policyName = policyEditor ? state?.profiles.find((profile) => profile.id === policyEditor.subjectId)?.name ?? '' : '';
   const newApp = shown === 'apps' && state?.editor?.kind === 'new-app' ? state.editor : null;
+  const newProfile = shown === 'profiles' && state?.editor?.kind === 'new-profile' ? state.editor : null;
   const openApp = shown === 'apps' && !newApp && appPage ? state?.apps.find((app) => app.id === appPage) ?? null : null;
   // Leaving a view inside a page leaves what was being edited there.
   const leaveViews = () => {
     const editor = state?.editor;
-    if (editor && (editor.kind === 'policy' || editor.kind === 'new-app' || ((editor.kind === 'app' || editor.kind === 'program') && appPage)))
+    if (editor && (editor.kind === 'policy' || editor.kind === 'new-app' || editor.kind === 'new-profile'
+      || ((editor.kind === 'app' || editor.kind === 'program') && appPage)))
       post('CANCEL_EDIT', { token: editor.token });
     setAppPage(null);
   };
@@ -132,15 +135,17 @@ export function App() {
   return <div className="shell">
     <Sidebar state={state} shown={shown} go={go} />
     <div className="main">
-      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : newApp ? t('Add an app') : openApp ? openApp.name
+      <MainHeader title={policyEditor ? t('Connection settings for {0}', policyName) : newApp ? t('Add an app') : newProfile ? t('Import a VPN profile')
+          : openApp ? openApp.name
           : t(pages.find(([value]) => value === shown)?.[1] ?? 'Apps')}
         back={policyEditor ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: policyEditor.token }) }
           : newApp ? { label: t('Back to Apps'), onClick: () => post('CANCEL_EDIT', { token: newApp.token }) }
+          : newProfile ? { label: t('Back to Profiles'), onClick: () => post('CANCEL_EDIT', { token: newProfile.token }) }
           : openApp ? { label: t('Back to Apps'), onClick: leaveViews } : undefined}>
         {state && shown === 'apps' && !openApp && !newApp && <>
           <ActionButton action={state.actions.addApp} glyph="plus" focusKey="add-app" onClick={() => post('ADD_APP', {})} />
         </>}
-        {state && shown === 'profiles' && !policyEditor && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
+        {state && shown === 'profiles' && !policyEditor && !newProfile && <ActionButton action={state.actions.import} glyph="plus" onClick={() => post('IMPORT', {})} />}
       </MainHeader>
       <Notices notices={state?.notices ?? []} earlierOpen={earlierOpen} toggleEarlier={() => setEarlierOpen((open) => !open)} />
       <main className="content" id="main-content">
@@ -155,6 +160,10 @@ export function App() {
           shown === 'apps' ? <Apps state={state} now={now} open={setAppPage}
             editorForm={state.editor?.kind === 'program' || state.editor?.kind === 'app' ? editorForm : null} /> :
           shown === 'network' ? <Network state={state} now={now} go={setPage} /> :
+          newProfile && currentDraft ? <section className="page" aria-label={t('Import a VPN profile')}>
+            <p className="page-intro secondary">{t('Your VPN provider gives you a profile: a .ovpn file, or a link to it. Sallyport keeps an encrypted copy for your Windows account.')}</p>
+            <NewProfileForm key={newProfile.token} editor={newProfile} draft={currentDraft} onChange={setDraft} />
+          </section> :
           policyEditor ? <ProfileSettings name={policyName} editorForm={editorForm} /> :
           shown === 'profiles' ? <Profiles state={state} now={now} /> :
           <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null}

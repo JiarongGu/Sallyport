@@ -22,7 +22,10 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
 
         Func<Task> intent = request.Type switch
         {
-            "IMPORT" => core.ImportFromDialogAsync,
+            "IMPORT" => () => Done(core.BeginProfileImport),
+            "PROFILE_IMPORT_BROWSE" => () => core.BrowseProfileAsync(Token(), PayloadHelper.GetRequiredValue<NewProfileValues>(request.Payload, "values")),
+            "PROFILE_IMPORT_LINK" => () => core.FetchProfileAsync(Token(), PayloadHelper.GetRequiredValue<NewProfileValues>(request.Payload, "values")),
+            "SAVE_PROFILE_IMPORT" => () => Done(() => core.SaveProfileImport(Token(), PayloadHelper.GetRequiredValue<NewProfileValues>(request.Payload, "values"))),
             "CONNECT" => () => Done(() => core.Connect(Id())),
             "DISCONNECT" => () => core.DisconnectAsync(Id()),
             "LOCATE" => () => core.LocateAsync(Id(), cancellationToken),

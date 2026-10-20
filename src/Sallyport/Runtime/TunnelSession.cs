@@ -16,7 +16,8 @@ public enum SessionState { Connecting, Up, Reconnecting, Stopped, Refused, GaveU
 /// shown that is not one; <see cref="FailedRounds"/>: rounds failed since the tunnel was last up.</summary>
 public sealed record SessionStatus(
     SessionState State, DateTimeOffset Since, string? Remote, int Attempts, int Reconnects, string? LastError,
-    string? Address, long BytesIn, long BytesOut, DateTimeOffset? NextAttemptAt = null, int FailedRounds = 0);
+    string? Address, long BytesIn, long BytesOut, DateTimeOffset? NextAttemptAt = null, int FailedRounds = 0,
+    bool AuthenticationRefused = false);
 
 /// <summary>Options a session's host rarely sets.</summary>
 public sealed class TunnelSessionOptions
@@ -116,9 +117,12 @@ public sealed class TunnelSession : IAsyncDisposable
     /// policy does not retry that, or the policy's rounds ran out.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
-        if (_profile.Remotes.Count == 0 || Tunnel.Unsupported(_profile) is not null)
+        var cannot = _profile.Remotes.Count == 0 ? "the profile names no remote"
+            : Tunnel.Unsupported(_profile)
+            ?? (_profile.AuthUserPass && _options.Tunnel.Login is null ? "the profile asks for a username and password, and none was given" : null);
+        if (cannot is not null)
         {
-            Report(SessionState.Refused, null, 0, 0, Tunnel.Unsupported(_profile) ?? "the profile names no remote", 0);
+            Report(SessionState.Refused, null, 0, 0, cannot, 0);
             return;
         }
         var connect = _options.Connect ?? ((remote, timeout, token) => Tunnel.ConnectAsync(_profile, remote, timeout,
@@ -209,7 +213,8 @@ public sealed class TunnelSession : IAsyncDisposable
             // Stopped while connecting or waiting to retry: nothing was up to take down.
         }
         await DropTunnelAsync();
-        Report(end, null, attempts, reconnects, lastError, failedRounds);
+        // Refused here is only ever the server's answer to the credentials: a profile it cannot serve returned above.
+        Report(end, null, attempts, reconnects, lastError, failedRounds, authenticationRefused: end == SessionState.Refused);
     }
 
     // The remotes for one round, of the policy's transport when it names one: as listed, or shuffled afresh (remote-random).
@@ -242,9 +247,10 @@ public sealed class TunnelSession : IAsyncDisposable
         Interlocked.Add(ref _droppedOut, counters.BytesOut);
     }
 
-    private void Report(SessionState state, string? remote, int attempts, int reconnects, string? error, int failedRounds, DateTimeOffset? next = null)
+    private void Report(SessionState state, string? remote, int attempts, int reconnects, string? error, int failedRounds, DateTimeOffset? next = null,
+        bool authenticationRefused = false)
     {
-        _status = new SessionStatus(state, DateTimeOffset.UtcNow, remote, attempts, reconnects, error, null, 0, 0, next, failedRounds);
+        _status = new SessionStatus(state, DateTimeOffset.UtcNow, remote, attempts, reconnects, error, null, 0, 0, next, failedRounds, authenticationRefused);
         StatusChanged?.Invoke(Status);
     }
 

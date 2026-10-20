@@ -1,8 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, MoveValues, NewAppValues, PolicyValues, ProgramEditValues } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, MoveValues, NewAppValues, NewProfileValues, PolicyValues, ProgramEditValues } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
-import { ActionButton, Disclosure, Icon } from './shared';
+import { ActionButton, Disclosure, Facts, Icon } from './shared';
 import { paintCaptionButtons } from './Chrome';
 
 export type Draft =
@@ -11,6 +11,7 @@ export type Draft =
   | { token: string; kind: 'defaults'; values: DefaultsValues }
   | { token: string; kind: 'policy'; values: PolicyValues }
   | { token: string; kind: 'new-app'; values: NewAppValues }
+  | { token: string; kind: 'new-profile'; values: NewProfileValues }
   | { token: string; kind: 'export' | 'import'; values: MoveValues };
 
 export function seedDraft(editor: Editor): Draft {
@@ -20,6 +21,7 @@ export function seedDraft(editor: Editor): Draft {
     case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
     case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
     case 'new-app': return { token: editor.token, kind: 'new-app', values: { ...editor.values, included: [...editor.values.included] } };
+    case 'new-profile': return { token: editor.token, kind: 'new-profile', values: { ...editor.values } };
     case 'export': case 'import': return { token: editor.token, kind: editor.kind, values: { ...editor.values } };
   }
 }
@@ -403,6 +405,95 @@ export function NewAppForm({ editor, draft, onChange, profileChoices, lossChoice
       <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
     </div>
     {/* Why Add app waits, under the pair rather than between them. */}
+    {!editor.save.enabled && editor.save.reason && <p className="secondary metadata">{editor.save.reason}</p>}
+  </form>;
+}
+
+/** "Import a VPN profile" (D29), as OpenVPN Connect's Import Profile has it: a file or a link first, then the profile as
+ *  it was read — its server, locked, and a name for it — before anything is kept. */
+export function NewProfileForm({ editor, draft, onChange }: { editor: Editor; draft: Draft; onChange: (draft: Draft) => void }) {
+  const form = useRef<HTMLFormElement>(null);
+  const prefix = useId();
+  useEditorFocus(form);
+  if (draft.kind !== 'new-profile' || editor.kind !== 'new-profile') return null;
+  const values = draft.values;
+  const read = editor.facts !== null;
+  const fetching = editor.phase === 'fetching';
+  const update = (next: Partial<NewProfileValues>) => onChange({ ...draft, values: { ...values, ...next } });
+  const fetch = () => { if (!fetching) post('PROFILE_IMPORT_LINK', { token: editor.token, values }); };
+  const error = (field: EditorField) => editor.errors[field]
+    ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p> : null;
+  const source = (value: NewProfileValues['source'], label: string) => <button type="button" role="radio" aria-checked={values.source === value}
+    className={values.source === value ? 'selected' : ''} onClick={() => update({ source: value })}>{t(label)}</button>;
+
+  return <form ref={form} className="new-app new-profile" tabIndex={-1} aria-label={t('Import a VPN profile')} noValidate onSubmit={(event) => {
+    event.preventDefault();
+    if (editor.save.enabled) post('SAVE_PROFILE_IMPORT', { token: editor.token, values });
+  }}>
+    <section className="card setup-step" aria-labelledby={`${prefix}-where`}>
+      <h2 id={`${prefix}-where`}>{t('Where is your profile?')}</h2>
+      <div className="segmented" role="radiogroup" aria-labelledby={`${prefix}-where`}>
+        {source('file', 'A file')}
+        {source('link', 'A link')}
+      </div>
+      {values.source === 'file' ? <>
+        <p className="secondary">{t('The .ovpn file your VPN provider gave you.')}</p>
+        <div className="actions">
+          <button type="button" onClick={() => post('PROFILE_IMPORT_BROWSE', { token: editor.token, values })}>{t('Choose a file…')}</button>
+        </div>
+        {error('form')}
+      </> : <>
+        <p className="secondary">{t('If your VPN provider offers it: its server’s address (OpenVPN Access Server), or a link to your profile.')}</p>
+        <div className="path-field">
+          <input id={`${prefix}-link`} type="url" autoComplete="url" spellCheck={false} value={values.link} aria-label={t('Address or link')}
+            placeholder="https://vpn.example.com" aria-invalid={!!editor.errors.link}
+            aria-describedby={editor.errors.link ? `${prefix}-link-error` : undefined}
+            onChange={(event) => update({ link: event.target.value })}
+            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); fetch(); } }} />
+          <button type="button" disabled={fetching} aria-busy={fetching} onClick={fetch}>{fetching ? t('Getting it…') : t('Get the profile')}</button>
+        </div>
+        {error('link')}
+        {values.signIn && <div className="editor-fields">
+          <div className="field">
+            <label htmlFor={`${prefix}-username`}>{t('Username')}</label>
+            <input id={`${prefix}-username`} type="text" autoComplete="username" spellCheck={false} value={values.username}
+              onChange={(event) => update({ username: event.target.value })} />
+          </div>
+          <div className="field">
+            <label htmlFor={`${prefix}-password`}>{t('Password')}</label>
+            <input id={`${prefix}-password`} type="password" autoComplete="current-password" value={values.password}
+              aria-invalid={!!editor.errors.password}
+              onChange={(event) => update({ password: event.target.value })}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); fetch(); } }} />
+            {error('password')}
+          </div>
+        </div>}
+        {error('form')}
+      </>}
+    </section>
+
+    {read && <section className="card setup-step" aria-labelledby={`${prefix}-read`}>
+      <h2 id={`${prefix}-read`}>{t('Imported profile')}</h2>
+      <Facts facts={editor.facts!} />
+      <div className="editor-fields">
+        <div className="field">
+          <label htmlFor={`${prefix}-name`}>{t('Profile name')}</label>
+          <input id={`${prefix}-name`} type="text" autoComplete="off" value={values.name} aria-invalid={!!editor.errors.name}
+            onChange={(event) => update({ name: event.target.value })} />
+          {error('name')}
+        </div>
+      </div>
+      {editor.hint && <p className="found cannot"><Icon name="warning" /><span>{editor.hint}</span></p>}
+      <label className="check-field">
+        <input type="checkbox" checked={values.connect} disabled={!!editor.hint} onChange={(event) => update({ connect: event.target.checked })} />
+        {t('Connect after import')}
+      </label>
+    </section>}
+
+    <div className="actions setup-actions">
+      <ActionButton action={editor.save} primary type="submit" />
+      <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
+    </div>
     {!editor.save.enabled && editor.save.reason && <p className="secondary metadata">{editor.save.reason}</p>}
   </form>;
 }

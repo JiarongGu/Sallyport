@@ -131,8 +131,8 @@ internal sealed class MainForm : OptimizedForm
         foreach (var path in args.Where(a => !a.StartsWith('-')))
         {
             if (!path.EndsWith(".ovpn", StringComparison.OrdinalIgnoreCase) && !path.EndsWith(".conf", StringComparison.OrdinalIgnoreCase)) continue;
-            try { _core.Import(path); }
-            catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
+            // Onto the import page, as one chosen there is: the person sees its name and server before it is kept.
+            _core.OpenProfileFile(path);
         }
         var addGame = Array.IndexOf(args, "--add-game");
         if (addGame >= 0 && addGame + 1 < args.Length)

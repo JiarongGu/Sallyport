@@ -38,6 +38,19 @@ public sealed record TunnelOptions
     public int? Ping { get; init; }
     public int? PingRestart { get; init; }
     public bool KeepaliveOverridesServer { get; init; }
+    /// <summary>The username and password a profile that asks for them (<c>auth-user-pass</c>) signs in with; every
+    /// reconnect of a session signs in with them again.</summary>
+    public Login? Login { get; init; }
+}
+
+/// <summary>A username and password, sent in the key-method-2 message after the options string. A class, not a record:
+/// nothing that prints the options it rides in (a record's own ToString would) may print either.</summary>
+public sealed class Login(string username, string password)
+{
+    public string Username { get; } = username;
+    public string Password { get; } = password;
+
+    public override string ToString() => "Login (hidden)";
 }
 
 /// <summary>
@@ -53,7 +66,7 @@ public sealed class Tunnel : IAsyncDisposable
     private readonly SslStream _tls;
     private readonly TlsInbox _inbox;
     private readonly DataChannel _data;
-    private readonly X509Certificate2 _certificate;
+    private readonly X509Certificate2? _certificate;
     private readonly CancellationTokenSource _stop = new();
     private readonly Channel<byte[]> _packets;
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -65,7 +78,7 @@ public sealed class Tunnel : IAsyncDisposable
     private long _packetsIn, _packetsOut, _bytesIn, _bytesOut, _pingsIn, _pingsOut, _rejected, _opposite, _replayed, _overflowed;
     private int _disposed;
 
-    private Tunnel(ControlChannel channel, SslStream tls, TlsInbox inbox, DataChannel data, X509Certificate2 certificate, List<string> other)
+    private Tunnel(ControlChannel channel, SslStream tls, TlsInbox inbox, DataChannel data, X509Certificate2? certificate, List<string> other)
     {
         _channel = channel;
         _tls = tls;
@@ -130,6 +143,9 @@ public sealed class Tunnel : IAsyncDisposable
         TimeSpan timeout, TunnelOptions options, Action<string>? log, CancellationToken ct)
     {
         Refuse(profile);
+        // Asked before a packet is sent: the server would only refuse it after the whole handshake.
+        if (profile.AuthUserPass && options.Login is null)
+            throw new HandshakeFailed(HandshakeStage.Profile, Outcome.Unverifiable, "the profile asks for a username and password, and none was given");
         var clock = Stopwatch.StartNew();
         var stage = HandshakeStage.Connect;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -152,14 +168,15 @@ public sealed class Tunnel : IAsyncDisposable
             log?.Invoke("hard reset answered");
 
             stage = HandshakeStage.Tls;
-            certificate = Certificates.Client(profile.CertPem!, profile.KeyPem!);
+            // A profile that signs in by its username and password alone has no certificate of its own to present.
+            certificate = profile.CertPem is not null ? Certificates.Client(profile.CertPem, profile.KeyPem!) : null;
             var authorities = Certificates.Authorities(profile.CaPem!);
             string? rejected = null;
             tls = new SslStream(new ControlStream(channel), leaveInnerStreamOpen: false);
             var tlsOptions = new SslClientAuthenticationOptions
             {
                 TargetHost = remote.Host,
-                ClientCertificateContext = SslStreamCertificateContext.Create(certificate, null, offline: true),
+                ClientCertificateContext = certificate is null ? null : SslStreamCertificateContext.Create(certificate, null, offline: true),
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 RemoteCertificateValidationCallback = (_, presented, chain, _) =>
                 {
@@ -177,7 +194,7 @@ public sealed class Tunnel : IAsyncDisposable
 
             stage = HandshakeStage.KeyExchange;
             var mine = KeySource.ForClient();
-            await tls.WriteAsync(KeyMethod2Message.Write(mine, OptionsString(profile, remote), "", "", PeerInfo()), token);
+            await tls.WriteAsync(KeyMethod2Message.Write(mine, OptionsString(profile, remote), options.Login?.Username ?? "", options.Login?.Password ?? "", PeerInfo()), token);
             var inbox = new TlsInbox(tls);
             KeyMethod2Message? theirs;
             int used;
@@ -386,7 +403,7 @@ public sealed class Tunnel : IAsyncDisposable
         await _tls.DisposeAsync();
         await _channel.DisposeAsync();
         _data.Dispose();
-        _certificate.Dispose();
+        _certificate?.Dispose();
         _stop.Dispose();
     }
 
@@ -402,9 +419,10 @@ public sealed class Tunnel : IAsyncDisposable
         profile.TlsCryptV2 ? "the profile uses tls-crypt-v2, which is not supported yet"
         : profile.TlsCryptKey is null && profile.TlsAuthKey is not null ? "the profile uses tls-auth, which is not supported yet"
         : profile.TlsCryptKey is null ? "the profile has no tls-crypt key; only tls-crypt profiles are supported yet"
-        : profile.AuthUserPass ? "the profile asks for a username and password, which is not supported yet"
         : profile.CaPem is null ? "the profile has no <ca>"
-        : profile.CertPem is null || profile.KeyPem is null ? "the profile has no client certificate and key"
+        : (profile.CertPem is null) != (profile.KeyPem is null) ? "the profile has a client certificate without its key, or a key without its certificate"
+        // A username and password may take the certificate's place; without them, it is the only way to sign in.
+        : profile.CertPem is null && !profile.AuthUserPass ? "the profile has no client certificate and key"
         : null;
 
     private static void Refuse(OvpnProfile profile)

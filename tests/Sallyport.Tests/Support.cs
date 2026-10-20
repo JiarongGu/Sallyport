@@ -151,6 +151,12 @@ internal sealed class FakeServer
     public TaskCompletionSource? RestartWhen;
     /// <summary>The server answers the push request with AUTH_FAILED, as one that no longer accepts the client does.</summary>
     public bool RefuseAuthentication;
+    /// <summary>The username and password the client sent in its key-method-2 message ("" when it sent none).</summary>
+    public string? ClientUsername, ClientPassword;
+    /// <summary>When set, any other username and password is answered AUTH_FAILED, as a server with users does.</summary>
+    public (string Username, string Password)? Accept;
+    /// <summary>False for a server whose users sign in by password alone, without a certificate of their own.</summary>
+    public bool CertificateRequired = true;
 
     public async Task RunAsync(ITransport transport, byte[] staticKey, X509Certificate2 certificate, CancellationToken ct)
     {
@@ -164,8 +170,8 @@ internal sealed class FakeServer
         await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
         {
             ServerCertificateContext = SslStreamCertificateContext.Create(certificate, null, offline: true),
-            ClientCertificateRequired = true,
-            RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null,
+            ClientCertificateRequired = CertificateRequired,
+            RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null || !CertificateRequired,
             CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
         }, ct);
 
@@ -176,11 +182,13 @@ internal sealed class FakeServer
         inbox.Consume(used);
         ClientOptions = hello!.Options;
         ClientPeerInfo = hello.Trailing.Count == 3 ? hello.Trailing[2] : null;
+        ClientUsername = hello.Trailing.Count > 0 ? hello.Trailing[0] : null;
+        ClientPassword = hello.Trailing.Count > 1 ? hello.Trailing[1] : null;
         var mine = KeySource.ForServer();
         await tls.WriteAsync(KeyMethod2Message.Write(mine, "V4,dev-type tun,tls-server"), ct);
 
         Assert.Equal("PUSH_REQUEST", await inbox.ReadTextAsync(ct));
-        if (RefuseAuthentication)
+        if (RefuseAuthentication || (Accept is { } accepted && (ClientUsername, ClientPassword) != accepted))
         {
             await tls.WriteAsync("AUTH_FAILED\0"u8.ToArray(), ct);
             await Task.Delay(Timeout.Infinite, ct);

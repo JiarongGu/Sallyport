@@ -198,32 +198,160 @@ internal sealed class ClientCore
 
     // ---- profiles
 
-    /// <summary>Asks for a profile file and imports it. One dialog at a time: a second ask while one is open is dropped,
-    /// as a second press of a button already pressed would be.</summary>
-    public async Task ImportFromDialogAsync()
+    // ---- "Import a VPN profile" (D29): a page of its own, as OpenVPN Connect's Import Profile is — a file or a link
+    // first, then the profile looked at (its name, its server) before anything is kept.
+
+    // What the open import read, for its token: the text stays here, in memory, until it is imported or let go.
+    private (string Token, string Origin, string Text, ProfilePreview Preview)? _reading;
+    private static readonly HttpClient Downloads = new() { Timeout = ProfileDownload.Timeout };
+
+    /// <summary>Opens "Import a VPN profile" with nothing read yet: from a file unless the person chooses a link.</summary>
+    public void BeginProfileImport()
     {
+        lock (_gate)
+        {
+            _reading = null;
+            _editor = new OpenEditor(NewToken(), "new-profile", "", new NewProfileValues("file", "", "", "", "", false), Empty);
+        }
+        Publish();
+    }
+
+    /// <summary>A profile file given to Sallyport — opened from Explorer, or a later start handed one — read onto the
+    /// import page, as one chosen there would be.</summary>
+    public void OpenProfileFile(string path)
+    {
+        BeginProfileImport();
+        OpenEditor? open;
+        lock (_gate) open = _editor;
+        if (open is not null) ReadProfileFile(open.Token, (NewProfileValues)open.Values, path);
+    }
+
+    /// <summary>Choose a file…: one dialog at a time, as every dialog is.</summary>
+    public async Task BrowseProfileAsync(string token, NewProfileValues values)
+    {
+        if (EditorFor(token, "new-profile") is null) return;
         var picked = await WithDialogAsync("import", () => _dialogs.OpenFileAsync(new OpenFileOptions
         {
             Title = L.T("Import an OpenVPN profile"),
             Filters = [new FileDialogFilter { Name = L.T("OpenVPN profiles"), Extensions = ["ovpn", "conf"] }],
             RememberPathKey = "import-profile",
         }));
-        if (picked is { Success: true, FilePath: { } path }) Import(path);
+        if (picked is { Success: true, FilePath: { } path }) ReadProfileFile(token, values, path);
     }
 
-    public StoredProfile Import(string path)
+    private void ReadProfileFile(string token, NewProfileValues values, string path)
     {
         var file = new FileInfo(path);
-        if (!file.Exists) throw new ShenoraException("FILE_GONE", "file", file.Name, L.T("{0} is no longer there.", file.Name));
-        if (file.Length > LargestProfile) throw new ShenoraException("PROFILE_INVALID", "file", file.Name, L.T("{0} is far larger than any profile.", file.Name));
-        var name = Path.GetFileNameWithoutExtension(file.Name).Trim();
-        if (name.Length == 0) name = "profile";
-        if (name.Length > LongestName) name = name[..LongestName];
+        string? why = null, text = null;
+        if (!file.Exists) why = L.T("{0} is no longer there.", file.Name);
+        else if (file.Length > LargestProfile) why = L.T("{0} is far larger than any profile.", file.Name);
+        else
+            try { text = File.ReadAllText(file.FullName); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { why = L.T("{0} could not be read: {1}.", file.Name, e.GetType().Name); }
+        Read(token, values with { Source = "file" }, file.Name, Path.GetFileNameWithoutExtension(file.Name), text, why);
+    }
 
+    /// <summary>Get the profile: the link fetched (HTTPS only), its server's sign-in asked for only when it asks.</summary>
+    public async Task FetchProfileAsync(string token, NewProfileValues values)
+    {
+        if (EditorFor(token, "new-profile") is null) return;
+        var address = ProfileDownload.Address(values.Link ?? "", out var why);
+        if (address is null)
+        {
+            Refuse(token, values with { Source = "link" }, "link", why!);
+            return;
+        }
+        Downloaded got;
+        lock (_gate) _fetching = token;
+        Publish();
+        try { got = await ProfileDownload.GetAsync(Downloads, address, values.SignIn ? values.Username : null, values.SignIn ? values.Password : null, CancellationToken.None); }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException)
+        { got = new(null, false, L.T("{0} could not be reached ({1}).", address.Host, e is TaskCanceledException ? L.T("no answer in time") : e.GetType().Name)); }
+        finally { lock (_gate) _fetching = null; }
+        if (got.SignIn)
+        {
+            Refuse(token, values with { Source = "link", SignIn = true, Password = "" }, got.Why is null ? "form" : "password",
+                got.Why ?? L.T("{0} asks who you are: type the username and password your VPN provider gave you.", address.Host));
+            return;
+        }
+        Read(token, values with { Source = "link", Password = "" }, address.Host, ProfileDownload.NameFor(address), got.Text, got.Why);
+    }
+
+    // The import page's token while a link is being fetched: its button says so.
+    private string? _fetching;
+
+    // What was read, looked at: kept under a new token (the page takes the name suggested) or refused where it was asked.
+    private void Read(string token, NewProfileValues values, string origin, string suggested, string? text, string? why)
+    {
+        ProfilePreview? preview = null;
+        if (text is not null && why is null)
+            // The store's own reasons never quote the text, so they may cross to the page.
+            try { preview = ProfileStore.Preview(text); }
+            catch (InvalidDataException e) { why = L.T("{0} is not a profile Sallyport can import: {1}.", origin, e.Message); }
+        if (preview is null)
+        {
+            Refuse(token, values, values.Source == "link" ? "link" : "form", why ?? L.T("{0} is not a profile Sallyport can import.", origin));
+            return;
+        }
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            var next = new OpenEditor(NewToken(), "new-profile", "", values with { Name = UniqueName(suggested), Connect = values.Connect && preview.Unsupported is null }, Empty);
+            _editor = next;
+            _reading = (next.Token, origin, text!, preview);
+        }
+        Publish();
+    }
+
+    private void Refuse(string token, NewProfileValues values, string field, string why)
+    {
+        lock (_gate)
+        {
+            if (_editor?.Token != token) return;
+            _reading = null;
+            _editor = _editor with { Values = values, Errors = new Dictionary<string, string> { [field] = why } };
+        }
+        Publish();
+    }
+
+    // A name no profile has yet: the file's, then "(2)", "(3)"… — two sections of the same name would be told apart by
+    // nothing on the Overview.
+    private string UniqueName(string suggested)
+    {
+        var given = suggested.Trim() is { Length: > 0 } trimmed ? trimmed : "profile";
+        var name = given.Length > LongestName ? given[..LongestName] : given;
+        var taken = _store.List().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        for (var n = 2; taken.Contains(name); n++) name = $"{given[..Math.Min(given.Length, LongestName - 6)]} ({n})";
+        return name;
+    }
+
+    /// <summary>Import: the text read, kept sealed under the person's name for it; connected at once if they asked.</summary>
+    public void SaveProfileImport(string token, NewProfileValues values)
+    {
+        if (EditorFor(token, "new-profile") is null) return;
+        (string Token, string Origin, string Text, ProfilePreview Preview)? reading;
+        lock (_gate) reading = _reading is { } open && open.Token == token ? open : null;
+        if (reading is not { Text: var text, Preview: var preview })
+        {
+            Refuse(token, values, "form", L.T("Choose a file or get the profile from its link first."));
+            return;
+        }
+        var name = values.Name?.Trim() ?? "";
+        if (name.Length is 0 or > LongestName)
+        {
+            lock (_gate) if (_editor?.Token == token) _editor = _editor with { Values = values, Errors = new Dictionary<string, string> { ["name"] = L.T("Use 1 to {0} characters.", LongestName) } };
+            Publish();
+            return;
+        }
         StoredProfile stored;
-        // The store's own reasons never quote the text, so they may cross to the page.
-        try { stored = _store.Import(name, File.ReadAllText(file.FullName)); }
-        catch (InvalidDataException e) { throw new ShenoraException("PROFILE_INVALID", "file", file.Name, L.T("{0} was not imported: {1}.", file.Name, e.Message)); }
+        try { stored = _store.Import(name, text); }
+        catch (InvalidDataException e) { Refuse(token, values, "form", L.T("{0} was not imported: {1}.", reading.Value.Origin, e.Message)); return; }
+        lock (_gate)
+        {
+            if (_editor?.Token == token) _editor = null;
+            _reading = null;
+        }
+        _servers[stored.Id] = preview.Servers;
         // The next step is the app: with none yet, the window goes where one is added.
         if (_items.List().Count == 0)
         {
@@ -231,8 +359,19 @@ internal sealed class ClientCore
             Navigate(Page.Apps);
         }
         else Notify(NoticeKind.Info, L.T("Imported {0}. Its copy is encrypted for your Windows account.", stored.Name), new("profile", stored.Id));
-        return stored;
+        if (values.Connect && stored.Unsupported is null) Connect(stored.Id);
+        Publish();
     }
+
+    // Each profile's servers, read from its sealed copy once and kept in memory only: its row shows them, as OpenVPN
+    // Connect's list does, and the description beside the copy never names them.
+    private readonly ConcurrentDictionary<string, IReadOnlyList<string>> _servers = new();
+
+    private IReadOnlyList<string> ServersOf(string id) => _servers.GetOrAdd(id, key =>
+    {
+        try { return [.. _store.Load(key).Remotes.Select(r => r.Host).Distinct(StringComparer.OrdinalIgnoreCase)]; }
+        catch (Exception e) when (e is System.Security.Cryptography.CryptographicException or FormatException or FileNotFoundException or IOException) { return []; }
+    });
 
     public void Connect(string id)
     {
@@ -353,6 +492,7 @@ internal sealed class ClientCore
         {
             await _connections.DisconnectAsync(id);
             if (!_store.Remove(id)) return;
+            _servers.TryRemove(id, out _);
             _settings.Forget(id);
             _items.Forget(id);
         }
@@ -877,6 +1017,7 @@ internal sealed class ClientCore
             if (_editor?.Token != token) return;
             _editor = null;
             _importing = null;
+            _reading = null;
         }
         Publish();
     }
@@ -1290,7 +1431,7 @@ internal sealed class ClientCore
                 p, _connections.ProxyPortOf(p.Id), _connections.StatusOf(p.Id), _connections.LocationOf(p.Id), _locating.ContainsKey(p.Id),
                 _locationFailed.ContainsKey(p.Id), _connections.AttemptsSinceUp(p.Id), _disconnecting.ContainsKey(p.Id), _removing.ContainsKey(p.Id),
                 live?.LaneFor(p.Id) is { } lane ? L.List(lane.Apps.Keys.Select(a => items.FirstOrDefault(g => g.Id == a)?.Name).OfType<string>()) : null,
-                _connections.NextAttemptOf(p.Id), _settings.ChoicesFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)))))
+                _connections.NextAttemptOf(p.Id), _settings.ChoicesFor(p.Id, ClientSettings.ProtocolsOf(p.Remotes)), ServersOf(p.Id))))
             .ToList();
         var driver = GameViews.Driver(Driver());
         var dialog = Volatile.Read(ref _dialog);
@@ -1320,10 +1461,14 @@ internal sealed class ClientCore
         NavigationView? navigation;
         (string Token, SetupPreview Preview)? setup;
         (string Token, BackupFile File, string Name)? importing;
+        (string Token, string Origin, string Text, ProfilePreview Preview)? profileRead;
+        bool fetching;
         lock (_gate)
         {
             editor = _editor;
             importing = _importing is { } reading && reading.Token == editor?.Token ? reading : null;
+            profileRead = _reading is { } looked && looked.Token == editor?.Token ? looked : null;
+            fetching = _fetching is not null && _fetching == editor?.Token;
             // What "Add an app" found, only for the token it was found for.
             setup = _setup is { } open && open.Token == editor?.Token ? open : null;
             confirmation = _confirmation;
@@ -1356,10 +1501,13 @@ internal sealed class ClientCore
             [.. stored.Select(p => new ClientState.ProfileChoice(p.Id, p.Name, p.Unsupported is null))],
             [.. Enum.GetValues<AppKind>().Select(k => new ClientState.KindChoice(k, ClientView.KindLabel(k), ClientView.KindHelp(k)))],
             GameViews.LossChoices,
-            editor is null ? null : new EditorView(editor.Token, editor.SubjectId, "editing", editor.Errors,
+            editor is null ? null : new EditorView(editor.Token, editor.SubjectId, fetching ? "fetching" : "editing", editor.Errors,
                 // The guidance until a save is refused; then the refusal, which says it, alone. "Add an app" says what it
-                // found at the place chosen, and adds nothing until it has found something.
+                // found at the place chosen, and adds nothing until it has found something. A profile this version cannot
+                // connect is said before it is imported, not after.
                 editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary
+                    : editor.Kind == "new-profile" && profileRead is { Preview.Unsupported: { } cannot }
+                        ? L.T("This version cannot connect it yet: {0}. You can import it now; a later version can connect it.", cannot)
                     : editor.Kind == "import" && importing is { } read ? L.T("{0}, exported {1}.", read.Name, L.Date(read.File.Exported))
                     : editor.Kind == "export" ? L.T("Choose what goes in the file. With a password, the profiles in it open only with that password; without one, anyone who has the file can use them.") : null,
                 editor.Kind switch
@@ -1367,12 +1515,14 @@ internal sealed class ClientCore
                     "new-app" => UiAction.Shown(L.T("Add app"), setup is not null, L.T("Choose where it is first.")),
                     "export" => UiAction.Shown(L.T("Export…"), dialog is null, L.T("A file dialog is open."), busy: dialog == "export"),
                     "import" => UiAction.Shown(L.T("Import")),
+                    "new-profile" => UiAction.Shown(L.T("Import"), profileRead is not null, L.T("Choose a file or get the profile from its link first.")),
                     _ => UiAction.Shown(L.T("Save")),
                 },
                 UiAction.Shown(L.T("Cancel")),
                 editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown(L.T("Follow Settings")) : UiAction.Hidden,
                 // A password the person typed is never sent back to the page: the page keeps what it was given.
-                editor.Kind, editor.Values is MoveValues move ? move with { Password = "", Confirm = "" } : editor.Values,
+                editor.Kind, editor.Values is MoveValues move ? move with { Password = "", Confirm = "" }
+                    : editor.Values is NewProfileValues signIn ? signIn with { Password = "" } : editor.Values,
                 // What Launch may start: the app's included programs. The connection types the profile has servers for.
                 // Only an app Sallyport starts has a choice of what it starts: one of its programs told of the proxy.
                 editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited && edited.PacketPrograms.Count == 0
@@ -1394,6 +1544,10 @@ internal sealed class ClientCore
                 editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } iconed
                     ? [.. iconed.Programs.Select(p => (Program: p, Url: _icons.Of(p.Path))).Where(c => c.Url is not null).DistinctBy(c => c.Url)
                         .Select(c => new IconChoice(c.Program.Id, Path.GetFileName(c.Program.Path), c.Url!))]
+                    : null,
+                // What was read, as OpenVPN Connect's Imported Profile shows it: its server, locked, and where it came from.
+                editor.Kind == "new-profile" && profileRead is { } got
+                    ? [new Fact(L.T("Server"), ClientView.ServerText(got.Preview.Servers)), new Fact(L.T("From"), got.Origin)]
                     : null),
             confirmation is null ? null : new ConfirmationView(confirmation.Token, confirmation.Title, confirmation.Text,
                 UiAction.Shown(confirmation.ConfirmLabel), UiAction.Shown(confirmation.CancelLabel)),

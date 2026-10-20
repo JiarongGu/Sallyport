@@ -436,6 +436,13 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 
 /* "Add an app": the place first, then what it is, then its programs */
 .new-app { display: grid; gap: 16px; }
+/* Where a profile comes from, a file or a link: one choice of two, side by side as OpenVPN Connect's tabs are. */
+.segmented { display: inline-flex; justify-self: start; gap: 2px; padding: 2px; border: 1px solid var(--stroke-control); border-radius: var(--radius-control); }
+.segmented button { min-height: 30px; padding: 0 16px; border-color: transparent; background: transparent; }
+.segmented button.selected { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.segmented button.selected:hover { background: var(--accent-hover); }
+.new-profile .setup-step > .actions { justify-content: flex-start; }
+.found.cannot .glyph { color: var(--busy); }
 .setup-step { display: grid; gap: 12px; }
 .setup-step > h2 { font: var(--font-body-large); }
 .path-field { display: flex; gap: 8px; align-items: center; }

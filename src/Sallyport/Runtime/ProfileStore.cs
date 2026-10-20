@@ -15,12 +15,25 @@ public interface IProfileProtector
 
 /// <summary>A stored profile as anyone may see it: never its keys, never its servers' names. <see cref="Remotes"/> are
 /// transport and port ("udp/1194"); <see cref="Unsupported"/> says why this version cannot connect with it, or is null.</summary>
-public sealed record StoredProfile(string Id, string Name, IReadOnlyList<string> Remotes, DateTimeOffset Imported, string? Unsupported);
+public sealed record StoredProfile(string Id, string Name, IReadOnlyList<string> Remotes, DateTimeOffset Imported, string? Unsupported,
+    bool NeedsLogin = false);
+
+/// <summary>A profile's text as <see cref="ProfileStore.Preview"/> reads it: its servers' names in the order it lists them
+/// (said to the person while it is imported; never written beside its sealed copy), its transports ("udp", "tcp"), why
+/// this version cannot connect it or null, whether it signs in with a username and password, and the username it carries
+/// (OpenVPN Access Server writes the person's into the profiles it makes).</summary>
+public sealed record ProfilePreview(IReadOnlyList<string> Servers, IReadOnlyList<string> Transports, string? Unsupported,
+    bool NeedsLogin = false, string? Username = null);
+
+/// <summary>What is kept of a profile's sign-in, as the window may show it: the username, and whether a password is
+/// kept — never the password itself.</summary>
+public sealed record LoginState(string? Username, bool PasswordSaved);
 
 /// <summary>
 /// Imported copies of profiles (D11). Each is two files: <c>{id}.profile</c>, the text sealed by the protector, and
-/// <c>{id}.json</c>, the <see cref="StoredProfile"/> that may be shown. The text is never written anywhere unsealed and
-/// never appears in an exception's message.
+/// <c>{id}.json</c>, the <see cref="StoredProfile"/> that may be shown; a profile that signs in with a username and
+/// password has a third, <c>{id}.login</c>, sealed the same way (D29). The text and the login are never written anywhere
+/// unsealed and never appear in an exception's message.
 /// </summary>
 public sealed class ProfileStore
 {
@@ -62,14 +75,11 @@ public sealed class ProfileStore
     {
         name = name.Trim();
         if (name.Length is 0 or > LongestName) throw new ArgumentException($"a profile's name is 1 to {LongestName} characters", nameof(name));
-        OvpnProfile profile;
-        try { profile = OvpnProfile.Parse(text); }
-        catch (FormatException) { throw new InvalidDataException("the text is not a profile this version can read: a key block is malformed"); }
-        if (profile.Remotes.Count == 0) throw new InvalidDataException("the text is not an OpenVPN profile: it names no remote");
+        var profile = Read(text);
 
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var entry = new StoredProfile(id, name, [.. profile.Remotes.Select(r => $"{r.Proto}/{r.Port}")], DateTimeOffset.UtcNow,
-            Tunnel.Unsupported(profile));
+            Tunnel.Unsupported(profile), profile.AuthUserPass);
         lock (_gate)
         {
             // The sealed text first: a description without it is never listed, so a crash in between leaves nothing usable half-made.
@@ -77,6 +87,82 @@ public sealed class ProfileStore
             WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(entry, Json));
         }
         return entry;
+    }
+
+    /// <summary>What <paramref name="text"/> holds, read before anything is kept: for the person to look at as they import
+    /// it, as OpenVPN Connect shows a profile's server before adding it. Nothing is written; throws as
+    /// <see cref="Import"/> does.</summary>
+    public static ProfilePreview Preview(string text)
+    {
+        var profile = Read(text);
+        return new ProfilePreview([.. profile.Remotes.Select(r => r.Host).Distinct(StringComparer.OrdinalIgnoreCase)],
+            [.. profile.Remotes.Select(r => r.Proto).Distinct()], Tunnel.Unsupported(profile), profile.AuthUserPass,
+            profile.AuthUserPass && CarriedUsername.Match(text) is { Success: true } carried ? carried.Groups[1].Value.Trim() : null);
+    }
+
+    // The comment OpenVPN Access Server puts in a person's profile: their username, to sign in with.
+    private static readonly System.Text.RegularExpressions.Regex CarriedUsername =
+        new(@"^\s*#\s*OVPN_ACCESS_SERVER_USERNAME=(\S+)", System.Text.RegularExpressions.RegexOptions.Multiline);
+
+    /// <summary>The username a profile signs in with and whether its password is kept, from its sealed login.</summary>
+    public LoginState LoginOf(string id) => ReadLogin(id) is { } kept ? new(kept.Username, kept.Password is not null) : new(null, false);
+
+    /// <summary>The username and password to connect with, when both are kept; null when either is not.</summary>
+    public Login? SavedLogin(string id) =>
+        ReadLogin(id) is { Username.Length: > 0, Password: { } password } kept ? new Login(kept.Username, password) : null;
+
+    /// <summary>Keeps <paramref name="username"/>, and <paramref name="password"/> when the person chose to remember it;
+    /// null forgets one kept before.</summary>
+    public void SetLogin(string id, string username, string? password)
+    {
+        if (Find(id) is null) throw new FileNotFoundException("no such profile");
+        var plain = JsonSerializer.SerializeToUtf8Bytes(new KeptLogin(username.Trim(), password), Json);
+        try { lock (_gate) WriteWhole(FileOf(id, ".login"), _protector.Protect(plain)); }
+        finally { CryptographicOperations.ZeroMemory(plain); }
+    }
+
+    /// <summary>The profile under a new name; everything else as it was.</summary>
+    public StoredProfile Rename(string id, string name)
+    {
+        name = name.Trim();
+        if (name.Length is 0 or > LongestName) throw new ArgumentException($"a profile's name is 1 to {LongestName} characters", nameof(name));
+        lock (_gate)
+        {
+            var renamed = (Find(id) ?? throw new FileNotFoundException("no such profile")) with { Name = name };
+            WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(renamed, Json));
+            return renamed;
+        }
+    }
+
+    private KeptLogin? ReadLogin(string id)
+    {
+        var path = FileOf(id, ".login");
+        byte[] sealedBytes;
+        lock (_gate)
+        {
+            if (!File.Exists(path)) return null;
+            sealedBytes = File.ReadAllBytes(path);
+        }
+        var plain = _protector.Unprotect(sealedBytes);
+        try { return JsonSerializer.Deserialize<KeptLogin>(plain, Json); }
+        catch (JsonException) { return null; }
+        finally { CryptographicOperations.ZeroMemory(plain); }
+    }
+
+    // A class, not a record: nothing may print the password it holds.
+    private sealed class KeptLogin(string username, string? password)
+    {
+        public string Username { get; } = username;
+        public string? Password { get; } = password;
+    }
+
+    private static OvpnProfile Read(string text)
+    {
+        OvpnProfile profile;
+        try { profile = OvpnProfile.Parse(text); }
+        catch (FormatException) { throw new InvalidDataException("the text is not a profile this version can read: a key block is malformed"); }
+        if (profile.Remotes.Count == 0) throw new InvalidDataException("the text is not an OpenVPN profile: it names no remote");
+        return profile;
     }
 
     /// <summary>The profile, opened. Throws <see cref="FileNotFoundException"/> for an id the store does not hold.</summary>
@@ -98,9 +184,10 @@ public sealed class ProfileStore
             var description = FileOf(id, ".json");
             var sealedFile = FileOf(id, ".profile");
             var existed = File.Exists(description) || File.Exists(sealedFile);
-            // The description first, so a half-removed profile is already no longer offered.
+            // The description first, so a half-removed profile is already no longer offered; its login goes with it.
             File.Delete(description);
             File.Delete(sealedFile);
+            File.Delete(FileOf(id, ".login"));
             return existed;
         }
     }

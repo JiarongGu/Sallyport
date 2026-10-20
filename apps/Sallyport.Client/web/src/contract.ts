@@ -343,7 +343,21 @@ export interface NewAppValues {
 }
 
 export type EditorField = 'form' | 'path' | 'name' | 'profileId' | 'kind' | 'arguments' | 'loss' | 'directAfterText' | 'launchProgramId'
-  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol' | 'password' | 'confirm';
+  | 'retryWaitText' | 'retryWaitMaxText' | 'roundsMaxText' | 'attemptTimeoutText' | 'pingRestartText' | 'protocol' | 'password' | 'confirm'
+  | 'link';
+
+/** "Import a VPN profile" (D29), as OpenVPN Connect's Import Profile: from a file or a link, then looked at before it is
+ *  kept. signIn: the link's server asked who the person is, so a username and password are asked for. The host never
+ *  sends a typed password back. */
+export interface NewProfileValues {
+  source: 'file' | 'link';
+  link: string;
+  username: string;
+  password: string;
+  name: string;
+  connect: boolean;
+  signIn: boolean;
+}
 
 /** Export and Import (D26): which parts, and the password the profiles are sealed with. The host never sends a typed
  *  password back: what the page holds is what was typed. */
@@ -362,7 +376,8 @@ export interface MoveValues {
 export type Editor = {
   token: string;
   subjectId: string;
-  phase: 'editing' | 'saving';
+  /** fetching: the import's link is being fetched. */
+  phase: 'editing' | 'saving' | 'fetching';
   errors: Partial<Record<EditorField, string>>;
   /** Guidance under the fields: what the profile itself says. */
   hint: string | null;
@@ -375,7 +390,9 @@ export type Editor = {
   options: { id: string; label: string; help: string | null }[] | null;
   /** For an app: the icons it may take, each a program's own (a data URL), one per look. */
   icons: { id: string; label: string; url: string }[] | null;
-} & ({ kind: 'app'; values: AppEditValues } | { kind: 'program'; values: ProgramEditValues }
+  /** For a profile being imported, once read: its server and where it came from. */
+  facts: Fact[] | null;
+} & ({ kind: 'app'; values: AppEditValues } | { kind: 'new-profile'; values: NewProfileValues } | { kind: 'program'; values: ProgramEditValues }
   | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues }
   | { kind: 'export'; values: MoveValues } | { kind: 'import'; values: MoveValues });
 
@@ -428,7 +445,12 @@ export interface ClientState {
 
 /** Every intent the page may post, with its payload. None is answered: what follows arrives as the next STATE. */
 export interface Commands {
+  /** Opens "Import a VPN profile" (a new-profile editor); the file or link is chosen there. */
   IMPORT: Record<string, never>;
+  PROFILE_IMPORT_BROWSE: { token: string; values: NewProfileValues };
+  /** Get the profile from values.link, with values.username and password once the server has asked for them. */
+  PROFILE_IMPORT_LINK: { token: string; values: NewProfileValues };
+  SAVE_PROFILE_IMPORT: { token: string; values: NewProfileValues };
   CONNECT: { id: string };
   DISCONNECT: { id: string };
   LOCATE: { id: string };

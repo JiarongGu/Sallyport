@@ -45,6 +45,54 @@ public class HandshakeTests
         await Assert.ThrowsAsync<TunnelEnded>(() => tunnel.SendAsync(packet).AsTask());
     }
 
+    // The profile as a server whose users sign in by password gives it: its CA and tls-crypt key, no certificate of its own.
+    private static string PasswordProfile(TestPki pki, byte[] key) =>
+        System.Text.RegularExpressions.Regex.Replace(pki.Profile(key), "<(cert|key)>.*?</\\1>", "", System.Text.RegularExpressions.RegexOptions.Singleline)
+        + "\nauth-user-pass\n";
+
+    private static Task<Tunnel> ConnectWith(string profileText, MemoryTransport end, Login? login) =>
+        Tunnel.ConnectAsync(OvpnProfile.Parse(profileText), Remote, _ => Task.FromResult<ITransport>(end), TimeSpan.FromSeconds(30),
+            new TunnelOptions { Login = login }, null, CancellationToken.None);
+
+    [Fact]
+    public async Task AUsernameAndPasswordAreSentInTheKeyExchangeAndTakeTheCertificatesPlace()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var (clientEnd, serverEnd) = MemoryTransport.Pair();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var server = new FakeServer { CertificateRequired = false, Accept = ("alex", "correct horse") };
+        var serving = server.RunAsync(serverEnd, key, pki.Server, stop.Token);
+
+        var tunnel = await ConnectWith(PasswordProfile(pki, key), clientEnd, new Login("alex", "correct horse"));
+        await tunnel.DisposeAsync();
+        await serving;
+
+        Assert.Equal(("alex", "correct horse"), (server.ClientUsername, server.ClientPassword));
+        Assert.Equal(new IPAddress([10, 8, 0, 2]), tunnel.Config.Address);
+        Assert.Equal("Login (hidden)", new TunnelOptions { Login = new Login("alex", "correct horse") }.Login!.ToString());
+        Assert.DoesNotContain("horse", new TunnelOptions { Login = new Login("alex", "correct horse") }.ToString());
+    }
+
+    [Fact]
+    public async Task AWrongPasswordIsTheServersRefusalAndNoneAtAllIsRefusedBeforeAPacket()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var (clientEnd, serverEnd) = MemoryTransport.Pair();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var serving = new FakeServer { CertificateRequired = false, Accept = ("alex", "correct horse") }.RunAsync(serverEnd, key, pki.Server, stop.Token);
+
+        var wrong = await Assert.ThrowsAsync<HandshakeFailed>(() => ConnectWith(PasswordProfile(pki, key), clientEnd, new Login("alex", "wrong horse")));
+        var none = await Assert.ThrowsAsync<HandshakeFailed>(() => ConnectWith(PasswordProfile(pki, key), MemoryTransport.Pair().Item1, null));
+        await stop.CancelAsync();
+        try { await serving; } catch (OperationCanceledException) { }
+
+        Assert.True(wrong.AuthenticationRefused);
+        Assert.Equal(HandshakeStage.Profile, none.Stage);
+        Assert.Contains("username and password", none.Message);
+    }
+
     [Fact]
     public async Task BothSidesOnTheSameKeyHalfIsNamedAsSuch()
     {

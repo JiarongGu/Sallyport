@@ -244,6 +244,7 @@ public class TunnelSessionTests
             await session.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
             Assert.Equal(SessionState.Refused, session.Status.State);
             Assert.Contains("refused authentication", session.Status.LastError);
+            Assert.True(session.Status.AuthenticationRefused);
             // The second remote is not tried: the credentials are the profile's, not the server's.
             Assert.Equal(1, farm.Attempts);
         }
@@ -449,6 +450,8 @@ public class TunnelSessionTests
 
         Assert.Equal(SessionState.Refused, session.Status.State);
         Assert.Contains("username and password", session.Status.LastError);
+        // Refused before asking, not by the server: no wrong password to say.
+        Assert.False(session.Status.AuthenticationRefused);
         Assert.Equal(0, farm.Attempts);
     }
 }
@@ -507,6 +510,9 @@ internal sealed class FakeProtector(byte keyId) : IProfileProtector
 
 public sealed class ProfileStoreTests : IDisposable
 {
+    private static string WithoutBlock(string profile, string tag) =>
+        System.Text.RegularExpressions.Regex.Replace(profile, $"<{tag}>.*?</{tag}>", "", System.Text.RegularExpressions.RegexOptions.Singleline);
+
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "sallyport-tests", Guid.NewGuid().ToString("N"));
     private readonly TestPki _pki = new();
     private readonly byte[] _key = TestKeys.StaticKey();
@@ -550,13 +556,65 @@ public sealed class ProfileStoreTests : IDisposable
     }
 
     [Fact]
+    public void APreviewSaysItsServersOnceEachAndKeepsNothing()
+    {
+        var text = _pki.Profile(_key) + "\nremote second.example.test 443 tcp\nremote VPN.example.test 1195 udp\n";
+
+        var preview = ProfileStore.Preview(text);
+
+        Assert.Equal(["vpn.example.test", "second.example.test"], preview.Servers);
+        Assert.Equal(["udp", "tcp"], preview.Transports);
+        Assert.Null(preview.Unsupported);
+        Assert.False(Directory.Exists(_directory) && Directory.EnumerateFileSystemEntries(_directory).Any());
+        // Asking for a username and password is a way to sign in (D29), not a reason it cannot connect.
+        Assert.Null(ProfileStore.Preview(text + "auth-user-pass\n").Unsupported);
+        Assert.Equal("the profile has no <ca>", ProfileStore.Preview(WithoutBlock(text, "ca")).Unsupported);
+        Assert.Throws<InvalidDataException>(() => ProfileStore.Preview("SECRET-MARKER is not a profile"));
+    }
+
+    [Fact]
+    public void ALoginIsKeptSealedWithItsPasswordOnlyWhenRememberedAndGoesWithTheProfile()
+    {
+        var store = new ProfileStore(_directory, new FakeProtector(1));
+        var entry = store.Import("work", _pki.Profile(_key) + "\nauth-user-pass\n");
+
+        Assert.True(entry.NeedsLogin);
+        Assert.Equal(new LoginState(null, false), store.LoginOf(entry.Id));
+        store.SetLogin(entry.Id, " alex ", null);
+        Assert.Equal(new LoginState("alex", false), store.LoginOf(entry.Id));
+        Assert.Null(store.SavedLogin(entry.Id));
+        store.SetLogin(entry.Id, "alex", "correct horse");
+        Assert.Equal(new LoginState("alex", true), store.LoginOf(entry.Id));
+        Assert.Equal(("alex", "correct horse"), (store.SavedLogin(entry.Id)!.Username, store.SavedLogin(entry.Id)!.Password));
+        var sealedLogin = Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(_directory, entry.Id + ".login")));
+        Assert.DoesNotContain("alex", sealedLogin);
+        Assert.DoesNotContain("horse", sealedLogin);
+        Assert.DoesNotContain("alex", File.ReadAllText(Path.Combine(_directory, entry.Id + ".json")));
+
+        Assert.Equal("work, renamed", store.Rename(entry.Id, " work, renamed ").Name);
+        Assert.Equal(("work, renamed", true), (Assert.Single(store.List()).Name, store.LoginOf(entry.Id).PasswordSaved));
+        store.Remove(entry.Id);
+        Assert.Empty(Directory.EnumerateFiles(_directory));
+    }
+
+    [Fact]
+    public void APreviewSaysASignInIsNeededAndTheUsernameAnAccessServerProfileCarries()
+    {
+        var preview = ProfileStore.Preview("# OVPN_ACCESS_SERVER_USERNAME=alex\n" + _pki.Profile(_key) + "\nauth-user-pass\n");
+        var withoutSignIn = ProfileStore.Preview("# OVPN_ACCESS_SERVER_USERNAME=alex\n" + _pki.Profile(_key));
+
+        Assert.Equal((true, "alex"), (preview.NeedsLogin, preview.Username));
+        Assert.Equal((false, null), (withoutSignIn.NeedsLogin, withoutSignIn.Username));
+    }
+
+    [Fact]
     public void AProfileThisVersionCannotServeIsKeptWithTheReason()
     {
         var store = new ProfileStore(_directory, new FakeProtector(1));
 
-        var entry = store.Import("work", _pki.Profile(_key) + "\nauth-user-pass\n");
+        var entry = store.Import("work", WithoutBlock(_pki.Profile(_key), "ca"));
 
-        Assert.Contains("username and password", entry.Unsupported);
+        Assert.Equal("the profile has no <ca>", entry.Unsupported);
     }
 
     [Fact]
