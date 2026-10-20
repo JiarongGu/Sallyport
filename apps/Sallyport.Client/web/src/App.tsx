@@ -127,7 +127,7 @@ export function App() {
     const editor = state?.editor;
     if (editor && editor.token !== editorToken.current) {
       setPage(editor.kind === 'new-profile' || editor.kind === 'profile-edit' ? 'profiles'
-        : editor.kind === 'defaults' || editor.kind === 'export' || editor.kind === 'import' ? 'settings' : 'apps');
+        : editor.kind === 'export' || editor.kind === 'import' ? 'settings' : 'apps');
       // An app's editors open on its page.
       if (editor.kind === 'app' || editor.kind === 'program') setAppPage(editor.subjectId.split('/')[0]);
     }
@@ -151,7 +151,7 @@ export function App() {
   });
   const editorForm = state?.editor && currentDraft ? <EditorForm key={state.editor.token}
     editor={state.editor} draft={currentDraft} onChange={setDraft}
-    profileChoices={state.profileChoices} kindChoices={state.kindChoices} lossChoices={state.lossChoices} /> : null;
+    kindChoices={state.kindChoices} lossChoices={state.lossChoices} /> : null;
   const shown = page ?? state?.initialPage ?? 'apps';
   const newApp = shown === 'apps' && state?.editor?.kind === 'new-app' ? state.editor : null;
   const newProfile = shown === 'profiles' && state?.editor?.kind === 'new-profile' ? state.editor : null;
@@ -213,7 +213,7 @@ export function App() {
           editedProfile && profileEdit && currentDraft ? <ProfileEdit profile={editedProfile}
             form={<ProfileEditForm key={profileEdit.token} editor={profileEdit} draft={currentDraft} onChange={setDraft} />} /> :
           shown === 'profiles' ? <Profiles state={state} now={now} /> :
-          <Settings state={state} expanded={expanded} toggle={toggle} editorForm={state.editor?.kind === 'defaults' ? editorForm : null}
+          <Settings state={state} expanded={expanded} toggle={toggle}
             moveForm={state.editor?.kind === 'export' || state.editor?.kind === 'import' ? editorForm : null} />}
       </main>
     </div>

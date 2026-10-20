@@ -49,17 +49,28 @@ public sealed class BackupTests
     public void Apps_and_connection_settings_read_back_as_written()
     {
         var app = new RoutedItem("0123456789abcdef", "Zenless", @"E:\Games\ZZZ", At, null, LossMode.Hold, 30, [], Uses: [new AppUse(Jp.Id, false)]);
-        var connection = new ConnectionPart(new PolicyOverride(RoundsMax: 5, Protocol: "tcp"), new Dictionary<string, PolicyOverride> { [Jp.Id] = new(PingRestartSeconds: 20) },
-            new AppDefaults(Jp.Id, LossMode.Direct));
+        var connection = new ConnectionPart(new PolicyOverride(RoundsMax: 5, Protocol: "tcp"), new Dictionary<string, PolicyOverride> { [Jp.Id] = new(PingRestartSeconds: 20) });
 
         var file = Backup.Read(Backup.Write(null, [app], connection));
 
         var back = Assert.Single(file.Apps!);
         Assert.Equal(("Zenless", 30, new AppUse(Jp.Id, false)), (back.Name, back.DirectAfterSeconds, Assert.Single(back.Sections)));
         Assert.Equal(connection.Connection, file.Connection!.Connection);
-        Assert.Equal(connection.Defaults, file.Connection.Defaults);
         Assert.Equal(new PolicyOverride(PingRestartSeconds: 20), file.Connection.Policies[Jp.Id]);
         Assert.Null(file.Profiles);
+    }
+
+    [Fact]
+    public void An_earlier_versions_file_with_defaults_for_new_apps_still_reads()
+    {
+        // 0.1.0 wrote the defaults for new apps into the connection part; they are no longer kept, and read past.
+        var written = Encoding.UTF8.GetString(Backup.Write(null, null, new ConnectionPart(new PolicyOverride(RoundsMax: 3), new Dictionary<string, PolicyOverride>())));
+        var earlier = written.Replace("\"policies\"", "\"defaults\": { \"profileId\": null, \"loss\": \"direct\", \"directAfterSeconds\": 30 }, \"policies\"", StringComparison.Ordinal);
+        Assert.Contains("\"defaults\"", earlier);
+
+        var file = Backup.Read(Encoding.UTF8.GetBytes(earlier));
+
+        Assert.Equal(new PolicyOverride(RoundsMax: 3), file.Connection!.Connection);
     }
 
     [Theory]

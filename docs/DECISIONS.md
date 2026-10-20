@@ -663,8 +663,9 @@ might be changed so app need to have a scan/relocate logic for this".
 - **Settings → Move to another computer → Export… / Import…** (they open there: the window used to leave for
   Overview). One file, `.sallyport` (`Backup`: `sallyport-export`, version 1, JSON, at most 16 MB read), of the parts
   the person ticks: **VPN profiles** (each one's own text, so the `.ovpn` is not needed), **apps** (their programs,
-  switches and sections; the games themselves are not copied) and **connection settings** (Settings' choices, each
-  profile's own changes, the defaults for new apps).
+  switches and sections; the games themselves are not copied) and **connection settings** (Settings' choices and each
+  profile's own changes; until 2026-10-21 the defaults for new apps too, which an earlier file still carries and Import
+  reads past — Add an app sets each one up: "新应用的默认设置 this can be just internal because the app add just one off").
 - **A password is the person's choice.** Given (8 characters at least, twice), each profile's text is sealed with
   AES-GCM (12-byte nonce, 16-byte tag) under a key PBKDF2-SHA256 makes from it (600,000 iterations, a 16-byte salt;
   fewer than 100,000 is refused when read), its id and name bound in. None given, the text is in the file as it is, and

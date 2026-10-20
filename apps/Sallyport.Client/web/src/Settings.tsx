@@ -7,8 +7,8 @@ import { HelpButton, HelpHeading } from './ui/Help';
 
 /** How Sallyport is set up on this computer, and how to use it: each group its heading and its controls, what it is for
  *  behind the "?" beside the heading (the owner: "a proper helper modal instead putting all in the display"). */
-export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
-  state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; editorForm: ReactNode; moveForm: ReactNode;
+export function Settings({ state, expanded, toggle, moveForm }: {
+  state: ClientState; expanded: ReadonlySet<string>; toggle: (key: string) => void; moveForm: ReactNode;
 }) {
   const settings = state.settings;
   const generalId = useId();
@@ -74,19 +74,6 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
         <p>{t('Without it, a profile still works as a SOCKS5 proxy on this computer, for the programs set to use one.')}</p>
       </HelpHeading>
       <RoutingCard routing={settings.routing} manage />
-    </section>
-
-    <section className="settings-group" aria-label={t('Defaults for new apps')}>
-      <HelpHeading title={t('Defaults for new apps')}>
-        <p>{t('What an app you add starts with. Apps added before keep their own.')}</p>
-      </HelpHeading>
-      <div className="card">
-        <div className="row-head">
-          <Facts facts={settings.defaults.facts} />
-          <ActionButton action={settings.defaults.edit} focusKey="defaults" onClick={() => post('BEGIN_DEFAULTS_EDIT', {})} />
-        </div>
-        {editorForm}
-      </div>
     </section>
 
     {settings.move && <section className="settings-group" aria-label={t('Move to another computer')}>
@@ -157,7 +144,7 @@ function MoveHelp() {
     <dl>
       <div><dt>{t('VPN profiles')}</dt><dd>{t('Their keys included; the .ovpn files themselves are not needed.')}</dd></div>
       <div><dt>{t('Apps')}</dt><dd>{t('Their programs, switches and the VPNs they go through. The games themselves are not copied.')}</dd></div>
-      <div><dt>{t('Connection settings')}</dt><dd>{t('VPN protocol, retries, each profile’s own changes, and the defaults for new apps.')}</dd></div>
+      <div><dt>{t('Connection settings')}</dt><dd>{t('VPN protocol, retries, and each profile’s own changes.')}</dd></div>
     </dl>
     <h3>{t('Password')}</h3>
     <p>{t('With a password, the profiles in the file open only with that password; without one, anyone who has the file can use them. Keep the password: it cannot be recovered.')}</p>

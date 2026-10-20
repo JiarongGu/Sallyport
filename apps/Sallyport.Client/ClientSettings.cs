@@ -21,10 +21,6 @@ internal sealed record GameChoice(string? ProfileId, LossMode Loss, int? DirectA
     public LossPolicy Policy => new(Loss, DirectAfterSeconds is > 0 and var s ? TimeSpan.FromSeconds(s) : null);
 }
 
-/// <summary>What a new app starts with: its VPN profile (null: the first that can connect) and loss policy. Apps made
-/// before keep their own.</summary>
-internal sealed record AppDefaults(string? ProfileId = null, LossMode Loss = LossMode.Hold, int? DirectAfterSeconds = null);
-
 /// <summary>A profile's connection settings the person changed, each null where the profile's own stands (OpenVPN's
 /// directives, read from it: <see cref="ConnectionPolicy"/>). <see cref="RoundsMax"/> 0 is "never give up";
 /// <see cref="Protocol"/> "udp" or "tcp" holds it to those servers, and <see cref="Any"/> lets a profile use all of its
@@ -83,7 +79,6 @@ internal sealed class ClientSettings
         public Dictionary<string, PolicyOverride> Policies { get; set; } = [];
         /// <summary>Settings' connection choices, for every profile; a profile's own changes go over them.</summary>
         public PolicyOverride Connection { get; set; } = new();
-        public AppDefaults Defaults { get; set; } = new();
         /// <summary>"en", "zh-Hans", or null for Windows' own display language.</summary>
         public string? Language { get; set; }
     }
@@ -118,18 +113,6 @@ internal sealed class ClientSettings
         }
     }
 
-    public AppDefaults Defaults
-    {
-        get { lock (_gate) return _saved.Defaults ?? new(); }
-        set
-        {
-            lock (_gate)
-            {
-                _saved.Defaults = value;
-                Save();
-            }
-        }
-    }
 
     /// <summary>Each game's profile and loss policy as an earlier client kept them, for <see cref="RoutedItemStore"/>'s
     /// migration; never written since.</summary>

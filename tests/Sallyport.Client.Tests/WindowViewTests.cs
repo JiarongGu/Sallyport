@@ -217,8 +217,7 @@ public class WindowViewTests
     public void Settings_says_how_Sallyport_starts_and_where_it_is(bool on, string toggle)
     {
         var guide = new ClientState.GuideView("127.0.0.1:1088", ClientView.CurlExample("127.0.0.1:1088"), UiAction.Shown("Copy"));
-        var view = WindowViews.Settings(Ready, on, guide, @"D:\Program Files\Sallyport\data\users\S-1-5-21-1", installedIn: null,
-            new AppDefaults(Jp.Id, LossMode.Direct, null), Jp, editing: false);
+        var view = WindowViews.Settings(Ready, on, guide, @"D:\Program Files\Sallyport\data\users\S-1-5-21-1", installedIn: null, editing: false);
 
         Assert.Equal(on, view.Startup.On);
         Assert.Equal("Start Sallyport with Windows", view.Startup.Label);
@@ -227,8 +226,6 @@ public class WindowViewTests
         Assert.Equal(["Version"], view.About.Select(f => f.Label));
         Assert.StartsWith("Not installed (a development build in ", view.Places!.Single(f => f.Label == "Installed in").Value);
         Assert.Equal(@"D:\Program Files\Sallyport\data\users\S-1-5-21-1", view.Places!.Single(f => f.Label == "Your data").Value);
-        Assert.Equal(["jp", "your own connection until it is back"], view.Defaults.Facts.Select(f => f.Value));
-        Assert.True(view.Defaults.Edit is { Visible: true, Enabled: true, Label: "Change…" });
     }
 
     [Fact]

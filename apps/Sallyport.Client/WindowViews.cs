@@ -49,12 +49,10 @@ internal sealed record NetworkView(string StatusText, Tone Tone, NetworkEmpty? E
 
 internal sealed record StartupView(bool On, string Label, string Text, UiAction Toggle);
 
-internal sealed record DefaultsView(IReadOnlyList<Fact> Facts, UiAction Edit);
-
 /// <summary>The language the window speaks, "en" or "zh-Hans", and the choices.</summary>
 internal sealed record LanguageView(string Setting, IReadOnlyList<EditorOption> Choices);
 
-internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About, DefaultsView Defaults,
+internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About,
     LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null, MoveView? Move = null,
     UiAction? Uninstall = null);
 
@@ -63,8 +61,6 @@ internal sealed record MoveView(UiAction Export, UiAction Import);
 
 /// <summary>Settings' connection choices, each applied the moment it is chosen: SET_PROTOCOL, SET_RETRY.</summary>
 internal sealed record ConnectionSettingsView(LanguageView Protocol, LanguageView Retry);
-
-internal sealed record DefaultsValues(string? ProfileId, LossMode Loss, string DirectAfterText);
 
 internal static class WindowViews
 {
@@ -153,7 +149,7 @@ internal static class WindowViews
     }
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
-        AppDefaults defaults, StoredProfile? defaultProfile, bool editing, string? languageSetting = null, PolicyOverride? connection = null,
+        bool editing, string? languageSetting = null, PolicyOverride? connection = null,
         string? dialogOpen = null, bool moving = false)
     {
         // The driver and the service are said once, under Packet routing.
@@ -169,11 +165,6 @@ internal static class WindowViews
                 L.T("Opens Sallyport beside the clock when you sign in. Your apps use the VPN only once you connect."),
                 UiAction.Shown(startsWithWindows ? L.T("Turn off") : L.T("Turn on"))),
             guide, about,
-            new DefaultsView(
-            [
-                new(L.T("VPN profile"), defaultProfile?.Name ?? (defaults.ProfileId is null ? L.T("The first that can connect") : L.T("Not chosen (the one chosen was removed)"))),
-                new(L.T("If the VPN drops"), GameViews.LossShort(new GameChoice(null, defaults.Loss, defaults.DirectAfterSeconds))),
-            ], UiAction.Shown(L.T("Change…"), !editing, L.T("Finish the open edit first."))),
             Language(languageSetting),
             // Never given "keep trying" stands until something else is chosen.
             new ConnectionSettingsView(new(connection?.Protocol ?? "", GameViews.ProtocolChoices()),

@@ -213,8 +213,6 @@ export interface SettingsView {
   about: Fact[];
   /** Where it is installed and where its data is: long paths, folded under Technical details. */
   places: Fact[] | null;
-  /** What a new app starts with; edit posts BEGIN_DEFAULTS_EDIT. */
-  defaults: { facts: Fact[]; edit: Action };
   /** The language in force ("en", "zh-Hans") and the choices; choosing posts SET_LANGUAGE. */
   language: { setting: string; choices: { id: string; label: string }[] };
   /** How every profile connects, unless changed for one in its own view. Choosing posts SET_PROTOCOL ('', 'udp', 'tcp')
@@ -227,13 +225,6 @@ export interface SettingsView {
   move: { export: Action; import: Action } | null;
   /** About's Uninstall Sallyport…: setup's removal, for an installed copy only. Posts UNINSTALL. */
   uninstall: Action | null;
-}
-
-/** What a new app starts with: a profile (null: the first that can connect) and its loss policy. */
-export interface DefaultsValues {
-  profileId: string | null;
-  loss: LossMode;
-  directAfterText: string;
 }
 
 /** One program of an app, as its row shows it. */
@@ -428,7 +419,7 @@ export type Editor = {
   /** For a profile being imported, once read: its server and where it came from. */
   facts: Fact[] | null;
 } & ({ kind: 'app'; values: AppEditValues } | { kind: 'new-profile'; values: NewProfileValues } | { kind: 'profile-edit'; values: ProfileEditValues } | { kind: 'program'; values: ProgramEditValues }
-  | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues }
+  | { kind: 'new-app'; values: NewAppValues }
   | { kind: 'export'; values: MoveValues } | { kind: 'import'; values: MoveValues });
 
 export interface Confirmation {
@@ -496,12 +487,10 @@ export interface Commands {
   CONNECT: { id: string };
   DISCONNECT: { id: string };
   LOCATE: { id: string };
-  BEGIN_DEFAULTS_EDIT: Record<string, never>;
   BEGIN_EXPORT: Record<string, never>;
   SAVE_EXPORT: { token: string; values: MoveValues };
   BEGIN_IMPORT: Record<string, never>;
   SAVE_IMPORT: { token: string; values: MoveValues };
-  SAVE_DEFAULTS: { token: string; values: DefaultsValues };
   COPY_ENDPOINT: { id: string };
   /** Opens "Add an app" (a new-app editor); its place is chosen there. */
   /** profileId: opened from that profile's section on the Overview, and ticked. */

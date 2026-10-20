@@ -758,14 +758,14 @@ internal sealed class ClientCore
     /// profile, if any.</summary>
     public void BeginAddApp(string? profileId = null)
     {
-        var defaults = _settings.Defaults;
         IReadOnlyList<string> through = profileId is not null && _store.Find(profileId) is not null ? [profileId]
             : DefaultProfile() is { } first ? [first.Id] : [];
         lock (_gate)
         {
             _setup = null;
-            _editor = new OpenEditor(NewToken(), "new-app", "", new NewAppValues("", "", through, defaults.Loss,
-                defaults.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? "", []), Empty);
+            // Held while the VPN reconnects, the safe choice: what else is wanted is chosen on the page, for this app (the
+            // owner: "新应用的默认设置 this can be just internal because the app add just one off").
+            _editor = new OpenEditor(NewToken(), "new-app", "", new NewAppValues("", "", through, LossMode.Hold, "", []), Empty);
         }
         Publish();
     }
@@ -928,45 +928,8 @@ internal sealed class ClientCore
         Notify(NoticeKind.Info, L.T("Added {0} to {1}.", Path.GetFileName(path), item.Name), new("app", id));
     }
 
-    // A new app's profile: the default the person chose, while it can connect; else the first that can.
-    private StoredProfile? DefaultProfile() =>
-        _settings.Defaults.ProfileId is { } chosen && _store.Find(chosen) is { Unsupported: null } profile ? profile
-        : _store.List().FirstOrDefault(p => p.Unsupported is null);
-
-    public void BeginDefaultsEdit()
-    {
-        var defaults = _settings.Defaults;
-        lock (_gate)
-            _editor = new OpenEditor(NewToken(), "defaults", "defaults", new DefaultsValues(_store.Find(defaults.ProfileId ?? "") is null ? null : defaults.ProfileId,
-                defaults.Loss, defaults.DirectAfterSeconds?.ToString(CultureInfo.InvariantCulture) ?? ""), Empty);
-        Publish();
-    }
-
-    public void SaveDefaults(string token, DefaultsValues values)
-    {
-        if (EditorFor(token, "defaults") is null) return;
-        var directAfterText = values.DirectAfterText?.Trim() ?? "";
-        var errors = new Dictionary<string, string>();
-        if (values.ProfileId is { } chosen && _store.Find(chosen) is null) errors["profileId"] = L.T("Choose one of your profiles.");
-        if (!Enum.IsDefined(values.Loss)) errors["loss"] = L.T("Choose what happens when the VPN drops.");
-        int? directAfter = null;
-        if (values.Loss == LossMode.Hold && directAfterText.Length > 0)
-        {
-            if (int.TryParse(directAfterText, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) && seconds is >= 5 and <= 3600) directAfter = seconds;
-            else errors["directAfterText"] = L.T("Use 5 to 3600 seconds, or leave it empty to hold until the VPN is back.");
-        }
-        lock (_gate)
-        {
-            if (_editor?.Token != token) return;
-            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
-            else
-            {
-                _settings.Defaults = new AppDefaults(values.ProfileId, values.Loss, directAfter);
-                _editor = null;
-            }
-        }
-        Publish();
-    }
+    // A new app's profile, when it is not added from a profile's section: the first that can connect.
+    private StoredProfile? DefaultProfile() => _store.List().FirstOrDefault(p => p.Unsupported is null);
 
     private async Task<string?> PickProgramAsync(string which, string title)
     {
@@ -1402,7 +1365,7 @@ internal sealed class ClientCore
         {
             var profiles = values.Profiles ? Backup.Seal(_store.List().Select(p => (p, _store.Text(p.Id))), password.Length > 0 ? password : null) : null;
             var bytes = Backup.Write(profiles, values.Apps ? _items.List() : null,
-                values.Connection ? new ConnectionPart(_settings.Connection, _settings.Policies, _settings.Defaults) : null);
+                values.Connection ? new ConnectionPart(_settings.Connection, _settings.Policies) : null);
             var temporary = path + ".tmp";
             File.WriteAllBytes(temporary, bytes);
             File.Move(temporary, path, overwrite: true);
@@ -1504,7 +1467,6 @@ internal sealed class ClientCore
         if (values.Connection && file.Connection is { } connection)
         {
             _settings.Connection = connection.Connection;
-            _settings.Defaults = connection.Defaults with { ProfileId = connection.Defaults.ProfileId is { } chosen && mapped.TryGetValue(chosen, out var to) ? to : null };
             foreach (var (profile, policy) in connection.Policies)
                 if (mapped.TryGetValue(profile, out var target)) _settings.PutPolicy(target, policy);
         }
@@ -1678,8 +1640,8 @@ internal sealed class ClientCore
             AppViews.Empty(stored.Count, apps.Count),
             WindowViews.Network(profiles, apps, live, stored, driver, stored.ToDictionary(p => p.Id, p => _connections.ProxyProblemOf(p.Id)),
                 stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id)), stored.ToDictionary(p => p.Id, p => _connections.TrafficOf(p.Id)), sections),
-            WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(), _settings.Defaults,
-                stored.FirstOrDefault(p => p.Id == _settings.Defaults.ProfileId), editor is not null, _settings.Language, _settings.Connection,
+            WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(),
+                editor is not null, _settings.Language, _settings.Connection,
                 dialog is null ? null : L.T("A file dialog is open."), editor?.Kind is "export" or "import"),
             // Where a first look is useful: with nothing to route through yet, the page that imports one; else the Overview,
             // where the switch is.

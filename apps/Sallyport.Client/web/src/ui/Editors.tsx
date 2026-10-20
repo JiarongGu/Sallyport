@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { AppEditValues, ClientState, Confirmation, DefaultsValues, Editor, EditorField, MoveValues, NewAppValues, NewProfileValues, PolicyValues, ProfileEditValues, ProgramEditValues, SignInView } from '../contract';
+import type { AppEditValues, ClientState, Confirmation, Editor, EditorField, MoveValues, NewAppValues, NewProfileValues, PolicyValues, ProfileEditValues, ProgramEditValues, SignInView } from '../contract';
 import { getFocusOrigin, post } from '../commands';
 import { t } from '../i18n';
 import { ActionButton, Disclosure, Facts, Icon } from './shared';
@@ -8,7 +8,6 @@ import { paintCaptionButtons } from './Chrome';
 export type Draft =
   | { token: string; kind: 'app'; values: AppEditValues }
   | { token: string; kind: 'program'; values: ProgramEditValues }
-  | { token: string; kind: 'defaults'; values: DefaultsValues }
   | { token: string; kind: 'new-app'; values: NewAppValues }
   | { token: string; kind: 'new-profile'; values: NewProfileValues }
   | { token: string; kind: 'profile-edit'; values: ProfileEditValues }
@@ -18,7 +17,6 @@ export function seedDraft(editor: Editor): Draft {
   switch (editor.kind) {
     case 'app': return { token: editor.token, kind: 'app', values: { ...editor.values } };
     case 'program': return { token: editor.token, kind: 'program', values: { ...editor.values } };
-    case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
     case 'new-app': return { token: editor.token, kind: 'new-app', values: { ...editor.values, included: [...editor.values.included] } };
     case 'new-profile': return { token: editor.token, kind: 'new-profile', values: { ...editor.values } };
     case 'profile-edit': return { token: editor.token, kind: 'profile-edit', values: { ...editor.values, policy: editor.values.policy && { ...editor.values.policy } } };
@@ -39,11 +37,10 @@ function useEditorFocus(ref: RefObject<HTMLFormElement | null>) {
   }, [ref]);
 }
 
-export function EditorForm({ editor, draft, onChange, profileChoices, kindChoices, lossChoices }: {
+export function EditorForm({ editor, draft, onChange, kindChoices, lossChoices }: {
   editor: Editor;
   draft: Draft;
   onChange: (draft: Draft) => void;
-  profileChoices: ClientState['profileChoices'];
   kindChoices: ClientState['kindChoices'];
   lossChoices: ClientState['lossChoices'];
 }) {
@@ -59,7 +56,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
 
   return <form ref={form} className="editor" tabIndex={-1}
     aria-label={t(editor.kind === 'program' ? 'Program methods'
-      : editor.kind === 'defaults' ? 'Defaults for new apps' : editor.kind === 'export' ? 'Export' : editor.kind === 'import' ? 'Import' : 'Edit app')}
+      : editor.kind === 'export' ? 'Export' : editor.kind === 'import' ? 'Import' : 'Edit app')}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
       event.preventDefault();
@@ -67,7 +64,6 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
       switch (draft.kind) {
         case 'app': post('SAVE_APP', { token: editor.token, values: draft.values }); break;
         case 'program': post('SAVE_PROGRAM', { token: editor.token, values: draft.values }); break;
-        case 'defaults': post('SAVE_DEFAULTS', { token: editor.token, values: draft.values }); break;
         case 'export': post('SAVE_EXPORT', { token: editor.token, values: draft.values }); break;
         case 'import': post('SAVE_IMPORT', { token: editor.token, values: draft.values }); break;
       }
@@ -147,37 +143,6 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
           onChange={(event) => onChange({ ...draft, values: { ...draft.values, arguments: event.target.value } })} />
         {error('arguments')}
       </div>
-    </div> : draft.kind === 'defaults' ? <div className="editor-fields">
-      <div className="field">
-        <label htmlFor={`${prefix}-profile`}>{t('VPN profile')}</label>
-        <select id={`${prefix}-profile`} value={draft.values.profileId ?? ''} disabled={saving}
-          aria-invalid={!!editor.errors.profileId} aria-describedby={description('profileId')}
-          onChange={(event) => onChange({ ...draft, values: { ...draft.values, profileId: event.target.value || null } })}>
-          <option value="">{t('The first that can connect')}</option>
-          {profileChoices.map((choice) => <option key={choice.id} value={choice.id} disabled={!choice.enabled}>{choice.label}</option>)}
-        </select>
-        {error('profileId')}
-      </div>
-      <fieldset className="field full-field loss-choices" aria-describedby={description('loss')}>
-        <legend>{t('When the VPN drops')}</legend>
-        {lossChoices.map((choice) => <label key={choice.value} className="radio-field">
-          <input type="radio" name={`${prefix}-loss`} value={choice.value} checked={draft.values.loss === choice.value} disabled={saving}
-            onChange={() => onChange({ ...draft, values: { ...draft.values, loss: choice.value } })} />
-          <span><span>{choice.label}</span><span className="secondary metadata">{choice.help}</span></span>
-        </label>)}
-        {error('loss')}
-      </fieldset>
-      {draft.values.loss === 'hold' && <div className="field">
-        <label htmlFor={`${prefix}-after`}>{t('Use my own connection after')}</label>
-        <div className="unit-field">
-          <input id={`${prefix}-after`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
-            value={draft.values.directAfterText} disabled={saving} placeholder={t('never')}
-            aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
-            onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
-          <span className="secondary">{t('seconds')}</span>
-        </div>
-        {error('directAfterText')}
-      </div>}
     </div> : null}
     {editor.hint && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
     {error('form')}

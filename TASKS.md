@@ -9,6 +9,12 @@ The owner, 2026-10-21: "next session will be a full code review + perpare for nu
 library for openvpn)". The list of 2026-10-21 is done (its record: the commits from `9b2c8ec` to this one, D30).
 
 The owner's reports since, each first:
+- **The setup exe's size.** "I also found the setup.exe is really big?" 53 MB is .NET's runtime and Windows Forms whole
+  (124 MB loose, compressed); WebView2 is Windows' own. Trimmed (`TrimMode=partial`) it measured 28.8 MB, but
+  Microsoft does not support trimming Windows Forms (NETSDK1175) and the library's reflection JSON warns (IL2026).
+  **Done when:** a trimmed release, every path tried on it (the window, the tray, the file dialogs, copy, icons, the
+  service and its workers, setup's install, upgrade and removal, export and import), or the reason it stays whole
+  recorded in DECISIONS.
 - **A folder release with a manifest.** "instead bundle we will need a zip/folder bundle too with mainfest file for file
   hash check (and this is been widely used in sibling repo you can check and pick the best one you think)". **Done
   when:** the release has, beside the setup exe, a zip of the installed folder and a manifest (each file's size and

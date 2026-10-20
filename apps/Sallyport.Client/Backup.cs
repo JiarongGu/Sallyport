@@ -25,8 +25,9 @@ internal sealed record SealedProfiles(string Kdf, int Iterations, string Salt, I
     public bool Sealed => Kdf != Unsealed;
 }
 
-/// <summary>Settings' connection choices, each profile's own changes, and the defaults for new apps.</summary>
-internal sealed record ConnectionPart(PolicyOverride Connection, IReadOnlyDictionary<string, PolicyOverride> Policies, AppDefaults Defaults);
+/// <summary>Settings' connection choices and each profile's own changes. An earlier version's file has the defaults for
+/// new apps too, which are no longer kept (Add an app sets each one up); they are read past.</summary>
+internal sealed record ConnectionPart(PolicyOverride Connection, IReadOnlyDictionary<string, PolicyOverride> Policies);
 
 /// <summary>A file of what the person exported, to import on another computer or again on this one.</summary>
 internal sealed record BackupFile(string Format, int Version, DateTimeOffset Exported, SealedProfiles? Profiles, IReadOnlyList<RoutedItem>? Apps,
