@@ -36,7 +36,7 @@ internal sealed class StatusTray : IDisposable
     {
         _window = window;
         _core = core;
-        _menu = new ContextMenuStrip { Renderer = new DarkMenuRenderer(), ShowImageMargin = false, ShowCheckMargin = false };
+        _menu = new ContextMenuStrip();
         // Rebuilt as it opens, so it is never a state behind.
         _menu.Opening += (_, e) => { Fill(); e.Cancel = false; };
         Fill();
@@ -121,81 +121,79 @@ internal sealed class StatusTray : IDisposable
         if (!_icons.TryGetValue(summary.Tone, out var icon))
             _icons[summary.Tone] = icon = Draw(Colours[summary.Tone], SystemInformation.SmallIconSize.Width);
         _icon.Icon = icon;
-        _icon.Text = Tooltip(L.T("Sallyport — {0}", summary.Text));
+        _icon.Text = TrayMenu.Tooltip(summary.Text);
     }
 
+    /// <summary>The menu as <see cref="TrayMenu"/> builds it from the window's views, in the theme Windows is in now.</summary>
     private void Fill()
     {
         // Cleared items are not disposed by the strip; each holds a handle-backed image and font until it is.
         foreach (var old in _menu.Items.Cast<ToolStripItem>().ToList()) old.Dispose();
         var state = _core.Snapshot();
-
-        var open = new ToolStripMenuItem(L.T("Open Sallyport"), null, (_, _) => ShowWindow());
-        open.Font = _bold ??= new Font(open.Font, FontStyle.Bold);
-        _menu.Items.Add(open);
-        _menu.Items.Add(new ToolStripMenuItem(L.T("Open Network"), null, (_, _) => ShowPage(Page.Network)) { ToolTipText = state.Network.StatusText });
-        _menu.Items.Add(new ToolStripSeparator());
-
-        if (state.Profiles.Count == 0)
-            _menu.Items.Add(new ToolStripMenuItem(L.T("No profiles yet — open Sallyport to import one")) { Enabled = false });
-        foreach (var profile in state.Profiles)
-        {
-            var id = profile.Id;
-            var item = new ToolStripMenuItem($"{profile.Name} — {profile.StatusText}");
-            if (profile.DetailText is { } detail) item.DropDownItems.Add(new ToolStripMenuItem(detail) { Enabled = false });
-            Add(item, profile.Actions.Connect, () => { _core.Connect(id); return Task.CompletedTask; });
-            Add(item, profile.Actions.Disconnect, () => _core.DisconnectAsync(id));
-            if (item.DropDownItems.Count == 0) item.DropDownItems.Add(new ToolStripMenuItem(profile.StatusText) { Enabled = false });
-            _menu.Items.Add(item);
-        }
-
-        // The app being routed, to stop; otherwise every app, to route or launch — as its card in the window offers.
-        if (state.Apps.FirstOrDefault(a => a.Run is { Phase: not RunPhase.Ended }) is { } routed)
-        {
-            _menu.Items.Add(new ToolStripSeparator());
-            var item = new ToolStripMenuItem($"{routed.Name} — {routed.Run!.StatusText}");
-            if (routed.Run.DetailText is { } detail) item.DropDownItems.Add(new ToolStripMenuItem(detail) { Enabled = false });
-            Add(item, routed.Actions.Stop, _core.StopRunAsync);
-            Add(item, routed.Actions.Launch, () => _core.LaunchAsync(routed.Id, null, CancellationToken.None));
-            _menu.Items.Add(item);
-        }
-        if (state.Apps.Where(a => a.Run is not { Phase: not RunPhase.Ended }).ToList() is { Count: > 0 } apps)
-        {
-            _menu.Items.Add(new ToolStripSeparator());
-            var all = new ToolStripMenuItem(L.T("Apps"));
-            foreach (var app in apps)
-            {
-                var id = app.Id;
-                var item = new ToolStripMenuItem($"{app.Name}  ·  {app.ThroughText}");
-                Add(item, app.Actions.Launch, () => _core.LaunchAsync(id, null, CancellationToken.None));
-                Add(item, app.Actions.Route, () => { _core.RouteApp(id); return Task.CompletedTask; });
-                if (item.DropDownItems.Count == 0) item.DropDownItems.Add(new ToolStripMenuItem(app.StatusText) { Enabled = false });
-                all.DropDownItems.Add(item);
-            }
-            _menu.Items.Add(all);
-        }
-
-        _menu.Items.Add(new ToolStripSeparator());
-        _menu.Items.Add(new ToolStripMenuItem(L.T("Settings"), null, (_, _) => ShowPage(Page.Settings)));
-        _menu.Items.Add(new ToolStripMenuItem(L.T("Exit Sallyport"), null, (_, _) => Exit()) { ToolTipText = L.T("Stops routing, disconnects every profile, then quits.") });
+        Style(_menu, Theme.Current());
+        foreach (var entry in TrayMenu.Build(state.Profiles, state.Apps, state.Network.StatusText)) _menu.Items.Add(Item(entry, (MenuRenderer)_menu.Renderer));
     }
 
-    /// <summary>A profile's action as the window decides it: shown or not, pressable or not, and why.</summary>
-    private void Add(ToolStripMenuItem parent, UiAction action, Func<Task> run)
+    private ToolStripItem Item(TrayEntry entry, MenuRenderer renderer)
     {
-        if (!action.Visible) return;
-        parent.DropDownItems.Add(new ToolStripMenuItem(action.Label, null, (_, _) => Run(run))
+        if (entry.Kind == TrayEntryKind.Separator) return new ToolStripSeparator();
+        var item = new ToolStripMenuItem(entry.Text) { Enabled = entry.Enabled, ToolTipText = entry.Tip ?? "", Padding = renderer.ItemPadding };
+        if (entry.Default) item.Font = _bold ??= new Font(item.Font, FontStyle.Bold);
+        if (entry.Kind == TrayEntryKind.Command) item.Click += (_, _) => Do(entry);
+        if (entry.Items is { } items)
         {
-            Enabled = action.Enabled,
-            ToolTipText = action.Reason ?? "",
-        });
+            Style((ToolStripDropDownMenu)item.DropDown, renderer.Theme);
+            foreach (var child in items) item.DropDownItems.Add(Item(child, renderer));
+        }
+        return item;
+    }
+
+    /// <summary>A menu in Windows 11's manner: the theme's colours, room around each entry, rounded corners.</summary>
+    private static void Style(ToolStripDropDownMenu menu, Theme theme)
+    {
+        menu.Renderer = new MenuRenderer(theme, menu.DeviceDpi / 96f);
+        menu.ShowImageMargin = false;
+        menu.ShowCheckMargin = false;
+        menu.ShowItemToolTips = true;
+        menu.Padding = new Padding(0, 4, 0, 4);
+        if (menu.IsHandleCreated) Round(menu);
+        else menu.HandleCreated += (_, _) => Round(menu);
+    }
+
+    private static void Round(ToolStrip menu)
+    {
+        var preference = DWMWCP_ROUNDSMALL;
+        // Refused before Windows 11, where the menu keeps its square corners and draws its own border.
+        if (DwmSetWindowAttribute(menu.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref preference, sizeof(int)) == 0 && menu.Renderer is MenuRenderer renderer)
+            renderer.SystemDrawsBorder = true;
+    }
+
+    /// <summary>What an entry does. A question it raises (disconnecting a profile an app is routed through) is asked in
+    /// the window, so the window comes up for it.</summary>
+    private void Do(TrayEntry entry)
+    {
+        var id = entry.Target ?? "";
+        switch (entry.Verb)
+        {
+            case TrayVerb.OpenWindow: ShowWindow(); return;
+            case TrayVerb.OpenNetwork: ShowPage(Page.Network); return;
+            case TrayVerb.OpenSettings: ShowPage(Page.Settings); return;
+            case TrayVerb.Exit: Exit(); return;
+            case TrayVerb.Connect: Run(() => { _core.Connect(id); return Task.CompletedTask; }); return;
+            case TrayVerb.Disconnect: Run(() => _core.DisconnectAsync(id)); return;
+            case TrayVerb.StopRun: Run(_core.StopRunAsync); return;
+            case TrayVerb.Launch: Run(() => _core.LaunchAsync(id, null, CancellationToken.None)); return;
+            case TrayVerb.Route: Run(() => { _core.RouteApp(id); return Task.CompletedTask; }); return;
+        }
     }
 
     private async void Run(Func<Task> action)
     {
+        var asked = _core.Snapshot().Confirmation?.Token;
         try { await action(); }
         catch (ShenoraException e) { _core.Notify(NoticeKind.Error, e.Message); }
         catch (Exception e) { _core.Notify(NoticeKind.Error, L.T("That did not work ({0}).", e.GetType().Name)); }
+        if (_core.Snapshot().Confirmation is { } confirmation && confirmation.Token != asked) ShowWindow();
     }
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
@@ -207,14 +205,6 @@ internal sealed class StatusTray : IDisposable
         if (_toldHidden) return;
         _toldHidden = true;
         Tell(L.T("Sallyport is still running in the notification area. Connections and routing stay on."));
-    }
-
-    /// <summary>The notification area refuses a tip longer than 127 characters: cut at the last whole phrase that fits.</summary>
-    private static string Tooltip(string text)
-    {
-        if (text.Length <= 127) return text;
-        var cut = text.LastIndexOf(" · ", 124, StringComparison.Ordinal);
-        return (cut > 0 ? text[..cut] : text[..124]) + " …";
     }
 
     public void Dispose()
@@ -233,35 +223,85 @@ internal sealed class StatusTray : IDisposable
     [DllImport("user32.dll")]
     private static extern bool DestroyIcon(IntPtr handle);
 
-    private sealed class DarkMenuRenderer() : ToolStripProfessionalRenderer(new Palette())
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUNDSMALL = 3;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+
+    /// <summary>The theme's surface and text; a selected entry as a rounded fill inset from the edges, as Windows 11's
+    /// own menus show it; thin separators. Sizes in device pixels at the menu's DPI.</summary>
+    private sealed class MenuRenderer(Theme theme, float scale) : ToolStripRenderer
     {
+        private readonly Dictionary<ToolStripItem, float> _textMiddle = [];
+
+        public Theme Theme { get; } = theme;
+
+        /// <summary>Windows draws the rounded border; drawn here too, its square corners would show outside it.</summary>
+        public bool SystemDrawsBorder { get; set; }
+
+        public Padding ItemPadding { get; } = new((int)(8 * scale), (int)(5 * scale), (int)(8 * scale), (int)(5 * scale));
+
+        protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
+        {
+            using var surface = new SolidBrush(Theme.Caption.Surface);
+            e.Graphics.FillRectangle(surface, e.AffectedBounds);
+        }
+
+        protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e)
+        {
+            if (SystemDrawsBorder) return;
+            using var border = new Pen(Theme.Caption.Pressed);
+            e.Graphics.DrawRectangle(border, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+        }
+
+        protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e)
+        {
+            if (!e.Item.Selected || !e.Item.Enabled) return;
+            var inset = (int)(4 * scale);
+            var bounds = new Rectangle(inset, 1, e.Item.Width - 2 * inset, e.Item.Height - 2);
+            using var path = Rounded(bounds, 4 * scale);
+            using var hover = new SolidBrush(Theme.Caption.Hover);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.FillPath(hover, path);
+        }
+
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? Color.FromArgb(230, 232, 238) : Color.FromArgb(150, 156, 168);
+            e.TextColor = e.Item.Enabled ? Theme.Text : Theme.Secondary;
+            _textMiddle[e.Item] = e.TextRectangle.Top + e.TextRectangle.Height / 2f;
             base.OnRenderItemText(e);
         }
 
+        /// <summary>A chevron, as Windows 11's menus draw it: on the line of the entry's text (drawn before it), which
+        /// sits above the middle of the entry and of the arrow's own box, and clear of the edge.</summary>
         protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
         {
-            e.ArrowColor = Color.FromArgb(230, 232, 238);
-            base.OnRenderArrow(e);
+            var half = 3.5f * scale;
+            var x = e.ArrowRectangle.Left + e.ArrowRectangle.Width / 2f - 4 * scale;
+            var y = e.Item is { } item && _textMiddle.TryGetValue(item, out var middle) ? middle : e.ArrowRectangle.Top + e.ArrowRectangle.Height / 2f;
+            using var pen = new Pen(e.Item?.Enabled == false ? Theme.Secondary : Theme.Text, Math.Max(1, scale));
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.DrawLines(pen, [new PointF(x - half / 2, y - half), new PointF(x + half / 2, y), new PointF(x - half / 2, y + half)]);
         }
-    }
 
-    private sealed class Palette : ProfessionalColorTable
-    {
-        private static readonly Color Surface = Color.FromArgb(29, 32, 39);
-        private static readonly Color Hover = Color.FromArgb(42, 48, 59);
-        private static readonly Color Border = Color.FromArgb(53, 61, 75);
+        protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)
+        {
+            var inset = (int)(12 * scale);
+            var y = e.Item.Height / 2;
+            using var line = new Pen(Theme.Caption.Pressed);
+            e.Graphics.DrawLine(line, inset, y, e.Item.Width - inset, y);
+        }
 
-        public override Color ToolStripDropDownBackground => Surface;
-        public override Color ImageMarginGradientBegin => Surface;
-        public override Color ImageMarginGradientMiddle => Surface;
-        public override Color ImageMarginGradientEnd => Surface;
-        public override Color MenuBorder => Border;
-        public override Color MenuItemBorder => Hover;
-        public override Color MenuItemSelected => Hover;
-        public override Color SeparatorDark => Border;
-        public override Color SeparatorLight => Surface;
+        private static GraphicsPath Rounded(Rectangle r, float radius)
+        {
+            var d = 2 * radius;
+            var path = new GraphicsPath();
+            path.AddArc(r.X, r.Y, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
     }
 }

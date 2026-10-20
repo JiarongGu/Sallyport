@@ -4,6 +4,9 @@ namespace Sallyport.Client.Tests;
 
 /// <summary>Every word the client shows has its Chinese (L, Chinese.cs; the page's i18n.ts): read from the sources, so a
 /// sentence added in English without its translation fails here rather than showing English to a Chinese reader.</summary>
+/// <remarks>The language is the process's (L.Current): a test that changes it runs alone, or a test beside it reading
+/// English words would read Chinese ones.</remarks>
+[Collection(nameof(OneLanguage))]
 public sealed partial class LanguageTests
 {
     private static string Repository()
@@ -51,6 +54,20 @@ public sealed partial class LanguageTests
 
         Assert.True(keys.Count > 80, $"only {keys.Count} keys found: the scan is not reading the sources");
         Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void No_page_word_is_written_outside_t()
+    {
+        // Text between tags is shown as written: an editor's unit once said "seconds" to a Chinese reader that way.
+        var web = Path.Combine(Client, "web", "src");
+        var bare = Directory.EnumerateFiles(web, "*.tsx", SearchOption.AllDirectories)
+            .SelectMany(f => PageBareText().Matches(File.ReadAllText(f)).Select(m => $"{Path.GetFileName(f)}: {m.Groups[1].Value}"))
+            // The name is the same in every language.
+            .Where(text => !text.EndsWith(": Sallyport", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Empty(bare);
     }
 
     [Fact]
@@ -106,6 +123,20 @@ public sealed partial class LanguageTests
         finally { L.Current = before; }
     }
 
+    [Fact]
+    public void The_tray_menu_is_in_chinese_too()
+    {
+        var before = L.Current;
+        try
+        {
+            L.Current = Language.Chinese;
+            var menu = TrayMenu.Build([], [], "");
+            Assert.Equal("打开 Sallyport", menu[0].Text);
+            Assert.All(menu.Where(e => e.Kind is TrayEntryKind.Command or TrayEntryKind.Note), e => Assert.Matches(@"\p{IsCJKUnifiedIdeographs}", e.Text));
+        }
+        finally { L.Current = before; }
+    }
+
     [GeneratedRegex("""L\.T\(\s*"((?:[^"\\]|\\.)*)" """, RegexOptions.IgnorePatternWhitespace)]
     private static partial Regex HostT();
 
@@ -123,9 +154,17 @@ public sealed partial class LanguageTests
     [GeneratedRegex("""\['(?:apps|network|profiles|settings)', '([^']*)'\]""")]
     private static partial Regex PageTabs();
 
+    // A tag's text that holds a letter: >seconds<, not >{t('seconds')}< nor the space between two tags. Code between a
+    // generic's brackets (useState<Page>(null); … useRef<) has a bracket, an equals sign or a line break; text has none.
+    [GeneratedRegex(""">[ \t]*([^<>{}();=&|\s][^<>{}();=&|\r\n]*?[A-Za-z][^<>{}();=&|\r\n]*?)[ \t]*<""")]
+    private static partial Regex PageBareText();
+
     [GeneratedRegex("""^\s*'((?:[^'\\]|\\.)*)':""", RegexOptions.Multiline)]
     private static partial Regex PageTable();
 
     [GeneratedRegex("""^\s*\["((?:[^"\\]|\\.)*)"\] =""", RegexOptions.Multiline)]
     private static partial Regex SetupTable();
 }
+
+[CollectionDefinition(nameof(OneLanguage), DisableParallelization = true)]
+public sealed class OneLanguage;

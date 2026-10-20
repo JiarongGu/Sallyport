@@ -138,7 +138,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
             value={draft.values.directAfterText} disabled={saving} placeholder={t('never')}
             aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
-          <span className="secondary">seconds</span>
+          <span className="secondary">{t('seconds')}</span>
         </div>
         {error('directAfterText')}
       </div>}
@@ -202,7 +202,7 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
             value={draft.values.directAfterText} disabled={saving} placeholder={t('never')}
             aria-invalid={!!editor.errors.directAfterText} aria-describedby={description('directAfterText')}
             onChange={(event) => onChange({ ...draft, values: { ...draft.values, directAfterText: event.target.value } })} />
-          <span className="secondary">seconds</span>
+          <span className="secondary">{t('seconds')}</span>
         </div>
         {error('directAfterText')}
       </div>}
