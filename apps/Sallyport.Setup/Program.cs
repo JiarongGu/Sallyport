@@ -43,8 +43,23 @@ static class Program
 
         Application.EnableVisualStyles();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.Run(new SetupForm(uninstall, choices, () => OpenPayload(payloadArg), Version, folder, existing is not null));
-        return 0;
+        Point? at = null;
+        while (true)
+        {
+            using var form = new SetupForm(uninstall, choices, () => OpenPayload(payloadArg), Version, folder, existing is not null);
+            if (at is { } where)
+            {
+                form.StartPosition = FormStartPosition.Manual;
+                form.Location = where;
+            }
+            Application.Run(form);
+            if (form.SwitchTo is not { } language) return 0;
+            // Another language: the same window again in it, where it was, with what the person had set.
+            L.Use(language);
+            folder = existing ?? form.Folder;
+            choices = form.Choices(choices);
+            at = form.Location;
+        }
     }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]

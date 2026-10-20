@@ -6,6 +6,7 @@ internal static class Chinese
 {
     public static readonly IReadOnlyDictionary<string, string> Words = new Dictionary<string, string>(StringComparer.Ordinal)
     {
+        ["Language"] = "语言",
         ["Type a full folder path, such as D:\\Program Files\\Sallyport."] = "请输入完整的文件夹路径，例如 D:\\Program Files\\Sallyport。",
         ["That is not a folder path Windows accepts."] = "这不是 Windows 能接受的文件夹路径。",
         ["Choose a folder on this computer, not on a network share."] = "请选择此电脑上的文件夹，而不是网络共享。",

@@ -8,11 +8,21 @@ namespace Sallyport.Setup;
 /// <summary>
 /// Setup's words in the person's language, as the client's are (apps/Sallyport.Client/Language.cs): written in English
 /// where they are used and looked up by it in <see cref="Chinese"/>. Which language: <c>--language</c>, else the one the
-/// person chose in an installed Sallyport (its settings, in their own folder of the install), else Windows' own.
+/// person chose in an installed Sallyport (its settings, in their own folder of the install), else Windows' own — and
+/// whichever the person picks in setup's window after that.
 /// </summary>
 internal static class L
 {
     public static bool Chinese { get; private set; }
+
+    /// <summary>The language's own name for itself in the client's settings: "en" or "zh-Hans".</summary>
+    public static string Code => Chinese ? "zh-Hans" : "en";
+
+    /// <summary>The languages setup offers, each named in itself, as the client's Settings names them.</summary>
+    public static readonly (string Code, string Name)[] Choices = [("en", "English"), ("zh-Hans", "中文简体")];
+
+    /// <summary>The language the person chose in setup's window.</summary>
+    public static void Use(string code) => Chinese = code == "zh-Hans";
 
     /// <summary>A family that has the Chinese glyphs itself: Segoe UI leans on font linking for them, which is not
     /// everywhere what a person reading Chinese expects.</summary>

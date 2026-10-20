@@ -211,6 +211,8 @@ sealed class Installer
 
         Directory.CreateDirectory(Data);
         ProtectUsers();
+        // The language setup ran in is the client's until a person chooses one in it.
+        File.WriteAllText(InstallLayout.Language(_folder), L.Code);
 
         say(L.T("Registering the Sallyport service…"), 0.72);
         ServiceControl.Install(RouterProtocol.ServiceName, "Sallyport game routing",

@@ -40,11 +40,19 @@ internal static class L
     public static string Date(DateTimeOffset at) =>
         Current == Language.Chinese ? at.ToString("yyyy'年'M'月'd'日'", Invariant) : at.ToString("d MMM yyyy", EnglishDates);
 
-    /// <summary>The setting's language: "en", "zh-Hans", or anything else for Windows' own display language.</summary>
-    public static Language Resolve(string? setting) => setting switch
+    /// <summary>The setting's language: "en", "zh-Hans"; with none, the language setup was run in; without that (a
+    /// development build), Windows' own display language.</summary>
+    public static Language Resolve(string? setting) => (setting is "en" or "zh-Hans" ? setting : Installed.Value) switch
     {
         "en" => Language.English,
         "zh-Hans" => Language.Chinese,
         _ => CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase) ? Language.Chinese : Language.English,
     };
+
+    private static readonly Lazy<string?> Installed = new(() =>
+    {
+        if (Sallyport.Windows.InstallLayout.InstalledHere() is not { } folder) return null;
+        try { return File.ReadAllText(Sallyport.Windows.InstallLayout.Language(folder)).Trim(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    });
 }

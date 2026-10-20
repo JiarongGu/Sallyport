@@ -197,7 +197,7 @@ internal static class WindowViews
             Language(languageSetting));
     }
 
-    /// <summary>The language choice, each named in itself; until the person picks one, the one Windows' language gives.</summary>
+    /// <summary>The language choice, each named in itself; until the person picks one, the one setup ran in, or Windows'.</summary>
     public static LanguageView Language(string? setting) => new(
         setting is "en" or "zh-Hans" ? setting : L.Resolve(null) == Client.Language.Chinese ? "zh-Hans" : "en",
         [

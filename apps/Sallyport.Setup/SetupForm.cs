@@ -61,6 +61,16 @@ sealed class SetupForm : Form
     private readonly ActionButton _primary;
     private readonly ActionButton _secondary;
     private readonly LinkLabel _logLink = new() { Text = L.T("Setup log"), Visible = false, AutoSize = true };
+    private readonly ChoiceBox _language;
+
+    /// <summary>The language the person picked in the window, which closes for setup to open it again in that language.</summary>
+    public string? SwitchTo { get; private set; }
+
+    /// <summary>The folder and the choices as the person left them, for the window opened again.</summary>
+    public string Folder => _where.Box.Text.Trim();
+
+    public SetupChoices Choices(SetupChoices before) =>
+        _uninstall ? before with { RemoveData = _option.Checked } : before with { Driver = _option.Checked || !_option.Enabled };
 
     public SetupForm(bool uninstall, SetupChoices choices, Func<Stream?> payload, string version, string folder, bool installed)
     {
@@ -118,6 +128,19 @@ sealed class SetupForm : Form
             link.BackColor = Color.Transparent;
         }
         _detailsLink.Margin = new Padding(0, 4, 0, 0);
+
+        _language = new ChoiceBox(_theme, Font, [.. L.Choices.Select(c => c.Name)], Array.FindIndex(L.Choices, c => c.Code == L.Code))
+        {
+            Size = new Size(140, 34), AccessibleName = L.T("Language"),
+        };
+        _language.Chosen += (_, _) =>
+        {
+            if (_busy || L.Choices[_language.Selected].Code == L.Code) return;
+            SwitchTo = L.Choices[_language.Selected].Code;
+            Close();
+        };
+        // At the foot's left, where installers keep theirs: the header's line of words keeps its whole width.
+        _footer.Controls.Add(_language);
 
         _whereRow.Controls.AddRange([_where, _browse]);
         _choose.Controls.AddRange([_chooseHeading, _chooseIntro, _whereLabel, _whereRow, _whereHint, _option, _missingNote, _missingLink]);
@@ -428,6 +451,8 @@ sealed class SetupForm : Form
     private void ShowPage(Control page)
     {
         foreach (var p in new[] { _choose, _progress, _finish }) p.Visible = p == page;
+        // The language is chosen before setup does anything: once it has, its window says what it did in one.
+        _language.Visible = page == _choose;
         LayOutFooter();
     }
 
@@ -444,13 +469,14 @@ sealed class SetupForm : Form
             right -= size.Width + gap;
         }
         _logLink.Location = new Point((int)(24 * s), (_footer.Height - _logLink.Height) / 2);
+        _language.Location = new Point((int)(24 * s), (_footer.Height - _language.Height) / 2);
     }
 
     private void PaintHeader(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
         var s = DeviceDpi / 96f;
-        Draw.Gate(g, new RectangleF(24 * s, 18 * s, 40 * s, 40 * s), SetupTheme.Brand, Color.White);
+        Draw.Gate(g, new RectangleF(24 * s, 18 * s, 40 * s, 40 * s));
         var x = (int)(78 * s);
         TextRenderer.DrawText(g, "Sallyport", _titleFont, new Point(x, (int)(15 * s)), _theme.Text, TextFormatFlags.NoPrefix);
         TextRenderer.DrawText(g, L.T("Version {0} · routes the games and apps you choose through your VPN", _version), Font,

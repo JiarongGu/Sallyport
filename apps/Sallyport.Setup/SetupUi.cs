@@ -11,17 +11,14 @@ sealed record SetupTheme(bool Dark, Color Background, Color Surface, Color Hover
     Color Border, Color Divider, Color Accent, Color OnAccent, Color Up, Color Busy, Color Trouble)
 {
     public static readonly SetupTheme DarkTheme = new(true,
-        Background: Rgb(0x15171C), Surface: Rgb(0x1D2027), Hover: Rgb(0x2A303B), Pressed: Rgb(0x353D4B), Text: Rgb(0xE6E8EE),
-        Secondary: Rgb(0xA9B1BF), Border: Rgb(0x677487), Divider: Rgb(0x2A303B), Accent: Rgb(0x5B9DFF), OnAccent: Rgb(0x15171C),
+        Background: Rgb(0x14181E), Surface: Rgb(0x1C2129), Hover: Rgb(0x262B33), Pressed: Rgb(0x2D333D), Text: Rgb(0xE8ECF2),
+        Secondary: Rgb(0x9AA5B4), Border: Rgb(0x6B7684), Divider: Rgb(0x2A313B), Accent: Rgb(0x5B9DFF), OnAccent: Rgb(0x0B1220),
         Up: Rgb(0x3CCF8E), Busy: Rgb(0xF2B84B), Trouble: Rgb(0xF06A6A));
 
     public static readonly SetupTheme LightTheme = new(false,
-        Background: Rgb(0xF5F6F8), Surface: Rgb(0xFFFFFF), Hover: Rgb(0xE9EDF3), Pressed: Rgb(0xDCE3EC), Text: Rgb(0x192230),
-        Secondary: Rgb(0x526071), Border: Rgb(0x7A8797), Divider: Rgb(0xDCE3EC), Accent: Rgb(0x185FC7), OnAccent: Rgb(0xFFFFFF),
+        Background: Rgb(0xF5F7FA), Surface: Rgb(0xFFFFFF), Hover: Rgb(0xE9ECF0), Pressed: Rgb(0xDFE3E8), Text: Rgb(0x18202C),
+        Secondary: Rgb(0x5A6575), Border: Rgb(0x8A94A3), Divider: Rgb(0xE6EAF0), Accent: Rgb(0x185FC7), OnAccent: Rgb(0xFFFFFF),
         Up: Rgb(0x137347), Busy: Rgb(0x865900), Trouble: Rgb(0xB42332));
-
-    /// <summary>Sallyport's mark, whatever the theme: the tray's "info" blue.</summary>
-    public static readonly Color Brand = Rgb(0x5B9DFF);
 
     private static Color Rgb(int rgb) => Color.FromArgb((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
 
@@ -68,26 +65,34 @@ static class Draw
         return path;
     }
 
-    /// <summary>Sallyport's mark, as the tray draws it: an arched door — a sallyport is a gate — on a disc.</summary>
-    public static void Gate(Graphics g, RectangleF r, Color fill, Color door)
+    /// <summary>Sallyport's mark, as the client draws it (apps/Sallyport.Client/BrandMark.cs, the same 32-unit grid): a
+    /// gateway with a way out rising through it, white on a rounded tile in the brand's gradient.</summary>
+    public static void Gate(Graphics g, RectangleF r)
     {
+        var saved = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var disc = new SolidBrush(fill);
-        g.FillEllipse(disc, r);
-        float size = r.Width, w = size * 0.38f, x = r.X + (size - w) / 2, top = r.Y + size * 0.27f, bottom = r.Y + size * 0.78f;
-        using var path = new GraphicsPath();
-        path.AddArc(x, top, w, w, 180, 180);
-        path.AddLine(x + w, top + w / 2, x + w, bottom);
-        path.AddLine(x + w, bottom, x, bottom);
-        path.CloseFigure();
-        using var brush = new SolidBrush(door);
-        g.FillPath(brush, path);
+        g.TranslateTransform(r.X, r.Y);
+        g.ScaleTransform(r.Width / 32f, r.Height / 32f);
+        using (var tile = Rounded(new RectangleF(1, 1, 30, 30), 8))
+        using (var fill = new LinearGradientBrush(new PointF(1, 1), new PointF(31, 31), Color.FromArgb(0x3D, 0x8B, 0xFF), Color.FromArgb(0x5B, 0x4B, 0xE0)))
+            g.FillPath(fill, tile);
+        using var stroke = new Pen(Color.White, 2.75f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        using (var gate = new GraphicsPath())
+        {
+            gate.AddLine(8.5f, 24f, 8.5f, 15.5f);
+            gate.AddArc(8.5f, 8f, 15f, 15f, 180, 180);
+            gate.AddLine(23.5f, 15.5f, 23.5f, 24f);
+            g.DrawPath(stroke, gate);
+        }
+        g.DrawLine(stroke, 16f, 24.5f, 16f, 15.5f);
+        g.DrawLines(stroke, [new PointF(13f, 18.5f), new PointF(16f, 15.5f), new PointF(19f, 18.5f)]);
+        g.Restore(saved);
     }
 
     public static Icon GateIcon(int size)
     {
         using var bitmap = new Bitmap(size, size);
-        using (var g = Graphics.FromImage(bitmap)) Gate(g, new RectangleF(0.5f, 0.5f, size - 1.5f, size - 1.5f), SetupTheme.Brand, Color.White);
+        using (var g = Graphics.FromImage(bitmap)) Gate(g, new RectangleF(0, 0, size, size));
         var handle = bitmap.GetHicon();
         try { return (Icon)Icon.FromHandle(handle).Clone(); }
         finally { DestroyIcon(handle); }
@@ -299,6 +304,110 @@ sealed class FieldBox : Panel
         using (var fill = new SolidBrush(Box.BackColor)) g.FillPath(fill, shape);
         using var pen = new Pen(focused ? _theme.Accent : SetupTheme.Mix(_theme.Background, _theme.Border, Box.ReadOnly ? 0.5 : 1), focused ? 2 * s : Math.Max(1, s));
         g.DrawPath(pen, shape);
+    }
+}
+
+/// <summary>A drop-down in the field's own look: the choice, and a chevron 12 from its edge, in a rounded field that opens
+/// a menu of the choices; the arrow keys move the choice as a combo box's do. A <see cref="Button"/> underneath, as
+/// <see cref="ActionButton"/> is: a plain custom control reaches no screen reader at all (WinForms gives it no UI
+/// Automation provider), a button does — named for what it chooses, the choice as its description.</summary>
+sealed class ChoiceBox : Button
+{
+    private readonly SetupTheme _theme;
+    private readonly string[] _choices;
+    private readonly ContextMenuStrip _menu = new() { ShowImageMargin = false, ShowCheckMargin = true };
+    private bool _hot;
+
+    public event EventHandler? Chosen;
+
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public int Selected { get; private set; }
+
+    public ChoiceBox(SetupTheme theme, Font font, string[] choices, int selected)
+    {
+        _theme = theme;
+        _choices = choices;
+        Selected = Math.Max(0, selected);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        FlatStyle = FlatStyle.Flat;
+        Font = font;
+        BackColor = theme.Surface;
+        Cursor = Cursors.Hand;
+        AccessibleDescription = choices[Selected];
+        _menu.BackColor = theme.Surface;
+        _menu.ForeColor = theme.Text;
+        _menu.Font = font;
+        for (var i = 0; i < choices.Length; i++)
+        {
+            var index = i;
+            _menu.Items.Add(new ToolStripMenuItem(choices[i], null, (_, _) => Choose(index)) { Checked = i == Selected });
+        }
+    }
+
+    private void Choose(int index)
+    {
+        if (index == Selected || index < 0 || index >= _choices.Length) return;
+        Selected = index;
+        for (var i = 0; i < _menu.Items.Count; i++) ((ToolStripMenuItem)_menu.Items[i]).Checked = i == index;
+        AccessibleDescription = _choices[index];
+        AccessibilityNotifyClients(System.Windows.Forms.AccessibleEvents.ValueChange, -1);
+        Invalidate();
+        Chosen?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void Open()
+    {
+        Focus();
+        _menu.MinimumSize = new Size(Width, 0);
+        _menu.Show(this, new Point(0, Height));
+    }
+
+    protected override void OnClick(EventArgs e)
+    {
+        base.OnClick(e);
+        Open();
+    }
+
+    protected override bool IsInputKey(Keys keyData) => keyData is Keys.Up or Keys.Down || base.IsInputKey(keyData);
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (e is { Alt: true, KeyCode: Keys.Down }) Open();
+        else if (e.KeyCode == Keys.Down) Choose(Selected + 1);
+        else if (e.KeyCode == Keys.Up) Choose(Selected - 1);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); _hot = true; Invalidate(); }
+
+    protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); _hot = false; Invalidate(); }
+
+    protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+
+    protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        var s = DeviceDpi / 96f;
+        g.Clear(Parent?.BackColor ?? _theme.Surface);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        using var shape = Draw.Rounded(new RectangleF(1, 1, Width - 2.5f, Height - 2.5f), 6 * s);
+        using (var fill = new SolidBrush(_hot ? _theme.Hover : _theme.Surface)) g.FillPath(fill, shape);
+        using (var pen = new Pen(Focused ? _theme.Accent : _theme.Border, Focused ? 2 * s : Math.Max(1, s))) g.DrawPath(pen, shape);
+        var chevron = 12 * s;
+        TextRenderer.DrawText(g, _choices[Selected], Font, new Rectangle((int)(10 * s), 0, Width - (int)(10 * s + chevron * 2 + 4 * s), Height), _theme.Text,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        // The chevron's 12-pixel box, 12 from the edge: the same room the client's drop-down leaves.
+        float x = Width - 12 * s - chevron, y = (Height - chevron) / 2;
+        using var stroke = new Pen(_theme.Secondary, 1.5f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        g.DrawLines(stroke, [new PointF(x + 2.5f * s, y + 4.5f * s), new PointF(x + 6 * s, y + 8 * s), new PointF(x + 9.5f * s, y + 4.5f * s)]);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _menu.Dispose();
+        base.Dispose(disposing);
     }
 }
 

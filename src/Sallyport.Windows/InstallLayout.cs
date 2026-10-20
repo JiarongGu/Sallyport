@@ -10,6 +10,10 @@ public static class InstallLayout
     /// <summary>The machine's part — setup's record, the driver's installer, the service's logs — and the people's.</summary>
     public static string Data(string installFolder) => Path.Combine(installFolder, "data");
 
+    /// <summary>The language setup was run in ("en" or "zh-Hans"): the client's, for a person who has not chosen one in it.
+    /// Written by setup, read by everyone.</summary>
+    public static string Language(string installFolder) => Path.Combine(Data(installFolder), "language");
+
     /// <summary>Each Windows user's part, a folder per SID that only that user (and the system, and administrators) can
     /// open. Setup makes it; a folder without it is a development build, which keeps the user's part in
     /// %LOCALAPPDATA%\Sallyport as before.</summary>
