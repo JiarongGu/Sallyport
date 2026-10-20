@@ -15,6 +15,22 @@
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
 
+  <!-- Trimmed when published (the owner: "the setup.exe is really big?"): 53 MB whole, 29 trimmed. Partial: only the
+       .NET assemblies that say they can be are cut (CoreLib 16 MB to 3.7, its JSON 1.9 to 0.5); ours, Shenora's,
+       WebView2's and Windows Forms' are copied whole, byte for byte, so nothing our reflection reaches is cut.
+       Windows Forms is refused trimming by default (NETSDK1175) for what trimming it would break; it is not trimmed.
+       WebView2's wrapper is built-in COM interop, off by default when trimming. JSON by reflection, as every store
+       here reads and writes its own records. -->
+  <PropertyGroup>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- What the trim analysis says of reflection JSON in our own assemblies, which are not cut. -->
+    <NoWarn>$(NoWarn);IL2026</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
     <!-- Game routing: the router service's client and the packet driver's management. -->

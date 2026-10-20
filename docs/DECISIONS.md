@@ -844,3 +844,32 @@ Before that, the first package was refused by itself ("此安装程序不包含�
 the loader had not reached the program — added to `EmbeddedResource` after the build had sorted its resources — and is
 now added before `AssignTargetPaths`. Not measured: a first install on a machine without Sallyport, and a removal to
 the end (the owner's install stays); a machine with UAC on, where setup's own prompt is the one administrator prompt.
+
+## D31 — The release is trimmed, .NET's own assemblies only: 27.5 MB, from 53 (2026-10-21; measured)
+
+The owner: "I also found the setup.exe is really big?" After D30 the 53 MB program was .NET's runtime and Windows Forms
+whole: 124 MB loose, compressed into one file; WebView2 is Windows' own.
+
+- **`PublishTrimmed` with `TrimMode=partial`** (`Sallyport.Client.csproj`): only the assemblies that say they can be
+  cut are — .NET's base ones (CoreLib 16 MB to 3.7, System.Text.Json 1.9 to 0.5; 124 MB loose to 70). Ours, Shenora's,
+  WebView2's wrapper and Windows Forms are copied byte for byte (measured, each against the whole build), so nothing our
+  reflection reaches is cut: every store's JSON stays reflection (`JsonSerializerIsReflectionEnabledByDefault`), and
+  the trim analysis's IL2026 on it is quieted with that reason.
+- **Windows Forms is refused trimming by default** (NETSDK1175, `_SuppressWinFormsTrimError`): it is not cut here, only
+  allowed in a trimmed program. **Built-in COM interop is kept** (`BuiltInComInteropSupport`): WebView2's wrapper is
+  built on it, and trimming turns it off.
+- **Found by measuring, not by the build: a COM interface of the base library's is cut silently.** Setup saved its
+  Start-menu shortcuts through `ComTypes.IPersistFile`; trimmed, the save did nothing and threw nothing — setup said
+  it had added them, exit 0, and none was written (the untrimmed build, the same test, wrote both). `ShellLink` now
+  declares its own `IPersistFile`, makes each shortcut anew and fails if it is not there after. The only other COM in
+  our code is Shenora's (its file dialogs) and WebView2's, each in an assembly copied whole.
+
+Measured 2026-10-21 on the owner's machine (D:\, at 200%), the trimmed build deployed and then installed by its own
+rehearsal package (0.1.1, 28,786,324 bytes; 0.1.0's was 184,546,498), the guard outside (2,897 rounds, 0 failed): the
+window's page (WebView2), its settings, profiles and apps read; the tray; an app's icon; a stand-in app (Windows'
+curl, copied) added through jp and its 5 MB download routed by the service's worker — the window counting 4.9 MB
+received, 77 KB sent and its own 234 ms — then removed; the connection's latency renewed; the guide's Copy (the
+clipboard read back); Export's save dialog opened and cancelled; the language switched and back (the settings file
+written twice); setup's quiet upgrade, exit 0 in 10 s, the service running again, both shortcuts written; `/uninstall`'s
+window opened and cancelled. Not measured trimmed: Import's open dialog (as Export's, Shenora's), a driver install or
+removal (they pause the network; the code is the same), and a first install and a removal to the end (no clean machine).

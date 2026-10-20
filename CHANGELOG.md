@@ -15,8 +15,8 @@
   from the right edge as from the left, and a submenu beside the menu with its entry level with the row it opens from.
 - Setup keeps the install folder chosen when its language is changed (2026-10-21); before, the window opened again in
   the other language on the default folder.
-- The setup is 51 MB, from 176 (2026-10-21, D30). Sallyport is one program — the window, the router service and setup —
-  so the release carries one .NET runtime instead of four, and the install folder holds that program, WebView2's
+- The setup is 27.5 MB, from 176 (2026-10-21, D30, D31). Sallyport is one program — the window, the router service and
+  setup — so the release carries one .NET runtime instead of four, trimmed to what it uses of .NET's own assemblies, and the install folder holds that program, WebView2's
   loader and `data`. An upgrade from 0.1.0 moves the service to the program; the Start menu, sign-in start and `.ovpn`
   association stay as they were.
 - Adding an app for apps and VPNs many to many (2026-10-21): Add an app asks which VPNs it goes through — each a
