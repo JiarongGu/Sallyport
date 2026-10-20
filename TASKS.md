@@ -4,9 +4,37 @@ A finished item is deleted (git is the archive). Work goes top to bottom, one at
 says under **Done when** has been measured — against the real server where a server is involved (CLAUDE.md rule 3).
 **Needs** names what only the owner can give.
 
-## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
-1. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
-2. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+## 0. Next session: a full code review, then the protocol library on NuGet
+The owner, 2026-10-21: "next session will be a full code review + perpare for nuget release for our core (the MIT
+library for openvpn)". The list of 2026-10-21 is done (its record: the commits from `9b2c8ec` to this one, D30).
+
+1. **A full code review**, before anything is published from it.
+   - **Scope:** the library first (`src/Sallyport`: Profile, Protocol, Tunnel, Net, Proxy, Runtime), then
+     `src/Sallyport.Windows` (the driver, the router, the service's protocol), then the one program (`apps/Sallyport.Client`
+     with `Sallyport.Service` and `Sallyport.Setup`, D30), then the tests.
+   - **Against:** AGENTS.md's six rules — above all rule 2 (every log line, exception and test failure that could carry a
+     profile's text, a key or a password) and rule 6 (a check that cannot be made said as that); the service's pipe
+     rights and its identity checks (D30's manager-record path, setup's elevated restart and its quoting); the sealed
+     files and the export's password; the router's two threads (tallies and mappings written by one, read by the other);
+     `GameRunner`, `Connections`' poll and its latency checks; handles and `Process` objects let go; error paths.
+   - **How:** as before — Codex read-only audits on briefs in `local/codex/`, one area each, every finding checked against
+     the code before it is acted on, the record saying how it was made.
+   - **Done when:** each finding fixed, refused with its reason, or open here; every test, and a live run (jp, an app
+     through it, the guard) after the fixes.
+2. **`src/Sallyport` on NuGet** as `Sallyport` (free on nuget.org on 2026-10-21, as is `Sallyport.OpenVpn`).
+   - **Its public API:** 46 public types now; decide what is meant to be public (`OvpnProfile`, `Tunnel`, `TunnelOptions`
+     and `Login`, `TunnelNetwork`, `Socks5Server`, `TunnelService`, `ProfileStore`…) and make the rest internal; XML docs
+     on every public member (CS1591 is suppressed today: lift it for the library); its README's examples compiled.
+   - **The package:** repository and project URLs, an icon (the mark), symbols (`.snupkg`) and SourceLink,
+     `ContinuousIntegrationBuild` on CI, `EnablePackageValidation` with a baseline from its first version on — as
+     Tyanor's `src/Directory.Build.props` does.
+   - **Its own version**, apart from the app's (D28's `version.ps1` writes one `<Version>` for everything): where it is
+     written, its own CHANGELOG section, and its first (a preview?).
+   - **Publishing:** a workflow beside `release.yml`, started by hand, a rehearsal by default, NuGet Trusted Publishing
+     (OIDC, `id-token: write`, `NuGet/login@v1`, `--skip-duplicate`) as Tyanor's `release.yml` does.
+   - **Needs (the owner):** a nuget.org account's Trusted Publishing policy for `JiarongGu/Sallyport` and that workflow.
+   - **Done when:** a rehearsal's `.nupkg` and `.snupkg` looked inside (README, XML docs, licence, SourceLink); a sample
+     project on the local package connects to the owner's server (rule 3); then the owner's go.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,
@@ -353,15 +381,10 @@ reader).
 - Kobo runs the library as a provider process (`Sallyport.Host.exe serve|stop`); in-process hosting waits for the release.
 
 ## 6. Release
-- **Made (D28):** `package.ps1` builds the one setup, its `.sha256` and its notes; `.github/workflows/release.yml` does
-  the same by hand from the Actions tab, then tags and drafts the GitHub release. Measured: the package, installed as an
-  upgrade over the owner's install, and used. **Not run:** the workflow — the repository has no GitHub remote yet; its
-  first dispatch should be a rehearsal (`dry_run`, the default), and its artifact installed before a real one.
-- **Ready to publish (2026-10-21):** every file version and commit message looked through for keys, certificates,
-  tokens, the owner's addresses (IPv4 and IPv6), accounts, host names, user and computer names, SIDs, MAC addresses and
-  profile paths — none; the history is published as it is. README (and README.zh-CN), CONTRIBUTING, SECURITY and
-  AGENTS written for the public repository. **Before the first release:** add the GitHub remote and push; turn on
-  private vulnerability reporting (Settings → Code security), which SECURITY.md points to; dispatch the Release
-  workflow as a rehearsal, install its artifact, then run it for real.
+- **0.1.0 published (2026-10-20):** the Release workflow's first dispatch (run 1, workflow_dispatch, success) tagged
+  `v0.1.0` and released "Sallyport 0.1.0" (not a draft): its setup (184,546,498 bytes, D28's three-program package) and
+  `.sha256`. The next release is D30's one program, about 53 MB; its CHANGELOG is `## Unreleased`.
+- **Needs (the owner):** private vulnerability reporting turned on (Settings → Code security → Private vulnerability
+  reporting), which SECURITY.md points to — the API said `enabled: false` on 2026-10-21.
 - **Needs:** a certificate others trust, for the setup and the binaries (until then SmartScreen and UAC show an unknown
   publisher, and peers are checked by install path, not by signature — `docs/design/product.md`, change 2).

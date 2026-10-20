@@ -1,5 +1,9 @@
 # The product — design (2026-10-20)
 
+> **Since D30 (2026-10-21)** the window, the router service and setup are one program, `Sallyport.Client.exe`: the
+> service is its `--service` mode, setup the release's file of it and its `/uninstall`. Where this page names them
+> apart, they are its modes; their roles, rights and protocol are as written.
+
 **Why it exists.** The router works from a console tool (`tools/Sallyport.Driver route`, TASKS item 1, measured with
 Zenless Zone Zero). The owner, asked what a game should do when the VPN drops mid-game: *"so there can be auto
 reconnect mode with different config (this is more like openvpn) and please develop the entire application into a

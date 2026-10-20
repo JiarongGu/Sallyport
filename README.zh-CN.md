@@ -69,13 +69,15 @@ Sallyport 是独立的开源软件（MIT 许可），依据 OpenVPN 协议的公
 - 你的配置**为你的 Windows 账户加密保存**（Windows DPAPI），位于安装文件夹的 `data` 文件夹中；之后不再需要原来的
   `.ovpn` 文件。密码以同样的方式保存，且只有在你选择“记住密码”时才保存。
 - 除了你的 VPN 服务器，Sallyport 只会连接：安装数据包驱动时，从 GitHub 上 NT Kernel 的发布页下载驱动（并用固定的
-  SHA-256 校验）；检测延迟时连接 1.1.1.1；检测出口位置时经由 VPN 连接 ipinfo.io；以及你为导入配置而输入的链接。
+  SHA-256 校验）；VPN 连接期间每 30 秒直接并经由 VPN 连接 1.1.1.1，以显示延迟；检测出口位置时经由 VPN 连接 ipinfo.io；
+  以及你为导入配置而输入的链接。
   没有遥测，也不需要账户。
 - 报告安全问题，请见 [SECURITY.md](SECURITY.md)。
 
 ## 卸载
 
-Windows **设置 → 应用 → 已安装的应用 → Sallyport → 卸载**。除非你选择一并删除，否则会保留你的配置、应用和设置；
+**开始菜单 → Sallyport → 卸载 Sallyport**，或在 Sallyport 中 **设置 → 关于 → 卸载 Sallyport…**，或 Windows
+**设置 → 应用 → 已安装的应用 → Sallyport → 卸载**。除非你选择一并删除，否则会保留你的配置、应用和设置；
 如果数据包驱动是 Sallyport 安装的，会将其移除。
 
 ## 遇到问题时

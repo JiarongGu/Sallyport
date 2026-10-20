@@ -83,14 +83,16 @@ other programs to use.
   folder; the original `.ovpn` file is not needed afterwards. A password is kept the same way, and only when you choose
   **Remember password**.
 - Sallyport talks to nothing but your VPN server, except: NT Kernel's release on GitHub, to download the packet driver
-  when you install it (checked against a pinned SHA-256); 1.1.1.1 when you check ping; ipinfo.io, through the VPN, when
-  you check the exit location; and a link you type to import a profile. There is no telemetry and no account.
+  when you install it (checked against a pinned SHA-256); 1.1.1.1, directly and through the VPN, every 30 seconds while a
+  VPN is connected, to show its latency; ipinfo.io, through the VPN, when you check the exit location; and a link you
+  type to import a profile. There is no telemetry and no account.
 - To report a security problem, see [SECURITY.md](SECURITY.md).
 
 ## Uninstall
 
-Windows **Settings → Apps → Installed apps → Sallyport → Uninstall**. Your profiles, apps and settings are kept unless
-you choose to remove them too, and the packet driver is removed if Sallyport installed it.
+**Start menu → Sallyport → Uninstall Sallyport**, or **Settings → About → Uninstall Sallyport…** in Sallyport, or Windows
+**Settings → Apps → Installed apps → Sallyport → Uninstall**. Your profiles, apps and settings are kept unless you
+choose to remove them too, and the packet driver is removed if Sallyport installed it.
 
 ## If something is not right
 

@@ -1,5 +1,10 @@
 # Architecture (2026-10-19, revised)
 
+> **Superseded where it disagrees (2026-10-21):** since D18 Sallyport sends an app's packets through NT Kernel's
+> Windows Packet Filter driver and a LocalSystem router service (`product.md`, `router.md`), and since D30 the window,
+> the service and setup are one program (`Sallyport.Client.exe` in its modes). What stands here: the references and
+> the package boundaries.
+
 What Sallyport is now, and what is still open. History: the first version of this page (approved 2026-10-19, D9–D11)
 planned packet routing through WinDivert and a LocalSystem service; Defender blocked WinDivert (D10), Windows' own
 per-app VPN was measured instead (D12) under a guard (D13), and with no privileged part left the client runs the runtime
