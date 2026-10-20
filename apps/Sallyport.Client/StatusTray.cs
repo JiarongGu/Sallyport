@@ -5,8 +5,8 @@ using Shenora.Core.Ipc;
 namespace Sallyport.Client;
 
 /// <summary>
-/// The notification-area icon, drawn in the colour of the window's summary, and its menu: each profile to connect or
-/// disconnect, the apps to launch (docs/design/client-ui.md §7). It renders the same view the window does, so the two
+/// The notification-area icon, drawn in the colour of the window's summary, and its menu: each profile a row that
+/// connects or disconnects it (docs/design/client-ui.md §7). It renders the same view the window does, so the two
 /// never disagree. Its own rather than Shenora's <c>TrayIcon</c>, which sets its icon and text once, when it is made —
 /// and a VPN's tray is read for whether it is connected.
 /// </summary>
@@ -27,6 +27,8 @@ internal sealed class StatusTray : IDisposable
     private readonly ContextMenuStrip _menu;
     private readonly Dictionary<Tone, Icon> _icons = [];
     private Font? _bold;
+    // Windows' own glyphs (Settings, Exit), at the size the menu's DPI wants: kept, as each rebuild would make a new one.
+    private Font? _glyphs;
     private bool _exiting;
     private bool _toldHidden;
 
@@ -118,21 +120,27 @@ internal sealed class StatusTray : IDisposable
         // Cleared items are not disposed by the strip; each holds a handle-backed image and font until it is.
         foreach (var old in _menu.Items.Cast<ToolStripItem>().ToList()) old.Dispose();
         var state = _core.Snapshot();
-        Style(_menu, Theme.Current());
-        foreach (var entry in TrayMenu.Build(state.Profiles, state.Network.StatusText)) _menu.Items.Add(Item(entry, (MenuRenderer)_menu.Renderer));
+        var scale = _menu.DeviceDpi / 96f;
+        if (_glyphs is null || Math.Abs(_glyphs.Size - 16 * scale) > 0.1f)
+        {
+            _glyphs?.Dispose();
+            // Windows 11's icon font, else Windows 10's: the same glyphs at the same code points.
+            var family = FontFamily.Families.Any(f => f.Name == "Segoe Fluent Icons") ? "Segoe Fluent Icons" : "Segoe MDL2 Assets";
+            _glyphs = new Font(family, 16 * scale, GraphicsUnit.Pixel);
+        }
+        _menu.Renderer = new MenuRenderer(Theme.Current(), scale, _glyphs);
+        Style(_menu);
+        var renderer = (MenuRenderer)_menu.Renderer;
+        foreach (var entry in TrayMenu.Build(state.Profiles, state.Network.StatusText)) _menu.Items.Add(Item(entry, renderer));
         Fit(_menu);
     }
 
-    /// <summary>Every entry as wide as the longest one where the renderer puts the text, with room for a chevron: WinForms
-    /// would size them from where it puts the text itself, and draws nothing of an entry outside its own width.</summary>
-    private static void Fit(ToolStripDropDownMenu menu, bool submenu = false)
+    /// <summary>Every entry as wide as the widest one wants (<see cref="MenuRenderer.Wants"/>): WinForms would size them
+    /// from where it puts the text itself, and draws nothing of an entry outside its own width.</summary>
+    private static void Fit(ToolStripDropDownMenu menu)
     {
         var renderer = (MenuRenderer)menu.Renderer;
-        var widest = submenu ? renderer.MinimumSubmenuWidth : renderer.MinimumWidth;
-        foreach (ToolStripItem item in menu.Items)
-            if (item is ToolStripMenuItem entry)
-                widest = Math.Max(widest, renderer.TextLeft + TextRenderer.MeasureText(entry.Text, entry.Font).Width
-                    + (entry.HasDropDownItems ? renderer.ChevronRoom : renderer.EndRoom));
+        var widest = menu.Items.OfType<ToolStripMenuItem>().Select(renderer.Wants).Append(renderer.MinimumWidth).Max();
         // The layout gives every entry the widest one's preferred width, which the right padding raises to the width wanted;
         // the window is held to it, as WinForms would size the window by its own measure.
         var preferred = menu.Items.OfType<ToolStripMenuItem>().Select(i => i.GetPreferredSize(Size.Empty).Width).DefaultIfEmpty(0).Max();
@@ -162,42 +170,38 @@ internal sealed class StatusTray : IDisposable
             if (shortBy > 0) entry.Padding = entry.Padding with { Right = entry.Padding.Right + shortBy };
         }
         menu.PerformLayout();
-    }
-
-    /// <summary>A submenu beside its menu, its first entry level with the row it opens from — WinForms puts it over the
-    /// menu's edge and a few pixels low. To the left where the screen has no room on the right.</summary>
-    private static void Place(ToolStripMenuItem owner)
-    {
-        if (owner.Owner is not ToolStripDropDown menu || owner.DropDown is not { } submenu || submenu.Items.Count == 0) return;
-        var row = menu.PointToScreen(owner.Bounds.Location);
-        var area = Screen.FromPoint(row).WorkingArea;
-        var x = menu.Bounds.Right + submenu.Width <= area.Right ? menu.Bounds.Right : menu.Bounds.Left - submenu.Width;
-        var y = Math.Clamp(row.Y - submenu.Items[0].Bounds.Top, area.Top, Math.Max(area.Top, area.Bottom - submenu.Height));
-        // WinForms keeps an open drop-down where it put it (setting Location changed nothing, measured); Windows moves it.
-        if (submenu.Location != new Point(x, y))
-            SetWindowPos(submenu.Handle, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        // The bottom as measured, not as the padding says: the window ends 2 px under the last entry at 200% whatever its
+        // bottom padding (the last highlight 3 px from the edge, the first 9), and it grows by what the margin adds.
+        if (entries.Count > 0)
+        {
+            var under = menu.ClientSize.Height - entries[^1].Bounds.Bottom + 1;
+            if (under != renderer.Edge)
+            {
+                entries[^1].Margin = entries[^1].Margin with { Bottom = Math.Max(0, entries[^1].Margin.Bottom + renderer.Edge - under) };
+                menu.PerformLayout();
+            }
+        }
     }
 
     private ToolStripItem Item(TrayEntry entry, MenuRenderer renderer)
     {
         if (entry.Kind == TrayEntryKind.Separator) return new ToolStripSeparator { AutoSize = false, Height = renderer.SeparatorHeight };
-        var item = new ToolStripMenuItem(entry.Text) { Enabled = entry.Enabled, ToolTipText = entry.Tip ?? "", Padding = renderer.ItemPadding };
+        var item = new ToolStripMenuItem(entry.Text)
+        {
+            Enabled = entry.Enabled, ToolTipText = entry.Tip ?? "", Tag = entry,
+            // A profile's row is taller: its state and what pressing it does are on it too.
+            Padding = entry.Tone is null ? renderer.ItemPadding : renderer.RowPadding,
+            // What a screen reader says of a row is what it shows: the name, where it is, what pressing it does.
+            AccessibleName = string.Join(" · ", new[] { entry.Text, entry.Status, entry.Action }.OfType<string>()),
+        };
         if (entry.Default) item.Font = _bold ??= new Font(item.Font, FontStyle.Bold);
         if (entry.Kind == TrayEntryKind.Command) item.Click += (_, _) => Do(entry);
-        if (entry.Items is { } items)
-        {
-            Style((ToolStripDropDownMenu)item.DropDown, renderer.Theme);
-            foreach (var child in items) item.DropDownItems.Add(Item(child, renderer));
-            Fit((ToolStripDropDownMenu)item.DropDown, submenu: true);
-            item.DropDown.Opened += (_, _) => Place(item);
-        }
         return item;
     }
 
-    /// <summary>A menu in Windows 11's manner: the theme's colours, room around each entry, rounded corners.</summary>
-    private static void Style(ToolStripDropDownMenu menu, Theme theme)
+    /// <summary>A menu in Windows 11's manner: room around each entry, rounded corners; its colours are the renderer's.</summary>
+    private static void Style(ToolStripDropDownMenu menu)
     {
-        menu.Renderer = new MenuRenderer(theme, menu.DeviceDpi / 96f);
         menu.ShowImageMargin = false;
         menu.ShowCheckMargin = false;
         menu.ShowItemToolTips = true;
@@ -260,53 +264,99 @@ internal sealed class StatusTray : IDisposable
         _icon.Dispose();
         _menu.Dispose();
         _bold?.Dispose();
+        _glyphs?.Dispose();
         foreach (var icon in _icons.Values) icon.Dispose();
     }
 
     private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUNDSMALL = 3;
-    private const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
 
     /// <summary>The theme's surface and text; a selected entry as a rounded fill inset from the edges, as Windows 11's
-    /// own menus show it; thin separators. Sizes in device pixels at the menu's DPI.</summary>
-    private sealed class MenuRenderer(Theme theme, float scale) : ToolStripRenderer
+    /// own menus show it; thin separators. Before each entry's text, its glyph — the mark, Windows' own, or a profile's
+    /// state as a dot — and at a profile's end what pressing it does, as the window's buttons say it. Sizes in device
+    /// pixels at the menu's DPI.</summary>
+    private sealed class MenuRenderer(Theme theme, float scale, Font glyphs) : ToolStripRenderer
     {
         public Theme Theme { get; } = theme;
 
         /// <summary>Windows draws the rounded border; drawn here too, its square corners would show outside it.</summary>
         public bool SystemDrawsBorder { get; set; }
 
-        // Windows 11's own menus: an entry 32 high, its text 16 from the menu's edge, the submenu chevron 16 from the other
-        // edge with 24 before it; a separator 9 high. The text is placed here (TextLeft), not where WinForms would put it,
-        // so the menu's width is set here too (Fit).
+        // Windows 11's own menus: an entry 32 high, its glyph 16 square 12 in from the highlight, the text 12 after it; a
+        // separator 9 high. A profile's row is 40 high. The text is placed here (TextLeft), not where WinForms would put
+        // it, so the menu's width is set here too (Wants).
         public Padding ItemPadding { get; } = new((int)(4 * scale), (int)(8 * scale), (int)(8 * scale), (int)(8 * scale));
 
-        public int TextLeft { get; } = (int)Math.Round(16 * scale);
-
-        /// <summary>After an entry's text: 24 and the chevron's 16 when it opens a submenu, else 24.</summary>
-        public int ChevronRoom { get; } = (int)Math.Round(40 * scale);
-
-        public int EndRoom { get; } = (int)Math.Round(24 * scale);
-
-        public int MinimumWidth { get; } = (int)Math.Round(180 * scale);
-
-        public int MinimumSubmenuWidth { get; } = (int)Math.Round(120 * scale);
-
-        public int SeparatorHeight { get; } = (int)Math.Round(9 * scale);
+        public Padding RowPadding { get; } = new((int)(4 * scale), (int)(12 * scale), (int)(8 * scale), (int)(12 * scale));
 
         /// <summary>From the window's edge to a highlight or a separator, on every side: the border, then 4.</summary>
         public int Edge { get; } = (int)Math.Round(4 * scale) + 1;
 
+        private int GlyphLeft => Edge + S(12);
+
+        private int GlyphSize => S(16);
+
+        private int TextLeft => GlyphLeft + GlyphSize + S(12);
+
+        public int MinimumWidth { get; } = (int)Math.Round(200 * scale);
+
+        public int SeparatorHeight { get; } = (int)Math.Round(9 * scale);
+
+        private int S(float logical) => (int)Math.Round(logical * scale);
+
+        private const TextFormatFlags Line = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+
+        /// <summary>The window's width this entry wants, from the window's left edge: its glyph and text, a profile's state
+        /// after its name and its action's pill after that, then the room at the end.</summary>
+        public int Wants(ToolStripMenuItem item)
+        {
+            var width = TextLeft + TextRenderer.MeasureText(item.Text, item.Font, Size.Empty, Line).Width;
+            if (item.Tag is TrayEntry { Status: { } status } entry)
+            {
+                width += S(8) + TextRenderer.MeasureText(status, item.Font, Size.Empty, Line).Width;
+                if (entry.Action is { } action) width += S(24) + Pill(action, item.Font).Width;
+            }
+            return width + S(12) + Edge;
+        }
+
+        private Size Pill(string action, Font font)
+        {
+            var text = TextRenderer.MeasureText(action, font, Size.Empty, Line);
+            return new(text.Width + S(20), S(24));
+        }
+
         /// <summary>The page's --hover on a card: the text's colour at 6% over the surface.</summary>
-        private Color Hover => Color.FromArgb(
-            Theme.Surface.R + (Theme.Text.R - Theme.Surface.R) * 6 / 100,
-            Theme.Surface.G + (Theme.Text.G - Theme.Surface.G) * 6 / 100,
-            Theme.Surface.B + (Theme.Text.B - Theme.Surface.B) * 6 / 100);
+        private Color Hover => Mix(Theme.Text, 6);
+
+        private Color Mix(Color over, int percent) => Color.FromArgb(
+            Theme.Surface.R + (over.R - Theme.Surface.R) * percent / 100,
+            Theme.Surface.G + (over.G - Theme.Surface.G) * percent / 100,
+            Theme.Surface.B + (over.B - Theme.Surface.B) * percent / 100);
+
+        /// <summary>A state's dot, as the page's status pills colour it (styles.css' --up-fill, --busy, --trouble, --off).</summary>
+        private Color Dot(Tone tone) => (tone, Theme.Dark) switch
+        {
+            (Tone.Up, false) => Color.FromArgb(0x1F, 0x9D, 0x55),
+            (Tone.Up, true) => Color.FromArgb(0x3C, 0xCF, 0x8E),
+            (Tone.Busy, false) => Color.FromArgb(0xD9, 0x8E, 0x04),
+            (Tone.Busy, true) => Color.FromArgb(0xF2, 0xB8, 0x4B),
+            (Tone.Trouble, false) => Color.FromArgb(0xC8, 0x30, 0x3E),
+            (Tone.Trouble, true) => Color.FromArgb(0xF0, 0x6A, 0x6A),
+            (_, false) => Color.FromArgb(0x8A, 0x94, 0xA3),
+            _ => Color.FromArgb(0x7D, 0x87, 0x94),
+        };
+
+        /// <summary>A state's words, in the page's --tone-text colours: what it is, read beside the name.</summary>
+        private Color Said(Tone tone) => (tone, Theme.Dark) switch
+        {
+            (Tone.Up, false) => Color.FromArgb(0x13, 0x73, 0x47),
+            (Tone.Busy, false) => Color.FromArgb(0x86, 0x59, 0x00),
+            (Tone.Trouble, false) => Color.FromArgb(0xB4, 0x23, 0x32),
+            (Tone.Up or Tone.Busy or Tone.Trouble, true) => Dot(tone),
+            _ => Theme.Secondary,
+        };
 
         protected override void OnRenderToolStripBackground(ToolStripRenderEventArgs e)
         {
@@ -332,28 +382,72 @@ internal sealed class StatusTray : IDisposable
             e.Graphics.FillPath(hover, path);
         }
 
-        /// <summary>The text centred on the entry's whole height, not on WinForms' own box for it (which sits high), and cut
-        /// with an ellipsis rather than under the chevron.</summary>
+        /// <summary>The entry drawn here, not where WinForms would put it: centred on its whole height (WinForms' own box
+        /// sits high), its glyph first, a profile's state and action after its name, each cut with an ellipsis rather than
+        /// run into the next.</summary>
         protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Enabled ? Theme.Text : Theme.Secondary;
-            // From the menu's edges: the entry may start in from the window's edge, and run past its right one.
-            var left = TextLeft - e.Item.Bounds.Left;
-            e.TextRectangle = new Rectangle(left, 0, Math.Max(0, Row(e.Item).Right - left - (int)(32 * scale)), e.Item.Height);
-            e.TextFormat = (e.TextFormat & ~(TextFormatFlags.Top | TextFormatFlags.Bottom)) | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
-            base.OnRenderItemText(e);
-        }
+            var g = e.Graphics;
+            var item = e.Item;
+            var entry = item.Tag as TrayEntry;
+            var x = -item.Bounds.Left;
+            var height = item.Height;
+            var text = item.Enabled ? Theme.Text : Theme.Secondary;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        /// <summary>A chevron, as Windows 11's menus draw it: on the entry's middle, as its text now is, 14 in from the
-        /// highlight's right.</summary>
-        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
-        {
-            var half = 3.5f * scale;
-            var x = (e.Item is { } item ? Row(item).Right : e.ArrowRectangle.Right) - 14 * scale;
-            var y = (e.Item?.Height ?? e.ArrowRectangle.Bottom) / 2f;
-            using var pen = new Pen(e.Item?.Enabled == false ? Theme.Secondary : Theme.Text, Math.Max(1, scale));
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            e.Graphics.DrawLines(pen, [new PointF(x - half / 2, y - half), new PointF(x + half / 2, y), new PointF(x - half / 2, y + half)]);
+            var glyph = new Rectangle(x + GlyphLeft, (height - GlyphSize) / 2, GlyphSize, GlyphSize);
+            switch (entry)
+            {
+                case { Tone: { } tone }:
+                    var d = S(10);
+                    var dot = new RectangleF(glyph.X + (GlyphSize - d) / 2f, glyph.Y + (GlyphSize - d) / 2f, d, d);
+                    // Not connected is a ring, as the page's pill says it: nothing is on.
+                    if (tone is Tone.Off or Tone.Info)
+                    {
+                        using var ring = new Pen(Dot(tone), Math.Max(1.5f, 1.5f * scale));
+                        dot.Inflate(-ring.Width / 2, -ring.Width / 2);
+                        g.DrawEllipse(ring, dot);
+                    }
+                    else
+                    {
+                        using var fill = new SolidBrush(Dot(tone));
+                        g.FillEllipse(fill, dot);
+                    }
+                    break;
+                case { Glyph: TrayGlyph.Mark }:
+                    BrandMark.Paint(g, glyph);
+                    break;
+                case { Glyph: TrayGlyph.Settings or TrayGlyph.Exit }:
+                    // Settings (E713) and Power (E7E8), in Windows' own icon font.
+                    TextRenderer.DrawText(g, entry.Glyph == TrayGlyph.Settings ? "\uE713" : "\uE7E8", glyphs, glyph, text,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+                    break;
+            }
+
+            var (_, right) = Row(item);
+            var end = right - S(12);
+            if (entry is { Action: { } action })
+            {
+                // What pressing the row does, as a quiet button at its end: the window's accent, on a wash of it.
+                var size = Pill(action, item.Font);
+                var pill = new Rectangle(end - size.Width, (height - size.Height) / 2, size.Width, size.Height);
+                var accent = item.Enabled ? Theme.Accent : Theme.Secondary;
+                using (var path = Rounded(pill, size.Height / 2f))
+                using (var wash = new SolidBrush(Mix(accent, item.Selected ? 18 : 11)))
+                    g.FillPath(wash, path);
+                TextRenderer.DrawText(g, action, item.Font, pill, accent, Line | TextFormatFlags.HorizontalCenter);
+                end = pill.Left - S(16);
+            }
+
+            var left = x + TextLeft;
+            var name = TextRenderer.MeasureText(g, item.Text, item.Font, Size.Empty, Line).Width;
+            TextRenderer.DrawText(g, item.Text, item.Font, new Rectangle(left, 0, Math.Max(0, Math.Min(name, end - left)), height), text, Line | TextFormatFlags.EndEllipsis);
+            if (entry is { Status: { } status, Tone: { } said })
+            {
+                var from = left + name + S(8);
+                TextRenderer.DrawText(g, status, item.Font, new Rectangle(from, 0, Math.Max(0, end - from), height),
+                    item.Enabled ? Said(said) : Theme.Secondary, Line | TextFormatFlags.EndEllipsis);
+            }
         }
 
         protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e)

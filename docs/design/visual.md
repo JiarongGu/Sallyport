@@ -67,8 +67,15 @@ the splash; `Chrome.tsx` (`GateMark`) for the page; `icon.ps1` writes `Sallyport
 
 ## The tray's menu
 
-Kept simple, as before — Open Sallyport (which opens the Overview), each profile, the routed app or the Apps, Settings, Exit —
-spaced as Windows 11's own menus: entries 32 high, the text 16 from the edge and centred on the entry, the submenu
-chevron 16 from the other edge with 24 before it, separators 9 high, a rounded selection inset 4, rounded corners on
-Windows 11. The renderer places the text and sizes each menu (`StatusTray.Fit`): WinForms would size the window and its
-entries by two different measures of where it puts the text itself.
+Kept simple — Open Sallyport (which opens the Overview), each profile, Settings, Exit — and drawn as the window is
+(2026-10-21, the owner: *"keep polish the tray menu (make a better ui looking)"*): Open Sallyport with the app's mark,
+Settings and Exit with Windows' own glyphs (Segoe Fluent Icons, else MDL2 Assets); each profile one row, no submenu —
+its state as a dot (filled in the page's --up-fill, --busy, --trouble; a ring while off), its name, its state's words
+in the page's tone colours, and at its end what pressing it does (Connect, Disconnect, Cancel, Try again) as a quiet
+pill in the accent, as the window's buttons say it; the window's own confirmation when apps go through it. Spaced as
+Windows 11's menus: entries 32 high (a profile's 40), the glyph 16 square 12 in from the highlight and the text 12
+after it, separators 9 high, a rounded selection inset 4 — 9 px from every edge at 200%, top and bottom measured, not
+taken from the padding — rounded corners on Windows 11. The renderer places the text and sizes the menu
+(`StatusTray.Fit`, `MenuRenderer.Wants`): WinForms would size the window and its entries by two different measures of
+where it puts the text itself. Its dark theme and the states this machine cannot show live were drawn by the same
+renderer from a scratch harness and looked at.

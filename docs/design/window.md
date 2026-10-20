@@ -181,7 +181,7 @@ Retain existing profile phases, renaming their actions rather than inventing ano
 
 Intents: retain profile/policy/driver/copy/notice commands. Replace game commands with `ADD_APP {source}`, `RESCAN_APP`, `ADD_APP_PROGRAM`, `BEGIN_PROGRAM_EDIT`, `SAVE_APP`, `SAVE_PROGRAM`, `REQUEST_REMOVE_APP`, `BEGIN_ROUTE`, `START_ROUTE {token}`, `STOP_ROUTE {selectionId}`, `LAUNCH_APP {id,programId?}`. Add `RETRY_CHANNEL`, `CHECK_LATENCY`, `BEGIN_DEFAULTS_EDIT`, `SAVE_DEFAULTS`, `SET_START_WITH_WINDOWS`. Remove `RUN_GAME`, payloadless `STOP_RUN` and immediate `REMOVE_APP`. All edits use tokens; method changes are submitted editor values.
 
-Tray: **Open Sallyport**, **Open Network**, app submenus with Route/Launch/Stop, profile submenus with shared connection status/Retry/Disconnect, **Settings**, **Exit Sallyport**. Render the same actions and reasons. Coverage failures, recovery uncertainty and direct fallback outrank healthy tunnels. Exit stops selections, disconnects channels, then quits.
+Tray: **Open Sallyport**, each profile a row that connects or disconnects it as pressed (its state on it; superseded the app and profile submenus, visual.md), **Settings**, **Exit Sallyport**. Render the same actions and reasons. Coverage failures, recovery uncertainty and direct fallback outrank healthy tunnels. Exit stops selections, disconnects channels, then quits.
 
 **Build in working increments:**
 

@@ -18,9 +18,6 @@ public class TrayMenuTests
             state == TunnelServiceStatus.Up ? "udp/1194" : null, 1, 0, null, state == TunnelServiceStatus.Up ? "10.8.0.2" : null, 2, 2048, 4096, 1088),
             null, false, false, null, false, false));
 
-    private static List<TrayEntry> Commands(IEnumerable<TrayEntry> entries) =>
-        entries.SelectMany(e => e.Items is { } items ? Commands(items) : e.Kind == TrayEntryKind.Command ? [e] : []).ToList();
-
     [Fact]
     public void With_nothing_yet_it_opens_the_window_says_how_to_begin_and_leaves()
     {
@@ -29,44 +26,43 @@ public class TrayMenuTests
         Assert.Equal(
             [TrayEntryKind.Command, TrayEntryKind.Separator, TrayEntryKind.Note, TrayEntryKind.Separator, TrayEntryKind.Command, TrayEntryKind.Command],
             menu.Select(e => e.Kind));
-        // One way into the window, on its Overview; what is connected, its tip.
-        Assert.True(menu[0] is { Text: "Open Sallyport", Verb: TrayVerb.OpenWindow, Default: true, Tip: "Nothing is connected" });
+        // One way into the window, on its Overview, with the app's mark; what is connected, its tip.
+        Assert.True(menu[0] is { Text: "Open Sallyport", Verb: TrayVerb.OpenWindow, Default: true, Tip: "Nothing is connected", Glyph: TrayGlyph.Mark });
         Assert.True(menu[2] is { Text: "No profiles yet — open Sallyport to import one", Enabled: false });
-        Assert.True(menu[4] is { Text: "Settings", Verb: TrayVerb.OpenSettings });
-        Assert.True(menu[5] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Tip: "Disconnects, then quits. Your apps use your own connection until Sallyport connects again." });
+        Assert.True(menu[4] is { Text: "Settings", Verb: TrayVerb.OpenSettings, Glyph: TrayGlyph.Settings });
+        Assert.True(menu[5] is { Text: "Exit Sallyport", Verb: TrayVerb.Exit, Glyph: TrayGlyph.Exit,
+            Tip: "Disconnects, then quits. Your apps use your own connection until Sallyport connects again." });
         // Only one entry is the default (what a double click would do), and it is opening the window.
         Assert.Single(menu, e => e.Default);
     }
 
     [Fact]
-    public void A_profile_not_connected_offers_connect_and_not_disconnect()
+    public void A_profile_not_connected_is_one_row_that_connects_it()
     {
         var profile = Profile(null);
 
-        var entry = Assert.Single(TrayMenu.Build([profile], ""), e => e.Kind == TrayEntryKind.Submenu);
+        var row = Assert.Single(TrayMenu.Build([profile], ""), e => e.Tone is not null);
 
-        Assert.Equal($"jp — {profile.StatusText}", entry.Text);
-        var connect = Assert.Single(entry.Items!);
-        Assert.True(connect is { Text: "Connect", Verb: TrayVerb.Connect, Enabled: true });
-        Assert.Equal(Jp.Id, connect.Target);
+        // Its name, where it is, what pressing it does: no submenu to open first.
+        Assert.True(row is { Kind: TrayEntryKind.Command, Text: "jp", Verb: TrayVerb.Connect, Action: "Connect", Enabled: true, Tone: Tone.Off });
+        Assert.Equal(profile.StatusText, row.Status);
+        Assert.Equal(Jp.Id, row.Target);
     }
 
     [Fact]
-    public void A_connected_profile_offers_disconnect_and_not_connect()
+    public void A_connected_profiles_row_disconnects_it()
     {
-        var entry = Assert.Single(TrayMenu.Build([Profile(TunnelServiceStatus.Up)], ""), e => e.Kind == TrayEntryKind.Submenu);
+        var row = Assert.Single(TrayMenu.Build([Profile(TunnelServiceStatus.Up)], ""), e => e.Tone is not null);
 
-        Assert.Equal("jp — Connected", entry.Text);
-        Assert.DoesNotContain(entry.Items!, e => e.Verb == TrayVerb.Connect);
-        Assert.True(Assert.Single(entry.Items!, e => e.Verb == TrayVerb.Disconnect) is { Text: "Disconnect", Enabled: true, Target: "ad50a53b0da826ad" });
+        Assert.True(row is { Text: "jp", Status: "Connected", Tone: Tone.Up, Verb: TrayVerb.Disconnect, Action: "Disconnect", Enabled: true, Target: "ad50a53b0da826ad" });
     }
 
     [Fact]
     public void A_profile_still_connecting_can_be_cancelled_from_the_tray()
     {
-        var entry = Assert.Single(TrayMenu.Build([Profile(TunnelServiceStatus.Connecting)], ""), e => e.Kind == TrayEntryKind.Submenu);
+        var row = Assert.Single(TrayMenu.Build([Profile(TunnelServiceStatus.Connecting)], ""), e => e.Tone is not null);
 
-        Assert.True(Assert.Single(entry.Items!, e => e.Kind == TrayEntryKind.Command) is { Text: "Cancel", Verb: TrayVerb.Disconnect });
+        Assert.True(row is { Verb: TrayVerb.Disconnect, Action: "Cancel", Tone: Tone.Busy });
     }
 
     [Fact]
@@ -74,14 +70,12 @@ public class TrayMenuTests
     {
         var menu = TrayMenu.Build([Profile(TunnelServiceStatus.Up)], "1 connection");
 
-        var commands = Commands(menu);
+        var commands = menu.Where(e => e.Kind == TrayEntryKind.Command).ToList();
         Assert.All(commands, c => Assert.NotEqual(TrayVerb.None, c.Verb));
         Assert.All(commands.Where(c => c.Verb is TrayVerb.Connect or TrayVerb.Disconnect), c => Assert.False(string.IsNullOrEmpty(c.Target)));
-        Assert.All(menu.SelectMany(Flatten).Where(e => e.Kind == TrayEntryKind.Note), n => Assert.False(n.Enabled));
+        Assert.All(menu.Where(e => e.Kind == TrayEntryKind.Note), n => Assert.False(n.Enabled));
         // What goes through a profile is set in the window, profile by profile (the owner): the tray connects it as set.
-        Assert.Equal(["Open Sallyport", "jp — Connected", "Settings", "Exit Sallyport"], menu.Where(e => e.Kind != TrayEntryKind.Separator).Select(e => e.Text));
-
-        static IEnumerable<TrayEntry> Flatten(TrayEntry e) => e.Items is { } items ? items.SelectMany(Flatten).Prepend(e) : [e];
+        Assert.Equal(["Open Sallyport", "jp", "Settings", "Exit Sallyport"], menu.Where(e => e.Kind != TrayEntryKind.Separator).Select(e => e.Text));
     }
 
     [Fact]
