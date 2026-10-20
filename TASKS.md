@@ -5,17 +5,14 @@ says under **Done when** has been measured — against the real server where a s
 **Needs** names what only the owner can give.
 
 ## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
-1. **Sizes that follow the text and the screen, not fixed pixels:** the window, setup and the page (what Shenora
-   offers for it, checked first).
-   - **Done when:** each measured at two display scales.
-2. **The package is 176 MB:** each of the client (56 MB), the service (36) and setup (49.5) carries its own .NET
+1. **The package is 176 MB:** each of the client (56 MB), the service (36) and setup (49.5) carries its own .NET
    runtime, and the release's setup carries setup again; WebView2 is Windows' own and not in it.
    - **Done when:** a smaller package is built, installed as an upgrade, and used.
-3. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Setup.exe
+2. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Setup.exe
    /uninstall`); the Start menu has Sallyport alone and the window has none. An "Uninstall Sallyport" beside it in the
    Start menu, and one in Settings → About.
    - **Done when:** each found and started where a person would look, and the removal measured from it.
-4. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
+3. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
    "应用程序的每个连接都经由 VPN。" and its check, which says nothing new; show what that app has sent and received through
    the VPN, and its own latency (its connections' round trip through the tunnel, as the router sees them). No "检测延迟"
    button: the profile's monitoring shows its latency to the VPN server on its own, all the while it is connected.
@@ -25,14 +22,14 @@ says under **Done when** has been measured — against the real server where a s
    on the app's own page, and say what kind (gone, or refused) — never on the Overview.
    - **Done when:** an app in use shows its traffic and latency, and the profile its latency, without a click, each
      measured against the tunnel's own figures.
-5. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
+4. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
    and its loss policy as when an app had one; now an app is added to the profiles it goes through (D23–D24), from the
    Overview's profile section or from Apps. Its look and its steps redesigned with that, for a person who is not
    technical.
    - **Done when:** an app added from each place lands where it was asked for, measured, and the page reviewed against
      the rest of the window.
-6. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
-7. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+5. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
+6. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,
@@ -353,6 +350,9 @@ were seeded instead), Firefox and Electron launches, the dark theme of the new w
   through jp measured with it on the owner's machine (Zenless's Use VPN up over a minute, the guard 196 rounds, 0
   failed). Measure on a machine with UAC on. The owner's own "not running as the system" was not reproduced: it is
   what a worker gone before the client reached it showed, which now gives the service's reason instead.
+- **Sizes at another display scale (2026-10-21):** the window and setup follow Windows' Text size (measured at 100% and
+  150% on the owner's one screen, at 200%, through `SALLYPORT_TEXT_SCALE`); the screen's own scale is WinForms' and
+  WebView2's, as before. Not measured at another display scale: this machine has one screen. Measure at 100% and 150%.
 - **Done when:** each is measured, or recorded as could-not-be-checked with the reason.
 
 ## 5. Phase 4 — the long run (the library)

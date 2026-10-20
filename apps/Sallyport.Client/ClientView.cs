@@ -81,7 +81,8 @@ internal sealed record ClientState(
     ConfirmationView? Confirmation,
     IReadOnlyList<Notice> Notices,
     string Language = "en",
-    SignInView? SignIn = null)
+    SignInView? SignIn = null,
+    double TextScale = 1)
 {
     internal sealed record SummaryView(string Text, Tone Tone);
     internal sealed record TopActions(UiAction Import, UiAction AddApp);

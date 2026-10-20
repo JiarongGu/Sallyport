@@ -1751,7 +1751,8 @@ internal sealed class ClientCore
                 ? new SignInView(asking.Token, signing.Id, L.T("Sign in to {0}", signing.Name), string.Join(", ", ServersOf(signing.Id)),
                     LoginStateOf(signing.Id).Username ?? "", LoginStateOf(signing.Id).PasswordSaved, asking.Error,
                     UiAction.Shown(L.T("Connect")), UiAction.Shown(L.T("Cancel")))
-                : null);
+                : null,
+            TextSize.Factor);
     }
 
     private static IReadOnlyList<EditorOption> MoveParts(int profiles, int apps, bool connection) =>

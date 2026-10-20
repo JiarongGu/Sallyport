@@ -104,9 +104,11 @@ internal sealed class MainForm : OptimizedForm
         SystemEvents.UserPreferenceChanged += OnPreferenceChanged;
     }
 
-    /// <summary>Windows says a setting changed, not which value: the theme is read again and applied if it moved.</summary>
+    /// <summary>Windows says a setting changed, not which value: the theme and the text size are read again, and what
+    /// moved is applied.</summary>
     private void OnPreferenceChanged(object? sender, UserPreferenceChangedEventArgs e)
     {
+        if (TextSize.Refresh()) _core.Publish();
         var theme = Theme.Current();
         if (theme == _theme || IsDisposed || !IsHandleCreated) return;
         BeginInvoke(() =>

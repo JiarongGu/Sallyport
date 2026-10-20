@@ -137,7 +137,7 @@ sealed class ActionButton : Button
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         g.Clear(Parent?.BackColor ?? _theme.Background);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var box = new RectangleF(1.5f * s, 1.5f * s, Width - 3 * s, Height - 3 * s);
@@ -201,7 +201,7 @@ sealed class OptionBox : CheckBox
         Margin = new Padding(0, 0, 0, 12);
     }
 
-    private int TextLeft => (int)(30 * DeviceDpi / 96f);
+    private int TextLeft => (int)(30 * TextSize.Scale(DeviceDpi));
     private const TextFormatFlags Wrap = TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
 
     protected override void OnTextChanged(EventArgs e) { FitHeight(); base.OnTextChanged(e); }
@@ -213,15 +213,15 @@ sealed class OptionBox : CheckBox
     {
         var width = Math.Max(1, Width - TextLeft);
         var title = TextRenderer.MeasureText(Text, _titleFont, new Size(width, 0), Wrap).Height;
-        var description = _description.Length == 0 ? 0 : TextRenderer.MeasureText(_description, Font, new Size(width, 0), Wrap).Height + (int)(2 * DeviceDpi / 96f);
-        var height = Math.Max(title + description, (int)(22 * DeviceDpi / 96f));
+        var description = _description.Length == 0 ? 0 : TextRenderer.MeasureText(_description, Font, new Size(width, 0), Wrap).Height + (int)(2 * TextSize.Scale(DeviceDpi));
+        var height = Math.Max(title + description, (int)(22 * TextSize.Scale(DeviceDpi)));
         if (Height != height) Height = height;
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         g.Clear(Parent?.BackColor ?? _theme.Background);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var faded = !Enabled;
@@ -288,7 +288,7 @@ sealed class FieldBox : Panel
     protected override void OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         var inset = (int)(10 * s);
         Box.SetBounds(inset, (Height - Box.Height) / 2, Math.Max(1, Width - 2 * inset), Box.Height);
     }
@@ -296,7 +296,7 @@ sealed class FieldBox : Panel
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         g.Clear(_theme.Background);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var focused = Box.Focused && !Box.ReadOnly;
@@ -389,7 +389,7 @@ sealed class ChoiceBox : Button
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         g.Clear(Parent?.BackColor ?? _theme.Surface);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using var shape = Draw.Rounded(new RectangleF(1, 1, Width - 2.5f, Height - 2.5f), 6 * s);

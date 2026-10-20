@@ -472,6 +472,8 @@ export interface ClientState {
   /** Newest first. Info notices leave on their own after a few seconds; warnings and errors stay until dismissed. */
   notices: Notice[];
   signIn: SignInView | null;
+  /** Windows' Text size, 1 to 2.25: the page's root size is multiplied by it. */
+  textScale: number;
 }
 
 /** Every intent the page may post, with its payload. None is answered: what follows arrives as the next STATE. */

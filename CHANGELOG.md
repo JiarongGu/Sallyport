@@ -15,6 +15,9 @@
   from the right edge as from the left, and a submenu beside the menu with its entry level with the row it opens from.
 - Setup keeps the install folder chosen when its language is changed (2026-10-21); before, the window opened again in
   the other language on the default folder.
+- The window and setup follow Windows' Text size (Settings → Accessibility → Text size; 2026-10-21): the window's
+  page is sized in rem of a root that the client sets from it, and arranges itself for a narrow window by its width in
+  that size; setup's window and fonts grow by it too.
 
 ## 0.1.0 — 2026-10-20
 

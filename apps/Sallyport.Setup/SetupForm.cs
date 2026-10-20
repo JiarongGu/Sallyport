@@ -20,9 +20,9 @@ sealed class SetupForm : Form
     private readonly Func<Stream?> _payload;
     private readonly string _version;
     private readonly string? _missing;
-    private readonly Font _headingFont = new(L.FontSemibold, 14f);
-    private readonly Font _titleFont = new(L.FontSemibold, 12.5f);
-    private readonly Font _strongFont = new(L.FontSemibold, 9.75f);
+    private readonly Font _headingFont = new(L.FontSemibold, TextSize.Points(14f));
+    private readonly Font _titleFont = new(L.FontSemibold, TextSize.Points(12.5f));
+    private readonly Font _strongFont = new(L.FontSemibold, TextSize.Points(9.75f));
     private long? _needed;
     private bool _busy;
     private string _verb = "Install";
@@ -85,9 +85,11 @@ sealed class SetupForm : Form
         _missing = uninstall ? null : Installer.Missing();
 
         SuspendLayout();
-        AutoScaleDimensions = new SizeF(96f, 96f);
+        // Laid out below in 96-DPI units at 100% text size. Said to be designed at 96 over the text size, the screen's
+        // scaling takes both: at 150% text, everything by 1.5 more, as its fonts are.
+        AutoScaleDimensions = new SizeF(96f / TextSize.Factor, 96f / TextSize.Factor);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Font = new Font(L.Font, 9.75f);
+        Font = new Font(L.Font, TextSize.Points(9.75f));
         Text = uninstall ? L.T("Remove Sallyport") : L.T("Sallyport setup");
         Icon = Draw.GateIcon(32);
         FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -464,7 +466,7 @@ sealed class SetupForm : Form
 
     private void LayOutFooter()
     {
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         var gap = (int)(8 * s);
         var right = _footer.Width - (int)(24 * s);
         foreach (var button in new[] { _primary, _secondary })
@@ -481,7 +483,7 @@ sealed class SetupForm : Form
     private void PaintHeader(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
-        var s = DeviceDpi / 96f;
+        var s = TextSize.Scale(DeviceDpi);
         Draw.Gate(g, new RectangleF(24 * s, 18 * s, 40 * s, 40 * s));
         var x = (int)(78 * s);
         TextRenderer.DrawText(g, "Sallyport", _titleFont, new Point(x, (int)(15 * s)), _theme.Text, TextFormatFlags.NoPrefix);

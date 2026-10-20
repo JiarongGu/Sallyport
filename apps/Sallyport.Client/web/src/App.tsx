@@ -1,5 +1,5 @@
 import { getBridge, isShenoraAvailable, useShenoraEvent, WindowCommands } from '@shenora/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ClientState, Notice, Page } from './contract';
 import { setLanguage, t } from './i18n';
 import { MODULE } from './contract';
@@ -74,6 +74,23 @@ export function App() {
   useEffect(() => {
     getBridge().notifyReady().catch(() => console.error('Sallyport ready handshake failed.'));
   }, []);
+
+  // The root's size follows Windows' Text size (the host's textScale), and every size is in rem of it. The two narrower
+  // arrangements follow the window's width in rem as well, so larger text arranges the page as a narrower window would:
+  // a media query's width is in CSS pixels, which text size does not change.
+  const textScale = state?.textScale ?? 1;
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--text-scale', String(textScale));
+    const arrange = () => {
+      const rems = window.innerWidth / (16 * textScale);
+      root.classList.toggle('narrow', rems <= 53.75);
+      root.classList.toggle('compact', rems <= 37.5);
+    };
+    arrange();
+    window.addEventListener('resize', arrange);
+    return () => window.removeEventListener('resize', arrange);
+  }, [textScale]);
 
   // The host's splash stays until the first state has been painted: lifted sooner, it would give way to a bare page.
   const splashLifted = useRef(false);
