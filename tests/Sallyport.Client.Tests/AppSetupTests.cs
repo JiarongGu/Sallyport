@@ -3,7 +3,9 @@ namespace Sallyport.Client.Tests;
 /// <summary>"Add an app" (AppSetup): what it says it found at the place the person chose, before anything is kept.</summary>
 public sealed class AppSetupTests : IDisposable
 {
-    private readonly string _folder = Path.Combine(Path.GetTempPath(), "sallyport-tests", Guid.NewGuid().ToString("N"));
+    // A folder of its own, not under the shared one another class removes when it is empty: a folder being removed
+    // refuses a new one inside it.
+    private readonly string _folder = Path.Combine(Path.GetTempPath(), "sallyport-setup-" + Guid.NewGuid().ToString("N"));
 
     public AppSetupTests()
     {

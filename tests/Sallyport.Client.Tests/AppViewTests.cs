@@ -242,7 +242,8 @@ public class AppViewTests
     [Fact]
     public void Settings_choices_go_over_every_profiles_own_and_a_profiles_changes_over_them()
     {
-        var file = Path.Combine(Path.GetTempPath(), "sallyport-tests", Guid.NewGuid().ToString("N"), "settings.json");
+        // Its own folder: the shared one is removed by another class when it is empty, and refuses new ones meanwhile.
+        var file = Path.Combine(Path.GetTempPath(), "sallyport-settings-" + Guid.NewGuid().ToString("N"), "settings.json");
         try
         {
             var settings = new ClientSettings(file) { Connection = new PolicyOverride(RoundsMax: 5, Protocol: "tcp") };
