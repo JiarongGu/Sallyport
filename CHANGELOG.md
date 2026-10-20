@@ -8,6 +8,11 @@
   It now asks the service manager — the service's process, its account, its executable, which a person may read —
   and takes the run's router to be the process the service names. A reason the service gives is now shown in the
   window's language, and a router that stops before the client reaches it gives the service's own reason.
+- A profile's Edit and Remove are on its row (2026-10-21). Edit is one page with one Save: its name, its sign-in, and
+  how it connects — as in Settings, or its own settings (the protocol, retrying, the finer settings). A silence limit
+  shown only because the server sets none is no longer kept as the profile's own when it is saved unchanged.
+- The tray menu (2026-10-21): room above the first entry and below the last as at its sides, the highlight as far
+  from the right edge as from the left, and a submenu beside the menu with its entry level with the row it opens from.
 
 ## 0.1.0 — 2026-10-20
 

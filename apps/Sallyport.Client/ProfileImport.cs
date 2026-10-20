@@ -16,9 +16,11 @@ internal sealed record SignInValues(string Username, string Password, bool Remem
 
 /// <summary>Edit a profile (D29): its name, and for one that signs in, its username and its kept password —
 /// <see cref="ChangePassword"/> with a new <see cref="Password"/> keeps that one, <see cref="ForgetPassword"/> lets the
-/// kept one go. <see cref="NeedsLogin"/> and <see cref="PasswordSaved"/> are the host's, for the page to show.</summary>
+/// kept one go. <see cref="NeedsLogin"/> and <see cref="PasswordSaved"/> are the host's, for the page to show. How it
+/// connects is on the same page (the owner: "edit will show a proper edit view"): <see cref="OwnSettings"/> off follows
+/// Settings, on keeps <see cref="Policy"/>; no <see cref="Policy"/> for a profile this version cannot connect.</summary>
 internal sealed record ProfileEditValues(string Name, string Username, string Password, bool ChangePassword, bool ForgetPassword,
-    bool NeedsLogin = false, bool PasswordSaved = false);
+    bool NeedsLogin = false, bool PasswordSaved = false, bool OwnSettings = false, PolicyValues? Policy = null);
 
 /// <summary>A profile fetched from a link: its text, or that the server wants the person signed in, or why not.</summary>
 internal sealed record Downloaded(string? Text, bool SignIn, string? Why);

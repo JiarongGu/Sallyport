@@ -443,4 +443,12 @@ public class AppViewTests
         Assert.True(GameViews.PolicyValuesOf(new ConnectionPolicy()) is { KeepTrying: true, RoundsMaxText: "5", Protocol: "" });
         Assert.True(GameViews.PolicyValuesOf(new ConnectionPolicy { RoundsMax = 3, Protocol = "udp" }) is { KeepTrying: false, RoundsMaxText: "3", Protocol: "udp" });
     }
+
+    [Fact]
+    public void A_silence_limit_that_only_stands_in_for_the_servers_starts_empty()
+    {
+        // Saved as shown, a 60 that stood in for a server setting none would become one that outranks the server's.
+        Assert.Equal("", GameViews.PolicyValuesOf(new ConnectionPolicy { PingRestart = 60 }).PingRestartText);
+        Assert.Equal("90", GameViews.PolicyValuesOf(new ConnectionPolicy { PingRestart = 90, KeepaliveOverridesServer = true }).PingRestartText);
+    }
 }

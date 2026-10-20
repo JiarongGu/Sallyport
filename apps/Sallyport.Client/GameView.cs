@@ -159,9 +159,11 @@ internal static class GameViews
         L.T("Windows will ask for permission. While the driver is taken out, this computer's network pauses for a few seconds (about 6 s measured; other computers may differ). Apps can no longer be routed by their packets until it is installed again.");
 
     // Five rounds is what the field offers when the person turns "keep trying" off: a number to change, not an empty box.
+    // A silence limit that only stands in for a server's (one that sets none) is left empty: empty is "the server's own",
+    // and the field saved as it was shown must not turn it into one that outranks the server.
     public static PolicyValues PolicyValuesOf(ConnectionPolicy p) => new(
         Seconds(p.RetryWait), Seconds(p.RetryWaitMax), p.RoundsMax?.ToString(English) ?? "5", p.RandomOrder, Seconds(p.AttemptTimeout),
-        p.RetryAfterAuthFailure, p.PingRestart?.ToString(English) ?? "", p.Protocol ?? "", p.RoundsMax is null);
+        p.RetryAfterAuthFailure, p.KeepaliveOverridesServer && p.PingRestart is { } r ? r.ToString(English) : "", p.Protocol ?? "", p.RoundsMax is null);
 
     // How the tunnel reaches the server, never what it carries: an app's TCP and UDP go through it on either (the owner:
     // "its mostly for all traffic").
@@ -199,13 +201,12 @@ internal static class GameViews
 
     /// <summary>What applies without changes of the profile's own — its directives with Settings' choices over them —
     /// under its connection settings, so a change is made knowing what it changes.</summary>
-    public static string PolicyHint(ConnectionPolicy p, bool overridden) =>
+    public static string PolicyHint(ConnectionPolicy p) =>
         L.T("Without changes here, from Settings and the profile itself: {0}, wait {1} s growing to {2} s, {3}, {4}, {5} s to answer{6}",
             ProtocolText(p.Protocol) ?? L.T("either protocol"), Seconds(p.RetryWait), Seconds(p.RetryWaitMax),
             p.RoundsMax is { } rounds ? L.Count(rounds, "give up after 1 round", "give up after {0} rounds") : L.T("never give up"),
             p.RandomOrder ? L.T("servers in random order") : L.T("servers in the order listed"), Seconds(p.AttemptTimeout),
-            p.PingRestart is { } r ? L.T(", dead after {0} s of silence when the server sets none.", r) : L.T("."))
-        + (overridden ? L.Join("", L.T("Your changes are shown above.")) : "");
+            p.PingRestart is { } r ? L.T(", dead after {0} s of silence when the server sets none.", r) : L.T("."));
 
     private static string Seconds(TimeSpan t) => ((int)Math.Round(t.TotalSeconds)).ToString(English);
 

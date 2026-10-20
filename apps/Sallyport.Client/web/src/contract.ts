@@ -81,7 +81,7 @@ export interface ProfileView {
   /** Its row on Profiles: VPN protocol, If it cannot connect, More settings (each Settings' or its own), Imported. */
   details: Fact[] | null;
   location: LocationView;
-  actions: Record<'connect' | 'disconnect' | 'copy' | 'locate' | 'remove' | 'settings' | 'edit', Action>;
+  actions: Record<'connect' | 'disconnect' | 'copy' | 'locate' | 'remove' | 'edit', Action>;
   /** ISO time the next round of attempts starts, while the connection waits for it: the page counts down to it. */
   nextAttemptAt: string | null;
 }
@@ -363,8 +363,9 @@ export interface NewProfileValues {
   needsLogin: boolean;
 }
 
-/** Edit a profile (D29): its name, and for one that signs in, its username and kept password. needsLogin and
- *  passwordSaved are the host's; a kept password is never sent to the page. */
+/** Edit a profile (D29): its name, for one that signs in its username and kept password, and how it connects —
+ *  ownSettings off follows Settings, on keeps policy. needsLogin and passwordSaved are the host's; a kept password is
+ *  never sent to the page. No policy for a profile this version cannot connect. */
 export interface ProfileEditValues {
   name: string;
   username: string;
@@ -373,6 +374,8 @@ export interface ProfileEditValues {
   forgetPassword: boolean;
   needsLogin: boolean;
   passwordSaved: boolean;
+  ownSettings: boolean;
+  policy: PolicyValues | null;
 }
 
 /** The sign-in a connect waits for (D29), over whatever page is shown. */
@@ -412,9 +415,7 @@ export type Editor = {
   hint: string | null;
   save: Action;
   cancel: Action;
-  /** The policy editor's "Use the profile's own": posts RESET_POLICY. */
-  reset: Action;
-  /** The app editor's choices for what Launch starts; the policy editor's VPN protocols, null when the profile has
+  /** The app editor's choices for what Launch starts; a profile's VPN protocols on its Edit page, null when it has
    *  servers of one only. */
   options: { id: string; label: string; help: string | null }[] | null;
   /** For an app: the icons it may take, each a program's own (a data URL), one per look. */
@@ -422,7 +423,7 @@ export type Editor = {
   /** For a profile being imported, once read: its server and where it came from. */
   facts: Fact[] | null;
 } & ({ kind: 'app'; values: AppEditValues } | { kind: 'new-profile'; values: NewProfileValues } | { kind: 'profile-edit'; values: ProfileEditValues } | { kind: 'program'; values: ProgramEditValues }
-  | { kind: 'policy'; values: PolicyValues } | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues }
+  | { kind: 'defaults'; values: DefaultsValues } | { kind: 'new-app'; values: NewAppValues }
   | { kind: 'export'; values: MoveValues } | { kind: 'import'; values: MoveValues });
 
 export interface Confirmation {
@@ -522,9 +523,6 @@ export interface Commands {
   REQUEST_REMOVE_PROFILE: { id: string };
   /** Whatever the open confirmation asks: removing a profile or an app, disconnecting, installing or removing the driver. */
   CONFIRM: { token: string };
-  BEGIN_POLICY_EDIT: { id: string };
-  SAVE_POLICY: { token: string; values: PolicyValues };
-  RESET_POLICY: { token: string };
   REQUEST_DRIVER_INSTALL: Record<string, never>;
   REQUEST_DRIVER_REMOVE: Record<string, never>;
   CANCEL_CONFIRMATION: { token: string };

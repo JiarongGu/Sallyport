@@ -9,7 +9,6 @@ export type Draft =
   | { token: string; kind: 'app'; values: AppEditValues }
   | { token: string; kind: 'program'; values: ProgramEditValues }
   | { token: string; kind: 'defaults'; values: DefaultsValues }
-  | { token: string; kind: 'policy'; values: PolicyValues }
   | { token: string; kind: 'new-app'; values: NewAppValues }
   | { token: string; kind: 'new-profile'; values: NewProfileValues }
   | { token: string; kind: 'profile-edit'; values: ProfileEditValues }
@@ -20,10 +19,9 @@ export function seedDraft(editor: Editor): Draft {
     case 'app': return { token: editor.token, kind: 'app', values: { ...editor.values } };
     case 'program': return { token: editor.token, kind: 'program', values: { ...editor.values } };
     case 'defaults': return { token: editor.token, kind: 'defaults', values: { ...editor.values } };
-    case 'policy': return { token: editor.token, kind: 'policy', values: { ...editor.values } };
     case 'new-app': return { token: editor.token, kind: 'new-app', values: { ...editor.values, included: [...editor.values.included] } };
     case 'new-profile': return { token: editor.token, kind: 'new-profile', values: { ...editor.values } };
-    case 'profile-edit': return { token: editor.token, kind: 'profile-edit', values: { ...editor.values } };
+    case 'profile-edit': return { token: editor.token, kind: 'profile-edit', values: { ...editor.values, policy: editor.values.policy && { ...editor.values.policy } } };
     case 'export': case 'import': return { token: editor.token, kind: editor.kind, values: { ...editor.values } };
   }
 }
@@ -53,34 +51,14 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
   const prefix = useId();
   useEditorFocus(form);
   const saving = editor.phase === 'saving';
-  // The finer settings stay folded until asked for, or until one of them is what a save refused.
-  const [moreAsked, setMoreAsked] = useState(false);
-  const moreOpen = moreAsked || (['retryWaitText', 'retryWaitMaxText', 'attemptTimeoutText', 'pingRestartText'] as const).some((f) => editor.errors[f]);
   const description = (field: EditorField) =>
     [editor.hint ? `${prefix}-hint` : '', editor.errors[field] ? `${prefix}-${field}-error` : ''].filter(Boolean).join(' ') || undefined;
   const error = (field: EditorField) => editor.errors[field]
     ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p>
     : null;
 
-  const text = (field: EditorField & keyof PolicyValues, label: string, unit: string) => draft.kind === 'policy' ? <div className="field">
-    <label htmlFor={`${prefix}-${field}`}>{t(label)}</label>
-    <div className="unit-field">
-      <input id={`${prefix}-${field}`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
-        value={draft.values[field] as string} disabled={saving}
-        aria-invalid={!!editor.errors[field]} aria-describedby={description(field)}
-        onChange={(event) => onChange({ ...draft, values: { ...draft.values, [field]: event.target.value } })} />
-      <span className="secondary">{t(unit)}</span>
-    </div>
-    {error(field)}
-  </div> : null;
-  const check = (field: 'randomOrder' | 'retryAfterAuthFailure', label: string) => draft.kind === 'policy' ? <label className="check-field">
-    <input type="checkbox" checked={draft.values[field]} disabled={saving}
-      onChange={(event) => onChange({ ...draft, values: { ...draft.values, [field]: event.target.checked } })} />
-    {t(label)}
-  </label> : null;
-
   return <form ref={form} className="editor" tabIndex={-1}
-    aria-label={t(editor.kind === 'policy' ? 'Connection settings' : editor.kind === 'program' ? 'Program methods'
+    aria-label={t(editor.kind === 'program' ? 'Program methods'
       : editor.kind === 'defaults' ? 'Defaults for new apps' : editor.kind === 'export' ? 'Export' : editor.kind === 'import' ? 'Import' : 'Edit app')}
     aria-describedby={editor.errors.form ? `${prefix}-form-error` : undefined}
     aria-busy={saving} noValidate onSubmit={(event) => {
@@ -90,7 +68,6 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         case 'app': post('SAVE_APP', { token: editor.token, values: draft.values }); break;
         case 'program': post('SAVE_PROGRAM', { token: editor.token, values: draft.values }); break;
         case 'defaults': post('SAVE_DEFAULTS', { token: editor.token, values: draft.values }); break;
-        case 'policy': post('SAVE_POLICY', { token: editor.token, values: draft.values }); break;
         case 'export': post('SAVE_EXPORT', { token: editor.token, values: draft.values }); break;
         case 'import': post('SAVE_IMPORT', { token: editor.token, values: draft.values }); break;
       }
@@ -210,53 +187,81 @@ export function EditorForm({ editor, draft, onChange, profileChoices, kindChoice
         </div>
         {error('directAfterText')}
       </div>}
-    </div> : draft.kind === 'policy' ? <div className="editor-fields">
-      {editor.options && <fieldset className="field full-field" aria-describedby={description('protocol')}>
-        <legend>{t('VPN protocol')}</legend>
-        {editor.options.map((choice) => <label key={choice.id} className="radio-field">
-          <input type="radio" name={`${prefix}-protocol`} value={choice.id} checked={draft.values.protocol === choice.id} disabled={saving}
-            onChange={() => onChange({ ...draft, values: { ...draft.values, protocol: choice.id } })} />
-          <span><span>{choice.label}</span>{choice.help && <span className="secondary metadata">{choice.help}</span>}</span>
-        </label>)}
-        {error('protocol')}
-      </fieldset>}
-      <fieldset className="field full-field">
-        <legend>{t('When it cannot connect')}</legend>
-        <label className="radio-field">
-          <input type="radio" name={`${prefix}-retry`} checked={draft.values.keepTrying} disabled={saving}
-            onChange={() => onChange({ ...draft, values: { ...draft.values, keepTrying: true } })} />
-          <span><span>{t('Keep trying until I disconnect')}</span></span>
-        </label>
-        <label className="radio-field">
-          <input type="radio" name={`${prefix}-retry`} checked={!draft.values.keepTrying} disabled={saving}
-            onChange={() => onChange({ ...draft, values: { ...draft.values, keepTrying: false } })} />
-          <span><span>{t('Stop after a number of rounds')}</span><span className="secondary metadata">{t('A round tries every server once.')}</span></span>
-        </label>
-      </fieldset>
-      {!draft.values.keepTrying && text('roundsMaxText', 'Stop after', 'rounds')}
-      <div className="full-field more-toggle">
-        <Disclosure open={moreOpen} controls={`${prefix}-more`} onClick={() => setMoreAsked(!moreOpen)}>{t('More settings')}</Disclosure>
-      </div>
-      <div id={`${prefix}-more`} hidden={!moreOpen} className="editor-fields full-field">
-        {text('retryWaitText', 'Wait between attempts', 'seconds')}
-        {text('retryWaitMaxText', 'Longest wait', 'seconds')}
-        {text('attemptTimeoutText', 'Time for a server to answer', 'seconds')}
-        {text('pingRestartText', 'Lost after silence of', 'seconds')}
-        <div className="field full-field">
-          {check('randomOrder', 'Try the servers in random order')}
-          {check('retryAfterAuthFailure', 'Keep trying after the server refuses the login')}
-        </div>
-        {editor.hint && <p className="secondary full-field" id={`${prefix}-hint`}>{editor.hint}</p>}
-      </div>
     </div> : null}
-    {editor.hint && editor.kind !== 'policy' && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
+    {editor.hint && <p className="secondary" id={`${prefix}-hint`}>{editor.hint}</p>}
     {error('form')}
     <div className="actions">
       <ActionButton action={editor.save} primary type="submit" />
       <ActionButton action={editor.cancel} onClick={() => post('CANCEL_EDIT', { token: editor.token })} />
-      <ActionButton action={editor.reset} onClick={() => post('RESET_POLICY', { token: editor.token })} />
     </div>
   </form>;
+}
+
+/** A profile's own connection settings, on its Edit page: the VPN protocol where it has servers of more than one, what
+ *  it does when it cannot connect, and the finer settings folded until asked for or refused. */
+function PolicyFields({ editor, values, onChange, prefix }: {
+  editor: Editor;
+  values: PolicyValues;
+  onChange: (values: PolicyValues) => void;
+  prefix: string;
+}) {
+  const [moreAsked, setMoreAsked] = useState(false);
+  const moreOpen = moreAsked || (['retryWaitText', 'retryWaitMaxText', 'attemptTimeoutText', 'pingRestartText'] as const).some((f) => editor.errors[f]);
+  const saving = editor.phase === 'saving';
+  const error = (field: EditorField) => editor.errors[field]
+    ? <p className="field-error" role="alert" id={`${prefix}-${field}-error`}>{editor.errors[field]}</p> : null;
+  const text = (field: EditorField & keyof PolicyValues, label: string, unit: string) => <div className="field">
+    <label htmlFor={`${prefix}-${field}`}>{t(label)}</label>
+    <div className="unit-field">
+      <input id={`${prefix}-${field}`} type="text" inputMode="numeric" autoComplete="off" spellCheck={false}
+        value={values[field] as string} disabled={saving}
+        aria-invalid={!!editor.errors[field]} aria-describedby={editor.errors[field] ? `${prefix}-${field}-error` : undefined}
+        onChange={(event) => onChange({ ...values, [field]: event.target.value })} />
+      <span className="secondary">{t(unit)}</span>
+    </div>
+    {error(field)}
+  </div>;
+  const check = (field: 'randomOrder' | 'retryAfterAuthFailure', label: string) => <label className="check-field">
+    <input type="checkbox" checked={values[field]} disabled={saving} onChange={(event) => onChange({ ...values, [field]: event.target.checked })} />
+    {t(label)}
+  </label>;
+
+  return <div className="editor-fields">
+    {editor.options && <fieldset className="field full-field">
+      <legend>{t('VPN protocol')}</legend>
+      {editor.options.map((choice) => <label key={choice.id} className="radio-field">
+        <input type="radio" name={`${prefix}-protocol`} value={choice.id} checked={values.protocol === choice.id} disabled={saving}
+          onChange={() => onChange({ ...values, protocol: choice.id })} />
+        <span><span>{choice.label}</span>{choice.help && <span className="secondary metadata">{choice.help}</span>}</span>
+      </label>)}
+      {error('protocol')}
+    </fieldset>}
+    <fieldset className="field full-field">
+      <legend>{t('When it cannot connect')}</legend>
+      <label className="radio-field">
+        <input type="radio" name={`${prefix}-retry`} checked={values.keepTrying} disabled={saving} onChange={() => onChange({ ...values, keepTrying: true })} />
+        <span><span>{t('Keep trying until I disconnect')}</span></span>
+      </label>
+      <label className="radio-field">
+        <input type="radio" name={`${prefix}-retry`} checked={!values.keepTrying} disabled={saving} onChange={() => onChange({ ...values, keepTrying: false })} />
+        <span><span>{t('Stop after a number of rounds')}</span><span className="secondary metadata">{t('A round tries every server once.')}</span></span>
+      </label>
+    </fieldset>
+    {!values.keepTrying && text('roundsMaxText', 'Stop after', 'rounds')}
+    <div className="full-field more-toggle">
+      <Disclosure open={moreOpen} controls={`${prefix}-more`} onClick={() => setMoreAsked(!moreOpen)}>{t('More settings')}</Disclosure>
+    </div>
+    <div id={`${prefix}-more`} hidden={!moreOpen} className="editor-fields full-field">
+      {text('retryWaitText', 'Wait between attempts', 'seconds')}
+      {text('retryWaitMaxText', 'Longest wait', 'seconds')}
+      {text('attemptTimeoutText', 'Time for a server to answer', 'seconds')}
+      {text('pingRestartText', 'Lost after silence of', 'seconds')}
+      <div className="field full-field">
+        {check('randomOrder', 'Try the servers in random order')}
+        {check('retryAfterAuthFailure', 'Keep trying after the server refuses the login')}
+      </div>
+    </div>
+  </div>;
 }
 
 /** "Add an app", a page of its own: first where it is — typed, pasted or browsed to, a folder or a program — and what
@@ -589,6 +594,20 @@ export function ProfileEditForm({ editor, draft, onChange }: { editor: Editor; d
           {values.passwordSaved && !values.forgetPassword && <button type="button" onClick={() => update({ forgetPassword: true })}>{t('Forget password')}</button>}
         </div>}
         {usernameChanged && values.passwordSaved && !values.changePassword && <p className="secondary metadata">{t('Changing the username also forgets its saved password.')}</p>}
+      </fieldset>}
+      {/* How it connects: as Settings says, which most never change, or its own, over Settings' choices. */}
+      {values.policy && <fieldset className="inset connection-choice">
+        <legend>{t('How it connects')}</legend>
+        <label className="radio-field">
+          <input type="radio" name={`${prefix}-own`} checked={!values.ownSettings} onChange={() => update({ ownSettings: false })} />
+          <span><span>{t('As in Settings')}</span>{editor.hint && <span className="secondary metadata">{editor.hint}</span>}</span>
+        </label>
+        <label className="radio-field">
+          <input type="radio" name={`${prefix}-own`} checked={values.ownSettings} onChange={() => update({ ownSettings: true })} />
+          <span><span>{t('Its own settings')}</span><span className="secondary metadata">{t('Only for this profile. What is left as it is follows Settings.')}</span></span>
+        </label>
+        {values.ownSettings && <PolicyFields editor={editor} values={values.policy} prefix={`${prefix}-policy`}
+          onChange={(policy) => update({ policy })} />}
       </fieldset>}
     </section>
     {error('form')}

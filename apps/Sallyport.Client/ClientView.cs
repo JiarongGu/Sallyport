@@ -36,10 +36,9 @@ internal sealed record EmptyView(string Title, string Text, string Command);
 
 internal sealed record LocationView(LocationPhase Phase, string Text, IReadOnlyList<Fact> Facts, DateTimeOffset? CheckedAt, bool PreviousResult);
 
-/// <summary><see cref="Edit"/>: the row's one action (D29) — the profile's name, sign-in, connection settings and removal
-/// are on its Edit page.</summary>
-internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction Locate, UiAction Remove, UiAction Settings,
-    UiAction? Edit = null);
+/// <summary>The row's own: <see cref="Edit"/>, whose page holds the profile's name, sign-in and how it connects, and
+/// <see cref="Remove"/> (the owner: "put edit/delete button on surface").</summary>
+internal sealed record ProfileActions(UiAction Connect, UiAction Disconnect, UiAction Copy, UiAction Locate, UiAction Remove, UiAction? Edit = null);
 
 internal sealed record ProfileView(
     string Id, string Name, ProfilePhase Phase, Tone Tone, string StatusText, string? DetailText, DateTimeOffset? ConnectedSince,
@@ -48,7 +47,7 @@ internal sealed record ProfileView(
 
 internal sealed record EditorView(
     string Token, string SubjectId, string Phase, IReadOnlyDictionary<string, string> Errors, string? Hint, UiAction Save,
-    UiAction Cancel, UiAction Reset, string Kind, object Values, IReadOnlyList<EditorOption>? Options = null,
+    UiAction Cancel, string Kind, object Values, IReadOnlyList<EditorOption>? Options = null,
     IReadOnlyList<IconChoice>? Icons = null, IReadOnlyList<Fact>? Facts = null);
 
 internal sealed record ConfirmationView(string Token, string Title, string Text, UiAction Confirm, UiAction Cancel);
@@ -175,7 +174,6 @@ internal static class ClientView
             Remove: UiAction.Shown(L.T("Remove profile"), !running && !busy && f.UsedBy is null,
                 // Disconnecting ends both, an app's route through it as well: one thing to do, where it is done.
                 running || f.UsedBy is not null ? L.T("Disconnect it on Overview first.") : null),
-            Settings: UiAction.Shown(L.T("Connection settings…"), !busy && f.Stored.Unsupported is null, L.T("This version cannot connect this profile.")),
             Edit: UiAction.Shown(L.T("Edit…"), !busy));
 
         // A countdown only while the session waits for a round it has set a time for: never one it would not keep.

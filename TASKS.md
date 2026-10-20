@@ -5,30 +5,36 @@ says under **Done when** has been measured — against the real server where a s
 **Needs** names what only the owner can give.
 
 ## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
-1. **Edit a profile in one click:** Edit and Remove on the profile's own row; Edit opens the edit view straight away
-   (now the row opens a page where Edit is a second click).
-2. **The tray menu's alignment**, from a capture of the real screen at 200%: an entry's highlight 10 px from the
-   menu's left edge and 20 px from its right (the separators even); the submenu over the menu's edge by 11 px; the
-   submenu's entry 5 px below the row it opens from.
-   - **Done when:** a capture shows the highlight even, the submenu beside the menu, and its entry level with the row.
-3. **Setup forgets the folder when the language changes:** a folder typed or browsed goes back to the default.
+1. **Setup forgets the folder when the language changes:** a folder typed or browsed goes back to the default.
    - **Done when:** a folder chosen, the language switched there and back, the folder still the one chosen.
-4. **Sizes that follow the text and the screen, not fixed pixels:** the window, setup and the page (what Shenora
+2. **Sizes that follow the text and the screen, not fixed pixels:** the window, setup and the page (what Shenora
    offers for it, checked first).
    - **Done when:** each measured at two display scales.
-5. **The package is 176 MB:** each of the client (56 MB), the service (36) and setup (49.5) carries its own .NET
+3. **The package is 176 MB:** each of the client (56 MB), the service (36) and setup (49.5) carries its own .NET
    runtime, and the release's setup carries setup again; WebView2 is Windows' own and not in it.
    - **Done when:** a smaller package is built, installed as an upgrade, and used.
-6. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Setup.exe
+4. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Setup.exe
    /uninstall`); the Start menu has Sallyport alone and the window has none. An "Uninstall Sallyport" beside it in the
    Start menu, and one in Settings → About.
    - **Done when:** each found and started where a person would look, and the removal measured from it.
-7. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
+5. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
    "应用程序的每个连接都经由 VPN。" and its check, which says nothing new; show what that app has sent and received through
-   the VPN, and its own latency (its connections' round trip through the tunnel, as the router sees them).
-   - **Done when:** an app in use shows its traffic and latency, measured against the tunnel's own figures.
-8. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
-9. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+   the VPN, and its own latency (its connections' round trip through the tunnel, as the router sees them). No "检测延迟"
+   button: the profile's monitoring shows its latency to the VPN server on its own, all the while it is connected.
+   The check's "but 24 processes could not be read" (the owner, toggling one game in a session) counts every process on
+   the machine whose executable the router could not read at a connection's first packet, for the run's whole life —
+   mostly, it seems, processes already gone; it reads as a fault of that app. Say it only where it could be the app's,
+   on the app's own page, and say what kind (gone, or refused) — never on the Overview.
+   - **Done when:** an app in use shows its traffic and latency, and the profile its latency, without a click, each
+     measured against the tunnel's own figures.
+6. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
+   and its loss policy as when an app had one; now an app is added to the profiles it goes through (D23–D24), from the
+   Overview's profile section or from Apps. Its look and its steps redesigned with that, for a person who is not
+   technical.
+   - **Done when:** an app added from each place lands where it was asked for, measured, and the page reviewed against
+     the rest of the window.
+7. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
+8. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,

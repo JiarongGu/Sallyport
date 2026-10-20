@@ -492,14 +492,19 @@ internal sealed class ClientCore
         Publish();
     }
 
-    // ---- Edit a profile (D29): its name, and for one that signs in, its username and kept password.
+    // ---- Edit a profile (D29): its name, for one that signs in its username and kept password, and how it connects.
 
     public void BeginProfileEdit(string id)
     {
         var profile = Profile(id);
         var login = profile.NeedsLogin ? LoginStateOf(id) : new LoginState(null, false);
+        // What it connects with now, Settings' and its own together, so a choice of its own starts from there.
+        var policy = profile.Unsupported is null
+            ? GameViews.PolicyValuesOf(_settings.PolicyFor(id, OwnPolicy(id), ClientSettings.ProtocolsOf(profile.Remotes)))
+            : null;
         lock (_gate) _editor = new OpenEditor(NewToken(), "profile-edit", id,
-            new ProfileEditValues(profile.Name, login.Username ?? "", "", false, false, profile.NeedsLogin, login.PasswordSaved), Empty);
+            new ProfileEditValues(profile.Name, login.Username ?? "", "", false, false, profile.NeedsLogin, login.PasswordSaved,
+                !_settings.PolicyOf(id).IsEmpty, policy), Empty);
         Publish();
     }
 
@@ -515,6 +520,8 @@ internal sealed class ClientCore
         var username = values.Username?.Trim() ?? "";
         if (profile.NeedsLogin && values.ChangePassword && string.IsNullOrEmpty(values.Password)) errors["password"] = L.T("Enter a password.");
         if (profile.NeedsLogin && values.ChangePassword && username.Length == 0) errors["username"] = L.T("Enter a username.");
+        var connects = profile.Unsupported is null;
+        var policy = connects && values.OwnSettings && values.Policy is { } own ? PolicyChange(profile.Id, own, errors) : new PolicyOverride();
         if (errors.Count > 0)
         {
             lock (_gate) if (_editor?.Token == token) _editor = _editor with { Values = values with { Password = "" }, Errors = errors };
@@ -529,8 +536,17 @@ internal sealed class ClientCore
             if (values.ChangePassword) KeepLogin(profile.Id, username, values.Password);
             else if (values.ForgetPassword || username != (kept.Username ?? "")) KeepLogin(profile.Id, username, null);
         }
-        lock (_gate) if (_editor?.Token == token) _editor = null;
-        Notify(NoticeKind.Info, L.T("Saved {0}.", name), new("profile", profile.Id));
+        var reconnect = false;
+        lock (_gate)
+        {
+            if (connects && policy is not null && policy != _settings.PolicyOf(profile.Id))
+            {
+                _settings.PutPolicy(profile.Id, policy);
+                reconnect = true;
+            }
+            if (_editor?.Token == token) _editor = null;
+        }
+        Notify(NoticeKind.Info, reconnect ? L.T("Saved {0}. Its next connection uses these settings.", name) : L.T("Saved {0}.", name), new("profile", profile.Id));
         Publish();
     }
 
@@ -1289,23 +1305,17 @@ internal sealed class ClientCore
             : L.T("{0} started; its traffic goes through {1}.", Path.GetFileName(target.Path), profile.Name), new("app", id));
     }
 
-    // ---- a profile's connection settings
+    // ---- a profile's connection settings, on its Edit page
 
-    public void BeginPolicyEdit(string id)
+    /// <summary>What of <paramref name="values"/> differs from what the profile connects with without changes of its own
+    /// (Settings' choices over its directives): only that is kept, so a later change in Settings, or a later import of a
+    /// profile that says otherwise, is followed where the person did not choose. Null, with <paramref name="errors"/>
+    /// said, where a value cannot be kept.</summary>
+    private PolicyOverride? PolicyChange(string id, PolicyValues values, Dictionary<string, string> errors)
     {
         var stored = Profile(id);
-        if (stored.Unsupported is not null) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect this profile."));
-        var effective = _settings.PolicyFor(id, OwnPolicy(id), ClientSettings.ProtocolsOf(stored.Remotes));
-        lock (_gate) _editor = new OpenEditor(NewToken(), "policy", id, GameViews.PolicyValuesOf(effective), Empty);
-        Publish();
-    }
-
-    public void SavePolicy(string token, PolicyValues values)
-    {
-        if (EditorFor(token, "policy") is not { } editor) return;
-        // What it connects with without changes of its own: Settings' choices over its directives.
-        var basis = _settings.BaseFor(OwnPolicy(editor.SubjectId), ClientSettings.ProtocolsOf(Profile(editor.SubjectId).Remotes));
-        var errors = new Dictionary<string, string>();
+        var basis = _settings.BaseFor(OwnPolicy(id), ClientSettings.ProtocolsOf(stored.Remotes));
+        var before = errors.Count;
         int? Read(string? text, string field, int least, int most, string message)
         {
             var trimmed = text?.Trim() ?? "";
@@ -1318,43 +1328,21 @@ internal sealed class ClientCore
         var rounds = values.KeepTrying ? 0 : Read(values.RoundsMaxText, "roundsMaxText", 1, 1000, L.T("Use 1 to 1000 rounds."));
         // Only a transport the profile has servers of: the choices offered are those.
         var protocol = values.Protocol is "" ? null : values.Protocol;
-        if (protocol is not null && GameViews.ProtocolChoices(Profile(editor.SubjectId).Remotes)?.Any(c => c.Id == protocol) != true)
+        if (protocol is not null && GameViews.ProtocolChoices(stored.Remotes)?.Any(c => c.Id == protocol) != true)
             errors["protocol"] = L.T("This profile has no servers of that type.");
         var timeout = Read(values.AttemptTimeoutText, "attemptTimeoutText", 2, 300, L.T("Use 2 to 300 seconds."));
         int? pingRestart = null;
         if (!string.IsNullOrWhiteSpace(values.PingRestartText)) pingRestart = Read(values.PingRestartText, "pingRestartText", 5, 600, L.T("Use 5 to 600 seconds, or leave it empty for the server's own."));
         if (wait is { } w && waitMax is { } m && m < w) errors["retryWaitMaxText"] = L.T("The longest wait cannot be shorter than the first.");
+        if (errors.Count > before) return null;
 
-        lock (_gate)
-        {
-            if (_editor?.Token != token) return;
-            if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; Publish(); return; }
-            // Only what differs from Settings and the profile's own is kept as a change: a later change in Settings, or a
-            // later import of a profile that says otherwise, is then followed where the person did not choose.
-            int? Differs(int value, TimeSpan theirs) => value == (int)Math.Round(theirs.TotalSeconds) ? null : value;
-            _settings.PutPolicy(editor.SubjectId, new PolicyOverride(
-                Differs(wait!.Value, basis.RetryWait), Differs(waitMax!.Value, basis.RetryWaitMax),
-                rounds == (basis.RoundsMax ?? 0) ? null : rounds, values.RandomOrder == basis.RandomOrder ? null : values.RandomOrder,
-                Differs(timeout!.Value, basis.AttemptTimeout), values.RetryAfterAuthFailure == basis.RetryAfterAuthFailure ? null : values.RetryAfterAuthFailure,
-                pingRestart is { } r && (r != basis.PingRestart || !basis.KeepaliveOverridesServer) ? r : null,
-                protocol == basis.Protocol ? null : protocol ?? PolicyOverride.Any));
-            _editor = null;
-        }
-        Publish();
-        Notify(NoticeKind.Info, L.T("Saved. The next connection uses these settings."), new("profile", editor.SubjectId));
-    }
-
-    public void ResetPolicy(string token)
-    {
-        if (EditorFor(token, "policy") is not { } editor) return;
-        lock (_gate)
-        {
-            if (_editor?.Token != token) return;
-            _settings.PutPolicy(editor.SubjectId, new PolicyOverride());
-            _editor = null;
-        }
-        Publish();
-        Notify(NoticeKind.Info, L.T("{0} follows Settings again from the next connection.", Profile(editor.SubjectId).Name), new("profile", editor.SubjectId));
+        int? Differs(int value, TimeSpan theirs) => value == (int)Math.Round(theirs.TotalSeconds) ? null : value;
+        return new PolicyOverride(
+            Differs(wait!.Value, basis.RetryWait), Differs(waitMax!.Value, basis.RetryWaitMax),
+            rounds == (basis.RoundsMax ?? 0) ? null : rounds, values.RandomOrder == basis.RandomOrder ? null : values.RandomOrder,
+            Differs(timeout!.Value, basis.AttemptTimeout), values.RetryAfterAuthFailure == basis.RetryAfterAuthFailure ? null : values.RetryAfterAuthFailure,
+            pingRestart is { } r && (r != basis.PingRestart || !basis.KeepaliveOverridesServer) ? r : null,
+            protocol == basis.Protocol ? null : protocol ?? PolicyOverride.Any);
     }
 
     // The policy the profile itself carries (its OpenVPN directives): read from the stored copy, which is opened for it.
@@ -1704,7 +1692,7 @@ internal sealed class ClientCore
                 // The guidance until a save is refused; then the refusal, which says it, alone. "Add an app" says what it
                 // found at the place chosen, and adds nothing until it has found something. A profile this version cannot
                 // connect is said before it is imported, not after.
-                editor.Kind == "policy" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary
+                editor.Kind == "profile-edit" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary
                     : editor.Kind == "new-profile" && profileRead is { Preview.Unsupported: { } cannot }
                         ? L.T("This version cannot connect it yet: {0}. You can import it now; a later version can connect it.", cannot)
                     : editor.Kind == "import" && importing is { } read ? L.T("{0}, exported {1}.", read.Name, L.Date(read.File.Exported))
@@ -1718,7 +1706,6 @@ internal sealed class ClientCore
                     _ => UiAction.Shown(L.T("Save")),
                 },
                 UiAction.Shown(L.T("Cancel")),
-                editor.Kind == "policy" && !_settings.PolicyOf(editor.SubjectId).IsEmpty ? UiAction.Shown(L.T("Follow Settings")) : UiAction.Hidden,
                 // A password the person typed is never sent back to the page: the page keeps what it was given.
                 editor.Kind, editor.Values is MoveValues move ? move with { Password = "", Confirm = "" }
                     : editor.Values is NewProfileValues typed ? typed with { Password = "" }
@@ -1728,7 +1715,7 @@ internal sealed class ClientCore
                 editor.Kind == "app" && items.FirstOrDefault(i => i.Id == editor.SubjectId) is { } edited && edited.PacketPrograms.Count == 0
                     && edited.Programs.Count(p => p.Included && p.Proxy is not null) > 1
                     ? [.. edited.Programs.Where(p => p.Included && p.Proxy is not null).Select(p => new EditorOption(p.Id, Path.GetFileName(p.Path)))]
-                    : editor.Kind == "policy" && stored.FirstOrDefault(p => p.Id == editor.SubjectId) is { } profile
+                    : editor.Kind == "profile-edit" && stored.FirstOrDefault(p => p.Id == editor.SubjectId) is { Unsupported: null } profile
                         ? GameViews.ProtocolChoices(profile.Remotes)
                     // What can go in an export, or what this file holds, each part with how much of it there is.
                     : editor.Kind == "export" ? MoveParts(stored.Count, items.Count, true)
@@ -1776,7 +1763,8 @@ internal sealed class ClientCore
 
     private string? PolicyHint(string id)
     {
-        try { return GameViews.PolicyHint(_settings.BaseFor(OwnPolicy(id), ClientSettings.ProtocolsOf(Profile(id).Remotes)), !_settings.PolicyOf(id).IsEmpty); }
+        // What "As in Settings" gives it: Settings' choices over its own directives, whatever it keeps of its own now.
+        try { return GameViews.PolicyHint(_settings.BaseFor(OwnPolicy(id), ClientSettings.ProtocolsOf(Profile(id).Remotes))); }
         catch (ShenoraException) { return null; }
     }
 

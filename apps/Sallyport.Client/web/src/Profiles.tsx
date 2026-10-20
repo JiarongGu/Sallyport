@@ -15,35 +15,15 @@ export function Profiles({ state, now }: { state: ClientState; now: number }) {
   </section>;
 }
 
-/** One profile's connection settings over Settings' — the advanced case, so a view of its own rather than a form in
- *  its card. Leaving it cancels the edit. */
-export function ProfileSettings({ name, editorForm }: { name: string; editorForm: ReactNode }) {
-  return <section className="page" aria-label={t('Connection settings for {0}', name)}>
-    <p className="page-intro secondary">{t('Only for {0}, over the choices in Settings. Anything left as it is follows Settings and the profile.', name)}</p>
-    <div className="card own-settings">{editorForm}</div>
-  </section>;
-}
-
-/** One profile: its name and state, its server and sign-in, how it connects, and Edit…, nothing folded (the owner: "remove the
- *  dropdown for this and display some detail in the row"). Connecting is Overview's and the tray's: "we kind dont need
- *  the connect in profile page anymore". */
-/** "Edit {name}" (D29): its name and sign-in in the form; under it, how it connects and removing it. Leaving the page
- *  cancels the edit. */
+/** "Edit {name}" (D29): everything of a profile that can change, in one form with one Save — its name, its sign-in, and
+ *  how it connects (the owner: "edit will show a proper edit view"). Leaving the page cancels the edit. */
 export function ProfileEdit({ profile, form }: { profile: ProfileView; form: ReactNode }) {
-  return <section className="page" aria-label={t('Edit {0}', profile.name)}>
-    {form}
-    <div className="card profile-more">
-      <div className="row-head">
-        <p className="secondary">{t('How it connects, over the choices in Settings, and taking it off this computer.')}</p>
-        <div className="actions">
-          <ActionButton action={profile.actions.settings} focusKey={`policy:${profile.id}`} onClick={() => post('BEGIN_POLICY_EDIT', { id: profile.id })} />
-          <ActionButton action={profile.actions.remove} focusKey={`remove:${profile.id}`} danger onClick={() => post('REQUEST_REMOVE_PROFILE', { id: profile.id })} />
-        </div>
-      </div>
-    </div>
-  </section>;
+  return <section className="page" aria-label={t('Edit {0}', profile.name)}>{form}</section>;
 }
 
+/** One profile: its name and state, its server and sign-in, how it connects, nothing folded (the owner: "remove the
+ *  dropdown for this and display some detail in the row"); Edit and Remove on the row itself ("put edit/delete button
+ *  on surface"). Connecting is Overview's and the tray's: "we kind dont need the connect in profile page anymore". */
 function ProfileRow({ profile, now }: { profile: ProfileView; now: number }) {
   const headingId = useId();
   return <article className={`card tone-border-${profile.tone}`} aria-labelledby={headingId}>
@@ -61,9 +41,9 @@ function ProfileRow({ profile, now }: { profile: ProfileView; now: number }) {
           <ActionButton action={profile.actions.copy} icon="copy" onClick={() => post('COPY_ENDPOINT', { id: profile.id })} />
         </span>}
       </div>
-      {/* One action, as Connect's pencil: its name, sign-in, connection settings and removal are on its Edit page. */}
       <div className="actions">
         <ActionButton action={profile.actions.edit} focusKey={`edit:${profile.id}`} onClick={() => post('BEGIN_PROFILE_EDIT', { id: profile.id })} />
+        <ActionButton action={profile.actions.remove} focusKey={`remove:${profile.id}`} danger onClick={() => post('REQUEST_REMOVE_PROFILE', { id: profile.id })} />
       </div>
     </div>
     {profile.detailText && <p className="supporting secondary">{profile.detailText}</p>}
