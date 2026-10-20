@@ -3,7 +3,7 @@
   <!-- Shenora by a decision (D9): rule 4 binds the packages, and an application may take one by a decision. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <!-- The name Task Manager and the file's properties give it. -->
     <AssemblyTitle>Sallyport</AssemblyTitle>
     <UseWindowsForms>true</UseWindowsForms>
@@ -19,6 +19,9 @@
     <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
     <!-- Game routing: the router service's client and the packet driver's management. -->
     <ProjectReference Include="..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
+    <!-- Sallyport's one program (D30): the service and setup run in it, so the release carries one .NET runtime. -->
+    <ProjectReference Include="..\Sallyport.Service\Sallyport.Service.csproj" />
+    <ProjectReference Include="..\Sallyport.Setup\Sallyport.Setup.csproj" />
     <PackageReference Include="Shenora.Windows" />
     <InternalsVisibleTo Include="Sallyport.Client.Tests" />
   </ItemGroup>
@@ -28,6 +31,18 @@
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\**" WithCulture="false" />
   </ItemGroup>
+
+  <!-- WebView2's loader inside the program as well as beside it: setup, which is this program (D30), writes it beside
+       the program it installs. Native, so a single file would otherwise unpack it to %TEMP% at every start. From the
+       WebView2 package's assets as the build resolves them: per runtime without a runtime identifier, flat with one. -->
+  <Target Name="CarryWebView2Loader" BeforeTargets="AssignTargetPaths" DependsOnTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <_Loader Include="@(RuntimeTargetsCopyLocalItems)" Condition="'%(Filename)%(Extension)' == 'WebView2Loader.dll' And '%(RuntimeIdentifier)' == 'win-x64'" />
+      <_Loader Include="@(NativeCopyLocalItems)" Condition="'%(Filename)%(Extension)' == 'WebView2Loader.dll'" />
+      <EmbeddedResource Include="@(_Loader->Distinct())" LogicalName="WebView2Loader.dll" WithCulture="false" />
+    </ItemGroup>
+    <Error Condition="'@(_Loader)' == ''" Text="WebView2Loader.dll for win-x64 was not among the WebView2 package's assets." />
+  </Target>
 
   <!-- A fresh clone has no wwwroot, and the glob above was evaluated before this ran: the files it builds are added here. -->
   <Target Name="BuildPage" BeforeTargets="BeforeBuild" Condition="!Exists('wwwroot\index.html')">

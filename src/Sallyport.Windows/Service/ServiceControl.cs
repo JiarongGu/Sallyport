@@ -23,11 +23,12 @@ public static partial class ServiceControl
     private const int ERROR_SERVICE_MARKED_FOR_DELETE = 1072, ERROR_INSUFFICIENT_BUFFER = 122;
 
     /// <summary>Registers <paramref name="binaryPath"/> as an automatic LocalSystem service that the manager restarts
-    /// 1, 5 and 30 s after a failure (docs/design/product.md §6). Replaces an earlier registration's path.</summary>
-    public static void Install(string name, string displayName, string description, string binaryPath)
+    /// 1, 5 and 30 s after a failure (docs/design/product.md §6), started with <paramref name="arguments"/>. Replaces an
+    /// earlier registration's path.</summary>
+    public static void Install(string name, string displayName, string description, string binaryPath, string? arguments = null)
     {
         using var scm = Manager(SC_MANAGER_ALL_ACCESS);
-        var quoted = $"\"{binaryPath}\"";
+        var quoted = arguments is null ? $"\"{binaryPath}\"" : $"\"{binaryPath}\" {arguments}";
         var service = CreateServiceW(scm, name, displayName, SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS, SERVICE_AUTO_START,
             SERVICE_ERROR_NORMAL, quoted, null, IntPtr.Zero, null, null, null);
         if (service.IsInvalid)

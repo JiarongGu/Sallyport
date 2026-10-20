@@ -5,14 +5,11 @@ says under **Done when** has been measured — against the real server where a s
 **Needs** names what only the owner can give.
 
 ## 0. The owner's list after 0.1.0 (2026-10-21), one at a time
-1. **The package is 176 MB:** each of the client (56 MB), the service (36) and setup (49.5) carries its own .NET
-   runtime, and the release's setup carries setup again; WebView2 is Windows' own and not in it.
-   - **Done when:** a smaller package is built, installed as an upgrade, and used.
-2. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Setup.exe
-   /uninstall`); the Start menu has Sallyport alone and the window has none. An "Uninstall Sallyport" beside it in the
+1. **An uninstall a person can find:** setup registers one only in Windows' installed apps (`Sallyport.Client.exe
+   /uninstall`, D30); the Start menu has Sallyport alone and the window has none. An "Uninstall Sallyport" beside it in the
    Start menu, and one in Settings → About.
    - **Done when:** each found and started where a person would look, and the removal measured from it.
-3. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
+2. **An app's own use and latency on the Overview, not its rule:** with its VPN connected, each app shows
    "应用程序的每个连接都经由 VPN。" and its check, which says nothing new; show what that app has sent and received through
    the VPN, and its own latency (its connections' round trip through the tunnel, as the router sees them). No "检测延迟"
    button: the profile's monitoring shows its latency to the VPN server on its own, all the while it is connected.
@@ -22,14 +19,14 @@ says under **Done when** has been measured — against the real server where a s
    on the app's own page, and say what kind (gone, or refused) — never on the Overview.
    - **Done when:** an app in use shows its traffic and latency, and the profile its latency, without a click, each
      measured against the tunnel's own figures.
-4. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
+3. **Adding an app, rethought for apps and profiles many to many:** the Add an app page still asks for one VPN profile
    and its loss policy as when an app had one; now an app is added to the profiles it goes through (D23–D24), from the
    Overview's profile section or from Apps. Its look and its steps redesigned with that, for a person who is not
    technical.
    - **Done when:** an app added from each place lands where it was asked for, measured, and the page reviewed against
      the rest of the window.
-5. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
-6. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
+4. **Docs ready for the next session:** the release published (below, §6), `## Unreleased` open in the CHANGELOG.
+5. **The next session's brief:** a full code review, and the protocol library (`src/Sallyport`, MIT) as a NuGet package.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,

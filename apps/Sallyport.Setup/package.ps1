@@ -1,10 +1,10 @@
-# Builds Sallyport's release (docs/DECISIONS.md D28): the client and the service published self-contained for win-x64
-# (no .NET to install first), zipped and carried inside one single-file setup, named for its version, with its SHA-256
-# beside it and the notes the GitHub release shows.
+# Builds Sallyport's release (docs/DECISIONS.md D28, D30): Sallyport's one program - the window, the service and setup
+# - published self-contained for win-x64 (no .NET to install first) as one file, named as the setup for its version,
+# with its SHA-256 beside it and the notes the GitHub release shows. Run under that name it installs itself.
 #   powershell -File apps\Sallyport.Setup\package.ps1 [-Out artifacts] [-Version 0.1.0]
 # artifacts\release\  Sallyport-<version>-win-x64-setup.exe and its .sha256: what is published
 # artifacts\release-notes.md                          what the release says
-# artifacts\build\    the payload and the setup's own publish, kept for a look and replaced by the next run
+# artifacts\build\    the program's publish, kept for a look and replaced by the next run
 param([string]$Out = "artifacts", [string]$Version)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
@@ -21,8 +21,7 @@ function Run([string]$what, [scriptblock]$command) {
 }
 foreach ($folder in $build, $release) { if (Test-Path $folder) { Remove-Item -Recurse -Force $folder } }
 New-Item -ItemType Directory -Force $build, $release | Out-Null
-$payload = Join-Path $build "payload"
-$zip = Join-Path $build "payload.zip"
+$program = Join-Path $build "program"
 
 # Directory.Build.props' version unless one is given (the workflow gives the one it has just written); every program
 # carries the same.
@@ -44,30 +43,18 @@ try {
 }
 finally { Pop-Location }
 
-# Each program one file (the owner: the install folder's root tidied to its programs), the runtime inside it; only
-# WebView2's native loader stays beside the client, rather than being unpacked into %TEMP% on the system drive when it
-# starts. The setup too, without a payload: the uninstaller in the install folder.
-$common = '-c', 'Release', '-r', 'win-x64', '--self-contained', '-nologo', '-v', 'q', "-p:Version=$Version"
-$single = '-p:PublishSingleFile=true', '-p:EnableCompressionInSingleFile=true', '-p:DebugType=none',
-    '-p:PublishDocumentationFile=false', '-p:PublishReferencesDocumentationFiles=false'
-foreach ($app in 'Sallyport.Client', 'Sallyport.Service', 'Sallyport.Setup') {
-    Run "publishing $app" { dotnet publish "$root\apps\$app" @common -o $payload @single }
-}
-# The publish also leaves WebView2's loader under runtimes\, a second copy of the one beside the client, which WebView2
-# finds first.
-if (Test-Path (Join-Path $payload 'WebView2Loader.dll')) { Remove-Item -Recurse -Force (Join-Path $payload 'runtimes') -ErrorAction SilentlyContinue }
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-[System.IO.Compression.ZipFile]::CreateFromDirectory($payload, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-
-$setupBuild = Join-Path $build "setup"
-Run 'publishing the setup' {
-    dotnet publish "$root\apps\Sallyport.Setup" @common -o $setupBuild `
-        -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true "-p:Payload=$zip"
+# One program, one file, one .NET runtime inside it (D30): the window, the service and setup. WebView2's native loader
+# is carried inside it too, and written beside it when it installs itself, rather than unpacked into %TEMP% on the
+# system drive at every start.
+Run 'publishing the program' {
+    dotnet publish "$root\apps\Sallyport.Client" -c Release -r win-x64 --self-contained -nologo -v q "-p:Version=$Version" -o $program `
+        -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:DebugType=none `
+        -p:PublishDocumentationFile=false -p:PublishReferencesDocumentationFiles=false
 }
 
 $name = "Sallyport-$Version-win-x64-setup.exe"
 $setup = Join-Path $release $name
-Copy-Item (Join-Path $setupBuild "Sallyport.Setup.exe") $setup
+Copy-Item (Join-Path $program "Sallyport.Client.exe") $setup
 $sha256 = (Get-FileHash -Algorithm SHA256 $setup).Hash.ToLowerInvariant()
 # sha256sum's own form, so `sha256sum -c` checks it where the file is downloaded.
 [IO.File]::WriteAllText("$setup.sha256", "$sha256  $name`n", (New-Object System.Text.UTF8Encoding $false))
@@ -105,7 +92,5 @@ $body
 "@
 [IO.File]::WriteAllText($notes, $text, (New-Object System.Text.UTF8Encoding $false))
 
-$payloadFiles = Get-ChildItem $payload -Recurse -File
-"payload: {0:N0} files, {1:N1} MB unpacked, {2:N1} MB zipped" -f $payloadFiles.Count, (($payloadFiles | Measure-Object Length -Sum).Sum / 1MB), ((Get-Item $zip).Length / 1MB)
 "release: {0} ({1:N1} MB), SHA-256 {2}" -f $name, ((Get-Item $setup).Length / 1MB), $sha256
 "notes:   $notes"

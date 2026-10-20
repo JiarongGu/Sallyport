@@ -69,6 +69,12 @@ sealed class Installer
     }
 
     public const string Name = "Sallyport";
+
+    /// <summary>Sallyport's one program (D30): the window, the service and its routers, and this setup's removal.</summary>
+    public const string Program = "Sallyport.Client.exe";
+
+    /// <summary>WebView2's loader, beside the program rather than inside it (which would unpack it to %TEMP%).</summary>
+    public const string Loader = "WebView2Loader.dll";
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Sallyport";
     private const string ProgId = "Sallyport.ovpn";
 
@@ -122,8 +128,7 @@ sealed class Installer
         return zip.Entries.Sum(e => e.Length);
     }
 
-    private static bool IsSallyport(string folder) =>
-        File.Exists(Path.Combine(folder, "Sallyport.Client.exe")) && File.Exists(Path.Combine(folder, "Sallyport.Service.exe"));
+    private static bool IsSallyport(string folder) => File.Exists(Path.Combine(folder, Program));
 
     /// <summary>Whether <paramref name="folder"/> holds only what removing Sallyport kept — the profiles, settings and
     /// apps, or an earlier install's users' folders — which installing there again takes up.</summary>
@@ -145,7 +150,7 @@ sealed class Installer
     private IReadOnlyList<string> KeptData => [.. InstallLayout.Kept.Select(area => InstallLayout.Area(_folder, area)), Users];
     private string Record => Path.Combine(Data, "setup.json");
     private static string Shortcut => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs", "Sallyport.lnk");
-    public string Client => Path.Combine(_folder, "Sallyport.Client.exe");
+    public string Client => Path.Combine(_folder, Program);
 
     /// <summary>Whether removing Sallyport takes the packet driver too: only if Sallyport put it there.</summary>
     public bool RemovesDriver => ReadRecord()?.InstalledDriver == true;
@@ -205,10 +210,6 @@ sealed class Installer
         // service believes only clients that run from a folder ordinary users cannot change (product design change 2).
         Protect(staged);
         Unpack(payload, staged, 0.08, 0.70);
-        // The payload carries an uninstaller of its own, this setup without the payload in it; a payload without one
-        // (a development folder) gets this setup instead.
-        if (!File.Exists(Path.Combine(staged, "Sallyport.Setup.exe")))
-            File.Copy(Environment.ProcessPath!, Path.Combine(staged, "Sallyport.Setup.exe"), overwrite: true);
         if (Directory.Exists(previous)) Directory.Delete(previous, recursive: true);
         var hadPrevious = Directory.Exists(_folder);
         if (hadPrevious) MoveWhenFree(_folder, previous);
@@ -235,7 +236,7 @@ sealed class Installer
 
         say(L.T("Registering the Sallyport service…"), 0.72);
         ServiceControl.Install(RouterProtocol.ServiceName, "Sallyport game routing",
-            "Routes the programs you run in Sallyport through your VPN. Idle until you run one.", Path.Combine(_folder, "Sallyport.Service.exe"));
+            "Routes the programs you run in Sallyport through your VPN. Idle until you run one.", Client, RouterProtocol.ServiceArgument);
         ServiceControl.Start(RouterProtocol.ServiceName);
 
         var record = ReadRecord();
@@ -416,7 +417,11 @@ sealed class Installer
             }
             catch (Win32Exception) { }
         var deadline = Environment.TickCount64 + 8000;
-        while (Process.GetProcessesByName("Sallyport.Client") is { Length: > 0 } left)
+        // A person's windows, not the service and its routers (the same program, D30, in session 0 — stopped as the
+        // service, never killed under the service manager, which would start it again), nor this setup and the start
+        // that asked for it to be administrator.
+        while (Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Program))
+                   .Where(p => p.SessionId != 0 && p.Id != Environment.ProcessId && p.Id != SetupProgram.Asker).ToArray() is { Length: > 0 } left)
         {
             if (Environment.TickCount64 > deadline)
             {
@@ -554,8 +559,8 @@ sealed class Installer
         key.SetValue("Publisher", "Sallyport");
         key.SetValue("InstallLocation", _folder);
         key.SetValue("DisplayIcon", $"\"{Client}\",0");
-        key.SetValue("UninstallString", $"\"{Path.Combine(_folder, "Sallyport.Setup.exe")}\" /uninstall");
-        key.SetValue("QuietUninstallString", $"\"{Path.Combine(_folder, "Sallyport.Setup.exe")}\" /uninstall /quiet");
+        key.SetValue("UninstallString", $"\"{Client}\" /uninstall");
+        key.SetValue("QuietUninstallString", $"\"{Client}\" /uninstall /quiet");
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
         key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         var kilobytes = new DirectoryInfo(_folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) / 1024;

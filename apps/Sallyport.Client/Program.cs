@@ -12,13 +12,19 @@ namespace Sallyport.Client;
 //   and route games through them (the router service, docs/design/product.md).
 //   A profile path imports it; --tray starts out of sight; --exit asks the running client to disconnect all and leave.
 //   A second start hands its arguments to the one already running.
+// Sallyport's one program (D30): the same file is also the router service (--service, as the service manager starts it,
+//   and each run's router) and setup (the release's file, which installs itself; /uninstall, which removes it).
 internal static class Program
 {
     [STAThread]
-    private static void Main(string[] args)
+    private static int Main(string[] args)
     {
+        // Before anything of the window's: the service and setup open no window of it, and claim no single instance.
+        if (args.FirstOrDefault() == Service.ServiceProgram.Argument) return Service.ServiceProgram.Run(args[1..]);
+        if (Setup.SetupProgram.Asked(args, Environment.ProcessPath)) return Setup.SetupProgram.Run(args);
+
         using var claim = SingleInstance.Claim(args);
-        if (claim is null || args.Contains("--exit")) return;
+        if (claim is null || args.Contains("--exit")) return 0;
 
         var builder = ShenoraApplication.CreateBuilder(new ShenoraApplicationOptions
         {
@@ -95,5 +101,6 @@ internal static class Program
 
         using var app = builder.Build();
         app.Run();
+        return 0;
     }
 }

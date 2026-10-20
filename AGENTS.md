@@ -18,8 +18,9 @@ rules are binding.
 6. **Three outcomes where something is checked**: it holds, it failed, or it could not be checked — never collapsed.
 
 Layout: `src/Sallyport` (the protocol library) and `src/Sallyport.Windows` (the driver, the router, the service's
-protocol, the install layout); `apps/` the applications — `Sallyport.Client` (the window and tray; its page in `web/`),
-`Sallyport.Service` (the router, LocalSystem), `Sallyport.Setup` (install, removal, `package.ps1`, `version.ps1`),
+protocol, the install layout); `apps/` the applications — `Sallyport.Client` (Sallyport's one program, D30: the window
+and tray, its page in `web/`, hosting the next two), `Sallyport.Service` (the router, LocalSystem; `--service`),
+`Sallyport.Setup` (install and removal; the release's name or `/uninstall`; `package.ps1`, `version.ps1`),
 `Sallyport.Host` (one profile's tunnel and proxy, headless, for another app); `Sallyport.Observer` and `Sallyport.Vpn`
 are the driverless route, kept but not in the product; `tools/Sallyport.Probe` and `tools/Sallyport.Driver` drive a phase
 against a real server; `tests/` one project per area. Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work

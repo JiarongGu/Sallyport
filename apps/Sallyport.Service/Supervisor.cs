@@ -171,7 +171,7 @@ sealed class Supervisor(Log log)
         if (Driver() is (false, var problem)) return new Rejected(problem ?? "The packet driver is not ready.");
 
         var id = Guid.NewGuid().ToString("N");
-        var worker = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, ["worker", id, peer.ProcessId.ToString()])
+        var worker = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, [Sallyport.Service.ServiceProgram.Argument, "worker", id, peer.ProcessId.ToString()])
         {
             RedirectStandardInput = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
         })!;

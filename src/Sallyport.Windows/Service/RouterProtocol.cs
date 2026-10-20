@@ -20,6 +20,8 @@ public static class RouterProtocol
     // process, for a client that cannot open the system's processes to see who answered.
     public const int Version = 4;
     public const string ServiceName = "Sallyport";
+    /// <summary>The argument that starts Sallyport's one program as the service (D30), as the service manager is told to.</summary>
+    public const string ServiceArgument = "--service";
     public const string ControlPipe = "Sallyport.Router.v1";
     public static string RunPipe(string runId) => $"Sallyport.Router.v1.run.{runId}";
 

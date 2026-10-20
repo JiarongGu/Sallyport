@@ -1,12 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The router service (docs/design/product.md §1): LocalSystem, the one part of Sallyport that opens the packet
-       driver. A supervisor under the service manager, and a worker per run. -->
+       driver. A supervisor under the service manager, and a worker per run. Hosted by Sallyport's one program
+       (Sallyport.Client.exe started as the service, D30), so the release carries one .NET runtime, not one per program. -->
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
-    <AssemblyTitle>Sallyport Service</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

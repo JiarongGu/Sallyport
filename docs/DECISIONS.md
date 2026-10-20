@@ -803,3 +803,43 @@ server that asks for a username and password (none here to sign in to without th
 Connect lists such profiles — importing one and connecting is that measurement, rule 3); an Access Server's
 `/rest/GetUserlogin`; a drop by mouse (DevTools' drop needs a debugging port this WebView2 runtime did not open, and a
 real drag would take the owner's mouse) — the host's part of it is the path Explorer's took.
+
+## D30 — Sallyport is one program: the window, the service and setup, so the release carries one .NET runtime (2026-10-21; measured)
+
+The owner: "why the entire package is 170mb since we rely on webview2? the bundle should be small enough?" WebView2 was
+never in it (Windows' own, D9). The 0.1.0 release, 176 MiB, was the .NET runtime four times over: setup's own (52 MB,
+the runtime and WinForms), and in its payload (132 MB zipped, the programs already compressed) the client (59 MB), the
+service (38 MB) and setup again as the uninstaller (52 MB), each a self-contained single file (D25, D28).
+
+Measured before choosing, from this tree: the three programs self-contained in one shared folder, 146 MB in 254 files,
+55 MB zipped — with setup's own runtime on top, about 107 MB. One program, about 54 MB. Trimming is refused for
+WinForms (NETSDK1175), so it could reach only the service.
+
+- **One program** (`Sallyport.Client.exe`): the service and setup are libraries it hosts. `--service` is the router
+  service as the service manager starts it (`"…\Sallyport.Client.exe" --service`), and `--service worker <run> <client
+  pid>` each run's router; a file name that says setup (the release's) or `/uninstall` is setup; anything else is the
+  window. Decided before anything of the window's, so neither claims the window's single instance.
+- **The release's file is the program**, named `Sallyport-<version>-win-x64-setup.exe`; it installs itself under its
+  installed name, with WebView2's loader, which it carries as a resource (160 KB) and writes beside it — native, so a
+  single file would otherwise unpack it to %TEMP% on the system drive at every start. The install folder:
+  `Sallyport.Client.exe`, `WebView2Loader.dll`, `data`. The names a 0.1.0 install has elsewhere — the Start menu's
+  shortcut, the Run key, the `.ovpn` association — name the program they named, so an upgrade changes only the
+  service's command line and the uninstall entry (`"…\Sallyport.Client.exe" /uninstall`).
+- **Setup asks to be administrator at its start**, as its manifest did: the program's window runs as the person, so
+  setup starts itself again elevated and waits for it. Closing Sallyport before an upgrade closes the person's windows
+  only — the service and its routers are the same program, in session 0, and one killed under the service manager is
+  started again — and never setup itself or the start waiting for it.
+- **The client targets `net10.0-windows`**, not `net10.0-windows10.0.17763.0`: Shenora's versioned target adds only
+  media playback, which Sallyport does not use, and its Windows Runtime projection was 23 MB (6 MB compressed) of the
+  program.
+
+Measured 2026-10-21 on the owner's machine: a rehearsal package (0.1.1, from this tree) is one file of 50.9 MiB
+(53,320,105 bytes) — 71% under 0.1.0's. Installed as a quiet upgrade over the 0.1.0-layout install (the owner's, D:\):
+exit 0 in 14 s; the folder its program, the loader and `data`; the service running from `"…\Sallyport.Client.exe"
+--service` in session 0; the uninstall entry at the program; the guard alongside, 295 rounds, 0 failed. Used: the window
+started as Explorer starts it; jp connected from the tray, its router `--service worker <run> <window's pid>`, Zenless
+"VPN 已开启 · jp"; disconnected, the router gone. `/uninstall` opened "移除 Sallyport", cancelled with nothing changed.
+Before that, the first package was refused by itself ("此安装程序不包含任何可安装的内容", the install left as it was):
+the loader had not reached the program — added to `EmbeddedResource` after the build had sorted its resources — and is
+now added before `AssignTargetPaths`. Not measured: a first install on a machine without Sallyport, and a removal to
+the end (the owner's install stays); a machine with UAC on, where setup's own prompt is the one administrator prompt.

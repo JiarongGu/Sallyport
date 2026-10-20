@@ -33,9 +33,9 @@ every change, by a person or a coding agent alike.
 |---|---|
 | `src/Sallyport` | The protocol library: profiles, the control and data channels, the tunnel and its sessions, the userspace TCP/IP network, the SOCKS5 proxy, the profile store. Cross-platform. [Its README](src/Sallyport/README.md). |
 | `src/Sallyport.Windows` | What only Windows has: the packet driver's management and interface, the router, the service's protocol, the install layout. |
-| `apps/Sallyport.Client` | The window and the tray (WinForms + WebView2 through Shenora). The host decides every word and action (`ClientCore`, `*View*.cs`); the page in `web/` (React, built into the executable) only shows them. |
-| `apps/Sallyport.Service` | The router service (LocalSystem): the one part that opens the packet driver. |
-| `apps/Sallyport.Setup` | The installer and uninstaller, and the scripts that package a release (`package.ps1`, `version.ps1`). |
+| `apps/Sallyport.Client` | Sallyport's one program (D30): the window and the tray (WinForms + WebView2 through Shenora), and the host of the service and setup below. The host decides every word and action (`ClientCore`, `*View*.cs`); the page in `web/` (React, built into the executable) only shows them. |
+| `apps/Sallyport.Service` | The router service (LocalSystem): the one part that opens the packet driver. A library the program runs as `--service`. |
+| `apps/Sallyport.Setup` | The installer and uninstaller — a library the program runs under the release's name or with `/uninstall` — and the scripts that package a release (`package.ps1`, `version.ps1`). |
 | `apps/Sallyport.Host` | A headless host: one profile's tunnel and its SOCKS5 proxy, with a status file, for another application to run. |
 | `apps/Sallyport.Observer`, `apps/Sallyport.Vpn` | The driverless route (ETW observation, a Windows VPN plug-in): kept for if the driver were ever refused (D16), not in the product. |
 | `tools/Sallyport.Probe` | Connects to a real server and says how far it got, phase by phase. |
@@ -95,7 +95,7 @@ commit. Pull requests say how the change was tried.
 
 ## Releases
 
-A release is one setup and its SHA-256:
+A release is one setup and its SHA-256: Sallyport's one program under the setup's name, which installs itself (D30).
 
 ```
 powershell -File apps\Sallyport.Setup\version.ps1 -Bump patch     # writes the version and dates its CHANGELOG section
