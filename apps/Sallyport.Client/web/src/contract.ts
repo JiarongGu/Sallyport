@@ -226,6 +226,8 @@ export interface SettingsView {
   };
   /** Export posts BEGIN_EXPORT, Import BEGIN_IMPORT (D26). */
   move: { export: Action; import: Action } | null;
+  /** About's Uninstall Sallyport…: setup's removal, for an installed copy only. Posts UNINSTALL. */
+  uninstall: Action | null;
 }
 
 /** What a new app starts with: a profile (null: the first that can connect) and its loss policy. */
@@ -531,6 +533,7 @@ export interface Commands {
   COPY_GUIDE_EXAMPLE: Record<string, never>;
   SET_START_WITH_WINDOWS: { enabled: boolean };
   SET_LANGUAGE: { language: string };
+  UNINSTALL: Record<string, never>;
   SET_PROTOCOL: { protocol: string };
   /** The app whose page is open (its programs are looked at while it is), or null when none is. */
   WATCH_APP: { id: string | null };

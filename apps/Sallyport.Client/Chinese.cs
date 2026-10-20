@@ -488,6 +488,8 @@ internal static class Chinese
         ["Use an https:// address or link."] = "请使用 https:// 地址或链接。",
         ["Account"] = "账户",
         ["Saved {0}. Its next connection uses these settings."] = "已保存 {0}。它的下一次连接将使用这些设置。",
+        ["Uninstall Sallyport…"] = "卸载 Sallyport…",
+        ["The removal did not start ({0})."] = "卸载没有启动（{0}）。",
         // The router service's reasons (RouterWords).
         ["The service is stopping."] = "Sallyport 服务正在停止。",
         ["Stopped by the client."] = "已由本窗口停止。",

@@ -184,6 +184,15 @@ internal sealed class ClientCore
         Publish();
     }
 
+    /// <summary>Setup's removal, as Windows' installed apps start it: this program with /uninstall (D30), which asks to be
+    /// administrator, then asks the person, and closes this window when they go ahead.</summary>
+    public void Uninstall()
+    {
+        if (InstallLayout.InstalledHere() is null || Environment.ProcessPath is not { } self) return;
+        try { Process.Start(new ProcessStartInfo(self, "/uninstall") { UseShellExecute = false })?.Dispose(); }
+        catch (System.ComponentModel.Win32Exception e) { Notify(NoticeKind.Error, L.T("The removal did not start ({0}).", e.Message)); }
+    }
+
     public void SetStartWithWindows(bool on)
     {
         try { StartupRegistration.Set(on); }

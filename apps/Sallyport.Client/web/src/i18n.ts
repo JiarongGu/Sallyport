@@ -118,6 +118,7 @@ const chinese: Record<string, string> = {
   'Review profile': '确认配置',
   'VPN sign-in': 'VPN 登录',
   'How it connects': '连接方式',
+  'Removes Sallyport from this computer. You choose whether your profiles, apps and settings stay.': '从这台电脑上移除 Sallyport。你可以选择是否保留配置、应用和设置。',
   'As in Settings': '与“设置”相同',
   'Its own settings': '单独设置',
   'Only for this profile. What is left as it is follows Settings.': '仅用于此配置。未改动的项目仍按“设置”。',

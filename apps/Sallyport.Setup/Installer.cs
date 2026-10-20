@@ -149,7 +149,13 @@ sealed class Installer
     // What removing keeps unless the person says otherwise: the shared areas, and an earlier install's users' folders.
     private IReadOnlyList<string> KeptData => [.. InstallLayout.Kept.Select(area => InstallLayout.Area(_folder, area)), Users];
     private string Record => Path.Combine(Data, "setup.json");
-    private static string Shortcut => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs", "Sallyport.lnk");
+    private static string Programs => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs");
+    // A folder of its own in the Start menu: Sallyport, and its removal beside it where a person looks for one (the
+    // owner: "we also missing an uninstall after the installation"). 0.1.0 put Sallyport at the top, alone.
+    private static string MenuFolder => Path.Combine(Programs, Name);
+    private static string Shortcut => Path.Combine(MenuFolder, "Sallyport.lnk");
+    private static string RemovalShortcut => Path.Combine(MenuFolder, L.T("Uninstall Sallyport") + ".lnk");
+    private static string OldShortcut => Path.Combine(Programs, "Sallyport.lnk");
     public string Client => Path.Combine(_folder, Program);
 
     /// <summary>Whether removing Sallyport takes the packet driver too: only if Sallyport put it there.</summary>
@@ -266,7 +272,9 @@ sealed class Installer
         WriteRecord(new SetupRecord(version, installedDriver, DateTimeOffset.Now));
 
         say(L.T("Adding Sallyport to the Start menu…"), 0.95);
+        try { File.Delete(OldShortcut); } catch (IOException) { }
         ShellLink.Create(Shortcut, Client, "", L.T("Send your games and apps through your VPN"));
+        ShellLink.Create(RemovalShortcut, Client, "/uninstall", L.T("Remove Sallyport from this computer"));
         RegisterOpenWith();
         RegisterUninstall(version);
         say(L.T("Done."), 1);
@@ -315,7 +323,9 @@ sealed class Installer
         }
 
         say(L.T("Removing Sallyport from the Start menu and from Windows' lists…"), 0.70);
-        try { File.Delete(Shortcut); } catch (IOException) { }
+        try { File.Delete(OldShortcut); } catch (IOException) { }
+        try { if (Directory.Exists(MenuFolder)) Directory.Delete(MenuFolder, recursive: true); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("The Start menu's Sallyport folder could not be removed: {0}", e.Message)); }
         Registry.LocalMachine.DeleteSubKeyTree(UninstallKey, throwOnMissingSubKey: false);
         Registry.LocalMachine.DeleteSubKeyTree($@"Software\Classes\{ProgId}", throwOnMissingSubKey: false);
         Registry.LocalMachine.OpenSubKey(@"Software\Classes\.ovpn\OpenWithProgids", writable: true)?.DeleteValue(ProgId, throwOnMissingValue: false);

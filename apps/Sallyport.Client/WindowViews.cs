@@ -53,7 +53,8 @@ internal sealed record DefaultsView(IReadOnlyList<Fact> Facts, UiAction Edit);
 internal sealed record LanguageView(string Setting, IReadOnlyList<EditorOption> Choices);
 
 internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About, DefaultsView Defaults,
-    LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null, MoveView? Move = null);
+    LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null, MoveView? Move = null,
+    UiAction? Uninstall = null);
 
 /// <summary>Settings' export and import of the profiles, the apps and the connection settings (D26): BEGIN_EXPORT, BEGIN_IMPORT.</summary>
 internal sealed record MoveView(UiAction Export, UiAction Import);
@@ -191,7 +192,9 @@ internal static class WindowViews
             // While Export or Import is open beneath them, its own buttons are what to press.
             moving ? new MoveView(UiAction.Hidden, UiAction.Hidden) : new MoveView(
                 UiAction.Shown(L.T("Export…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first.")),
-                UiAction.Shown(L.T("Import…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first."))));
+                UiAction.Shown(L.T("Import…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first."))),
+            // Only an installed copy has setup's removal to start; a development build has nothing installed.
+            installedIn is null ? UiAction.Hidden : UiAction.Shown(L.T("Uninstall Sallyport…")));
     }
 
     /// <summary>The language choice, each named in itself; until the person picks one, the one setup ran in, or Windows'.</summary>

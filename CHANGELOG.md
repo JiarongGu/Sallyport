@@ -19,6 +19,8 @@
   so the release carries one .NET runtime instead of four, and the install folder holds that program, WebView2's
   loader and `data`. An upgrade from 0.1.0 moves the service to the program; the Start menu, sign-in start and `.ovpn`
   association stay as they were.
+- Uninstalling where a person looks (2026-10-21): the Start menu has a Sallyport folder with Sallyport and Uninstall
+  Sallyport, and Settings → About has Uninstall Sallyport…; each opens setup's removal, as Windows' installed apps do.
 - The window and setup follow Windows' Text size (Settings → Accessibility → Text size; 2026-10-21): the window's
   page is sized in rem of a root that the client sets from it, and arranges itself for a narrow window by its width in
   that size; setup's window and fonts grow by it too.

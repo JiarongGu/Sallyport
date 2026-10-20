@@ -110,6 +110,10 @@ export function Settings({ state, expanded, toggle, editorForm, moveForm }: {
       <h2>{t('About')}</h2>
       <div className="card about">
         <Facts facts={settings.about} />
+        {settings.uninstall?.visible && <div className="row-head uninstall">
+          <p className="secondary">{t('Removes Sallyport from this computer. You choose whether your profiles, apps and settings stay.')}</p>
+          <div className="actions"><ActionButton action={settings.uninstall} danger onClick={() => post('UNINSTALL', {})} /></div>
+        </div>}
         {settings.places && <div className="manual-setup">
           <Disclosure open={expanded.has('places')} controls={placesId} onClick={() => toggle('places')}>{t('Technical details')}</Disclosure>
           <div id={placesId} hidden={!expanded.has('places')} className="manual-content">

@@ -458,6 +458,10 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 .inset.sign-in > .actions { justify-content: flex-start; }
 .setup-actions .change-source { margin-left: auto; align-self: center; }
 /* An Edit page's second card: apart from the form's Save, its buttons at its own edge. */
+/* About's removal, under the version: its line and its button on one row. */
+.about .uninstall { display: flex; align-items: center; gap: 1rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--divider); }
+.about .uninstall > p { flex: 1; margin: 0; }
+
 /* How a profile connects, on its Edit page: Settings' or its own, its own fields under the choice. */
 .inset.connection-choice { display: grid; gap: 0.625rem; padding: 0.875rem 1rem; border-radius: var(--radius-card); background: var(--surface-alt); }
 .inset.connection-choice > legend { float: left; width: 100%; font: var(--font-body-strong); margin-bottom: 2px; }
