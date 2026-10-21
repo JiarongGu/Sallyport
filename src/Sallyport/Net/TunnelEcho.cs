@@ -21,7 +21,8 @@ public sealed class TunnelEcho
     // Not this process's id: a routed program's own ping (its identifier the NAT's) must never be taken for one of these.
     private readonly ushort _id = (ushort)Random.Shared.Next(1, 65536);
     private readonly Lock _lock = new();
-    private readonly Dictionary<ushort, (long Sent, TaskCompletionSource<EchoAnswer> Answer)> _outstanding = [];
+    // Each echo by its sequence, with the address it went to: only that address answers it as the destination.
+    private readonly Dictionary<ushort, (long Sent, uint To, TaskCompletionSource<EchoAnswer> Answer)> _outstanding = [];
     private ushort _sequence;
 
     public TunnelEcho(IPAddress tunnelAddress, Func<byte[], ValueTask> send)
@@ -50,7 +51,7 @@ public sealed class TunnelEcho
         lock (_lock)
         {
             sequence = ++_sequence;
-            _outstanding[sequence] = (Stopwatch.GetTimestamp(), answer);
+            _outstanding[sequence] = (Stopwatch.GetTimestamp(), BinaryPrimitives.ReadUInt32BigEndian(packet.AsSpan(16)), answer);
         }
         BinaryPrimitives.WriteUInt16BigEndian(icmp[6..], sequence);
         BinaryPrimitives.WriteUInt16BigEndian(icmp[2..], Fold(Sum(icmp)));
@@ -79,9 +80,15 @@ public sealed class TunnelEcho
         else return false;
         if (BinaryPrimitives.ReadUInt16BigEndian(packet[at..]) != _id) return false;
         var sequence = BinaryPrimitives.ReadUInt16BigEndian(packet[(at + 2)..]);
-        (long Sent, TaskCompletionSource<EchoAnswer> Answer) waiting;
+        (long Sent, uint To, TaskCompletionSource<EchoAnswer> Answer) waiting;
         lock (_lock)
-            if (!_outstanding.Remove(sequence, out waiting)) return true;
+        {
+            // A reply to an echo from anyone but the address pinged is not the destination's answer: claimed (it is
+            // ours), and not taken for one.
+            if (!_outstanding.TryGetValue(sequence, out waiting)) return true;
+            if (fromDestination && BinaryPrimitives.ReadUInt32BigEndian(packet[12..]) != waiting.To) return true;
+            _outstanding.Remove(sequence);
+        }
         waiting.Answer.TrySetResult(new EchoAnswer(new IPAddress(packet.Slice(12, 4)), Stopwatch.GetElapsedTime(waiting.Sent).TotalMilliseconds, fromDestination));
         return true;
     }

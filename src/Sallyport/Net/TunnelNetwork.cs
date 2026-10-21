@@ -77,13 +77,15 @@ public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
         // The tunnel carries IPv4 (the server pushes block-ipv6); a v6 destination is unreachable from inside it.
         if (!Ipv4.IsIpv4(address)) throw new SocketException((int)SocketError.NetworkUnreachable);
         var remotePort = checked((ushort)port);
-        TcpConnection connection;
-        while (true)
+        TcpConnection? connection = null;
+        // Each port once: with every one of them open to this destination, there is no connection to make.
+        for (var tried = 0; tried < EphemeralPorts && connection is null; tried++)
         {
             var localPort = (ushort)(FirstEphemeralPort + (uint)Interlocked.Increment(ref _nextPort) % EphemeralPorts);
-            connection = new TcpConnection(this, Clock, _local, localPort, address, remotePort);
-            if (_tcp.TryAdd((address, remotePort, localPort), connection)) break;
+            var candidate = new TcpConnection(this, Clock, _local, localPort, address, remotePort);
+            if (_tcp.TryAdd((address, remotePort, localPort), candidate)) connection = candidate;
         }
+        if (connection is null) throw new SocketException((int)SocketError.TooManyOpenSockets);
         Interlocked.Increment(ref _opened);
         connection.Open();
         try
@@ -234,7 +236,9 @@ internal sealed class TunnelResolver
     private readonly TunnelNetwork _network;
     private readonly IReadOnlyList<IPAddress> _servers;
     private readonly ushort _port;
-    private readonly ConcurrentDictionary<ushort, TaskCompletionSource<(int Code, List<IPAddress> Addresses, uint Ttl)>> _pending = new();
+    // Each query by its id, with the server it went to and the name it asked: an answer from anyone else, or about
+    // another name, is not its answer.
+    private readonly ConcurrentDictionary<ushort, (IPAddress Server, string Name, TaskCompletionSource<(int Code, List<IPAddress> Addresses, uint Ttl, bool Truncated)> Waiter)> _pending = new();
     private readonly ConcurrentDictionary<string, (IReadOnlyList<IPAddress>? Addresses, long Until)> _cache = new(StringComparer.OrdinalIgnoreCase);
     private long _lookups, _fromCache;
 
@@ -264,17 +268,20 @@ internal sealed class TunnelResolver
         for (var attempt = 0; attempt < Attempts; attempt++)
         {
             ushort id;
-            TaskCompletionSource<(int, List<IPAddress>, uint)> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            do id = (ushort)RandomNumberGenerator.GetInt32(1, 65536); while (!_pending.TryAdd(id, waiter));
+            var server = _servers[attempt % _servers.Count];
+            TaskCompletionSource<(int, List<IPAddress>, uint, bool)> waiter = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            do id = (ushort)RandomNumberGenerator.GetInt32(1, 65536); while (!_pending.TryAdd(id, (server, name, waiter)));
             try
             {
-                _network.SendUdp(_port, _servers[attempt % _servers.Count], 53, DnsMessage.Query(id, name, DnsMessage.TypeA));
-                var (code, addresses, ttl) = await waiter.Task.WaitAsync(AskAgain, ct);
+                _network.SendUdp(_port, server, 53, DnsMessage.Query(id, name, DnsMessage.TypeA));
+                var (code, addresses, ttl, truncated) = await waiter.Task.WaitAsync(AskAgain, ct);
                 if (code == 0 && addresses.Count > 0)
                 {
                     _cache[name] = (addresses, Environment.TickCount64 + Math.Clamp(ttl, MinTtl, MaxTtl) * 1000);
                     return addresses;
                 }
+                // Cut short (TC) with no address in what came: not an answer about the name, so asked again.
+                if (truncated && code == 0) continue;
                 // NXDOMAIN, or a name with no IPv4 address: an answer, and a negative one.
                 if (code == 3 || code == 0)
                 {
@@ -294,9 +301,10 @@ internal sealed class TunnelResolver
     {
         if (from != 53 || payload.Count < 2) return;
         var id = (ushort)(payload[0] << 8 | payload[1]);
-        if (_pending.TryGetValue(id, out var waiter)
-            && DnsMessage.TryReadAnswers(payload, id, DnsMessage.TypeA, out var code, out var addresses, out var ttl))
-            waiter.TrySetResult((code, addresses, ttl));
+        if (_pending.TryGetValue(id, out var pending) && header.Source.Equals(pending.Server)
+            && DnsMessage.TryReadAnswers(payload, id, DnsMessage.TypeA, out var code, out var addresses, out var ttl, out var asked, out var truncated)
+            && string.Equals(asked, pending.Name, StringComparison.OrdinalIgnoreCase))
+            pending.Waiter.TrySetResult((code, addresses, ttl, truncated));
     }
 
     public void OnTick(long now)
@@ -308,6 +316,6 @@ internal sealed class TunnelResolver
 
     public void EndAll()
     {
-        foreach (var waiter in _pending.Values) waiter.TrySetException(new SocketException((int)SocketError.NetworkDown));
+        foreach (var pending in _pending.Values) pending.Waiter.TrySetException(new SocketException((int)SocketError.NetworkDown));
     }
 }

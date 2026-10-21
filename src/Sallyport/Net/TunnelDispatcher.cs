@@ -23,8 +23,9 @@ public interface ITunnelRoute : IAsyncDisposable
     void FromTunnel(byte[] packet);
 }
 
-/// <summary>Where a dispatcher sent what came out of its tunnel.</summary>
-public readonly record struct DispatchCounters(long ToProxy, long ToRouter, long Unclaimed, long NotForUs, long ToEcho);
+/// <summary>Where a dispatcher sent what came out of its tunnel. <see cref="Overflowed"/>: the proxy's packets this
+/// process threw away itself, its network's reader having fallen 4,096 behind (D7: it looks like loss on the path).</summary>
+public readonly record struct DispatchCounters(long ToProxy, long ToRouter, long Unclaimed, long NotForUs, long ToEcho, long Overflowed = 0);
 
 /// <summary>
 /// The one reader of a tunnel generation's packets (docs/design/window.md): each goes to the proxy's network or to the
@@ -37,15 +38,18 @@ public sealed class TunnelDispatcher : IAsyncDisposable
 {
     private const byte Icmp = 1, Tcp = 6, Udp = 17;
 
-    private readonly Channel<byte[]> _proxy = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+    private readonly Channel<byte[]> _proxy;
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _reading;
     private readonly uint _address;
     private ITunnelRoute? _route;
-    private long _toProxy, _toRouter, _unclaimed, _notForUs, _toEcho;
+    private long _toProxy, _toRouter, _unclaimed, _notForUs, _toEcho, _overflowed;
 
     public TunnelDispatcher(Tunnel tunnel, int generation)
     {
+        // As the tunnel's own queue is, and for its reason: unbounded here, that one would bound nothing.
+        _proxy = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest },
+            _ => Interlocked.Increment(ref _overflowed));
         Tunnel = tunnel;
         Generation = generation;
         var address = tunnel.Config.Address is { } a && Ipv4.IsIpv4(a)
@@ -67,7 +71,7 @@ public sealed class TunnelDispatcher : IAsyncDisposable
     public TunnelEcho Echo { get; }
 
     public DispatchCounters Counters => new(Interlocked.Read(ref _toProxy), Interlocked.Read(ref _toRouter), Interlocked.Read(ref _unclaimed),
-        Interlocked.Read(ref _notForUs), Interlocked.Read(ref _toEcho));
+        Interlocked.Read(ref _notForUs), Interlocked.Read(ref _toEcho), Interlocked.Read(ref _overflowed));
 
     /// <summary>Gives the router side this generation's packets from now on. One route at a time; it is disposed with
     /// the generation unless detached first.</summary>

@@ -206,4 +206,28 @@ public class DnsMessageTests
         Assert.Equal([IPAddress.Parse("93.184.215.14")], addresses);
         Assert.False(DnsMessage.TryReadAnswers(response, 0x9999, DnsMessage.TypeA, out _, out _));
     }
+
+    [Fact]
+    public void SaysWhichNameItAnswersAndWhetherItWasCutShort()
+    {
+        var query = DnsMessage.Query(0x1234, "Example.com", DnsMessage.TypeA);
+        byte[] whole = [.. query[..2], 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0, .. query[12..]];
+        byte[] cut = [.. query[..2], 0x83, 0x80, 0, 1, 0, 0, 0, 0, 0, 0, .. query[12..]];
+
+        Assert.True(DnsMessage.TryReadAnswers(whole, 0x1234, DnsMessage.TypeA, out _, out var none, out _, out var asked, out var truncated));
+        Assert.Equal("Example.com", asked);
+        Assert.Empty(none);
+        Assert.False(truncated);
+        Assert.True(DnsMessage.TryReadAnswers(cut, 0x1234, DnsMessage.TypeA, out _, out _, out _, out _, out truncated));
+        Assert.True(truncated);
+    }
+
+    [Fact]
+    public void AQuestionWhosePointerLoopsReadsAsNoName()
+    {
+        // The question's name a pointer to itself (0xc00c at offset 12).
+        byte[] looped = [0x12, 0x34, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0, 0xc0, 0x0c, 0, 1, 0, 1];
+        Assert.True(DnsMessage.TryReadAnswers(looped, 0x1234, DnsMessage.TypeA, out _, out _, out _, out var asked, out _));
+        Assert.Null(asked);
+    }
 }

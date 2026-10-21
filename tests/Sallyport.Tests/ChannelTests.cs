@@ -54,4 +54,55 @@ public class ControlChannelTests
         Assert.Null(server.PeerSession);
         Assert.False(server.Inbound.TryRead(out _));
     }
+
+    // A peer that writes its packets by hand: what the channel under test acknowledges is read back off the link.
+    private static async Task<(ControlChannel Channel, List<ControlPacket> Answers)> Feed(params ControlPacket[] packets)
+    {
+        var key = TestKeys.StaticKey();
+        var (clientEnd, serverEnd) = MemoryTransport.Pair();
+        var channel = new ControlChannel(clientEnd, TlsCrypt.ForClient(key)) { Tick = TimeSpan.FromMilliseconds(10) };
+        channel.Start();
+        var peer = new TlsCrypt(key, sendHalf: 0);
+        foreach (var packet in packets) await serverEnd.SendAsync(packet.Encode(peer), CancellationToken.None);
+        var answers = new List<ControlPacket>();
+        using var listen = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+        try
+        {
+            while (true) if (ControlPacket.Decode(await serverEnd.ReceiveAsync(listen.Token), peer) is { } answer) answers.Add(answer);
+        }
+        catch (OperationCanceledException) { }
+        return (channel, answers);
+    }
+
+    private static readonly byte[] PeerSessionId = [9, 9, 9, 9, 9, 9, 9, 9];
+
+    [Fact]
+    public async Task AMessagePastTheReceiveWindowIsNeitherKeptNorAcknowledged()
+    {
+        var (channel, answers) = await Feed(
+            new ControlPacket(Opcode.ControlV1, 0, PeerSessionId, 1, 1, [], null, 0, [1]),
+            new ControlPacket(Opcode.ControlV1, 0, PeerSessionId, 2, 1, [], null, 200, [2]));
+        await using (channel)
+        {
+            var acked = answers.SelectMany(a => a.Acks).ToList();
+            Assert.Contains(0u, acked);
+            Assert.DoesNotContain(200u, acked);
+            Assert.True(channel.Inbound.TryRead(out var delivered));
+            Assert.Equal(0u, delivered!.MessageId);
+            Assert.False(channel.Inbound.TryRead(out _));
+        }
+    }
+
+    [Fact]
+    public async Task AFirstPacketThatAcknowledgesAnotherSessionPinsNoPeer()
+    {
+        var (channel, answers) = await Feed(
+            new ControlPacket(Opcode.ControlHardResetServerV2, 0, PeerSessionId, 1, 1, [0], [7, 7, 7, 7, 7, 7, 7, 7], 0, []));
+        await using (channel)
+        {
+            Assert.Null(channel.PeerSession);
+            Assert.Equal(1, channel.Dropped);
+            Assert.Empty(answers);
+        }
+    }
 }

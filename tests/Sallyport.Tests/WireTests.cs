@@ -156,4 +156,63 @@ public class OvpnProfileTests
     [Fact]
     public void AStaticKeyOfTheWrongSizeIsRefused() =>
         Assert.Throws<FormatException>(() => StaticKey.Parse("-----BEGIN OpenVPN Static key V1-----\n00ff\n-----END OpenVPN Static key V1-----\n"));
+
+    [Theory]
+    [InlineData("verify-x509-name server name", "server", "name")]
+    [InlineData("verify-x509-name 'C=KG, ST=NA, CN=Server-1'", "C=KG, ST=NA, CN=Server-1", "subject")]
+    [InlineData("verify-x509-name \"OpenVPN Server\" name-prefix", "OpenVPN Server", "name-prefix")]
+    public void ReadsTheServerNameItPins(string line, string name, string type)
+    {
+        var profile = OvpnProfile.Parse($"remote x 1194\n{line}\n");
+        Assert.Equal(new ServerName(name, type), profile.VerifyName);
+        Assert.Null(profile.UnsupportedCheck);
+    }
+
+    [Theory]
+    [InlineData("verify-x509-name server ou", "verify-x509-name ou")]
+    [InlineData("peer-fingerprint AB:CD", "peer-fingerprint")]
+    [InlineData("<peer-fingerprint>\nAB:CD\n</peer-fingerprint>", "peer-fingerprint")]
+    [InlineData("verify-hash AB:CD SHA256", "verify-hash")]
+    [InlineData("tls-verify ./check.sh", "tls-verify")]
+    public void AServerCheckItCannotMakeRefusesTheProfile(string line, string check)
+    {
+        var profile = OvpnProfile.Parse($"remote x 1194\n{line}\n");
+        Assert.Equal(check, profile.UnsupportedCheck);
+    }
+
+    [Fact]
+    public void ADurationPastADayIsADay()
+    {
+        var policy = OvpnProfile.Parse("remote x 1194\nconnect-timeout 2147483647\nconnect-retry 2147483647\n").Policy;
+        Assert.Equal(TimeSpan.FromDays(1), policy.AttemptTimeout);
+        Assert.Equal(TimeSpan.FromDays(1), policy.RetryWait);
+        Assert.True(policy.WaitAfter(1000) <= TimeSpan.FromDays(1));
+    }
+}
+
+public class ServerWordsTests
+{
+    [Fact]
+    public void AChallengeAndATokenAreNeverQuoted()
+    {
+        var said = ServerWords.Quote("AUTH_FAILED,CRV1:R,E:Om01u7Fh4LrGBS7uh0SWmzwabUiGiW6l:Y3Ix:Please enter your OTP");
+        Assert.StartsWith("AUTH_FAILED,", said);
+        Assert.DoesNotContain("Om01u7", said);
+        Assert.DoesNotContain("Y3Ix", said);
+    }
+
+    [Fact]
+    public void WhatIsQuotedIsPrintableAndShort()
+    {
+        var said = ServerWords.Quote("AUTH_FAILED\n" + new string('x', 500));
+        Assert.Equal(121, said.Length);
+        Assert.DoesNotContain('\n', said);
+    }
+
+    [Theory]
+    [InlineData(" auth-token SECRET")]
+    [InlineData("auth-token\tSECRET")]
+    [InlineData("AUTH-TOKEN SECRET")]
+    public void ATokenIsRedactedHoweverItIsSpaced(string option) =>
+        Assert.DoesNotContain("SECRET", PushOptions.Redact(option));
 }

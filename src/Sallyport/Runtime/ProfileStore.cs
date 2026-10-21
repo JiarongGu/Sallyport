@@ -82,12 +82,17 @@ public sealed class ProfileStore
         var id = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(8));
         var entry = new StoredProfile(id, name, [.. profile.Remotes.Select(r => $"{r.Proto}/{r.Port}")], DateTimeOffset.UtcNow,
             Tunnel.Unsupported(profile), profile.AuthUserPass);
-        lock (_gate)
+        var plain = Encoding.UTF8.GetBytes(text);
+        try
         {
-            // The sealed text first: a description without it is never listed, so a crash in between leaves nothing usable half-made.
-            WriteWhole(FileOf(id, ".profile"), _protector.Protect(Encoding.UTF8.GetBytes(text)));
-            WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(entry, Json));
+            lock (_gate)
+            {
+                // The sealed text first: a description without it is never listed, so a crash in between leaves nothing usable half-made.
+                WriteWhole(FileOf(id, ".profile"), _protector.Protect(plain));
+                WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(entry, Json));
+            }
         }
+        finally { CryptographicOperations.ZeroMemory(plain); }
         return entry;
     }
 
@@ -191,7 +196,9 @@ public sealed class ProfileStore
     {
         byte[] sealedBytes;
         lock (_gate) sealedBytes = File.ReadAllBytes(FileOf(id, ".profile"));
-        return Encoding.UTF8.GetString(_protector.Unprotect(sealedBytes));
+        var plain = _protector.Unprotect(sealedBytes);
+        try { return Encoding.UTF8.GetString(plain); }
+        finally { CryptographicOperations.ZeroMemory(plain); }
     }
 
     public bool Remove(string id)

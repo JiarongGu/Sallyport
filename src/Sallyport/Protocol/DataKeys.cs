@@ -59,7 +59,9 @@ internal sealed class DataKeys
     {
         if (client.PreMaster is null) throw new ArgumentException("the client's key source carries the pre-master secret", nameof(client));
         var master = Prf.Tls10(client.PreMaster, "OpenVPN master secret", [.. client.Random1, .. server.Random1], 48);
-        return Prf.Tls10(master, "OpenVPN key expansion", [.. client.Random2, .. server.Random2, .. clientSession, .. serverSession], BlockLength);
+        // Not needed once the block exists: cleared, as far as the collector has not copied it already.
+        try { return Prf.Tls10(master, "OpenVPN key expansion", [.. client.Random2, .. server.Random2, .. clientSession, .. serverSession], BlockLength); }
+        finally { CryptographicOperations.ZeroMemory(master); }
     }
 
     /// <param name="block">The 256-byte key block.</param>

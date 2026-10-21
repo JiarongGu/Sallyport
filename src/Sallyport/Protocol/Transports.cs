@@ -44,14 +44,22 @@ internal sealed class UdpTransport : ITransport
             ReceiveBufferSize = 4 * 1024 * 1024,
             SendBufferSize = 1024 * 1024,
         };
-        if (OperatingSystem.IsWindows())
+        try
         {
-            // SIO_UDP_CONNRESET off: otherwise one ICMP "port unreachable" makes every later receive throw, and a
-            // server that is merely restarting looks like a dead socket.
-            socket.IOControl(unchecked((int)0x9800000C), [0, 0, 0, 0], null);
+            if (OperatingSystem.IsWindows())
+            {
+                // SIO_UDP_CONNRESET off: otherwise one ICMP "port unreachable" makes every later receive throw, and a
+                // server that is merely restarting looks like a dead socket.
+                socket.IOControl(unchecked((int)0x9800000C), [0, 0, 0, 0], null);
+            }
+            await socket.ConnectAsync(endpoint, ct);
+            return new UdpTransport(socket);
         }
-        await socket.ConnectAsync(endpoint, ct);
-        return new UdpTransport(socket);
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     public bool IsReliable => false;
@@ -86,8 +94,16 @@ internal sealed class TcpTransport : ITransport
     public static async Task<TcpTransport> ConnectAsync(IPEndPoint endpoint, CancellationToken ct)
     {
         var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        await socket.ConnectAsync(endpoint, ct);
-        return new TcpTransport(socket);
+        try
+        {
+            await socket.ConnectAsync(endpoint, ct);
+            return new TcpTransport(socket);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     public bool IsReliable => true;

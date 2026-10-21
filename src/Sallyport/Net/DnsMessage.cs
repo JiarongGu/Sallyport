@@ -37,18 +37,28 @@ internal static class DnsMessage
 
     /// <summary>As above, with <c>ttl</c>: the shortest time-to-live among the matching answers, in seconds — how long
     /// they may be cached.</summary>
-    public static bool TryReadAnswers(ReadOnlySpan<byte> message, ushort id, ushort type, out int responseCode, out List<IPAddress> addresses, out uint ttl)
+    public static bool TryReadAnswers(ReadOnlySpan<byte> message, ushort id, ushort type, out int responseCode, out List<IPAddress> addresses, out uint ttl) =>
+        TryReadAnswers(message, id, type, out responseCode, out addresses, out ttl, out _, out _);
+
+    /// <summary>As above, with what it answers — its first question's name, without the trailing dot — and whether the
+    /// server cut it short (TC): a truncated answer may hold none of the addresses there are.</summary>
+    public static bool TryReadAnswers(ReadOnlySpan<byte> message, ushort id, ushort type, out int responseCode, out List<IPAddress> addresses, out uint ttl,
+        out string? question, out bool truncated)
     {
         responseCode = -1;
         addresses = [];
         ttl = uint.MaxValue;
+        question = null;
+        truncated = false;
         if (message.Length < 12 || BinaryPrimitives.ReadUInt16BigEndian(message) != id || (message[2] & 0x80) == 0) return false;
+        truncated = (message[2] & 0x02) != 0;
         responseCode = message[3] & 0x0f;
         int questions = BinaryPrimitives.ReadUInt16BigEndian(message[4..]);
         int answers = BinaryPrimitives.ReadUInt16BigEndian(message[6..]);
         var at = 12;
         for (var i = 0; i < questions; i++)
         {
+            if (i == 0) question = ReadName(message, at);
             if (!SkipName(message, ref at) || at + 4 > message.Length) return false;
             at += 4;
         }
@@ -67,6 +77,31 @@ internal static class DnsMessage
             at += length;
         }
         return true;
+    }
+
+    // A name's labels joined by dots, following compression pointers backwards only, so a loop of them cannot hold the
+    // reader; null for one that does not read.
+    private static string? ReadName(ReadOnlySpan<byte> message, int at)
+    {
+        var name = new StringBuilder();
+        for (var limit = at; at < message.Length;)
+        {
+            var length = message[at];
+            if (length == 0) return name.ToString();
+            if ((length & 0xc0) == 0xc0)
+            {
+                if (at + 1 >= message.Length) return null;
+                var target = (length & 0x3f) << 8 | message[at + 1];
+                if (target >= limit) return null;
+                at = limit = target;
+                continue;
+            }
+            if ((length & 0xc0) != 0 || at + 1 + length > message.Length) return null;
+            if (name.Length > 0) name.Append('.');
+            name.Append(Encoding.ASCII.GetString(message.Slice(at + 1, length)));
+            at += 1 + length;
+        }
+        return null;
     }
 
     private static bool SkipName(ReadOnlySpan<byte> message, ref int at)

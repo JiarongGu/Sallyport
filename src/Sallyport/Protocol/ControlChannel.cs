@@ -186,25 +186,24 @@ internal sealed class ControlChannel : IAsyncDisposable
     {
         lock (_gate)
         {
-            if (PeerSession is null) PeerSession = packet.SessionId;
-            else if (!packet.SessionId.AsSpan().SequenceEqual(PeerSession)) { _dropped++; return false; }
-
-            if (packet.Acks.Count > 0)
-            {
-                // An ACK names whose packets it acknowledges; one that names another session is not about ours.
-                if (packet.RemoteSessionId is null || !packet.RemoteSessionId.AsSpan().SequenceEqual(LocalSession)) { _dropped++; return false; }
-                _outgoing.RemoveAll(o => packet.Acks.Contains(o.Id));
-            }
+            if (PeerSession is not null && !packet.SessionId.AsSpan().SequenceEqual(PeerSession)) { _dropped++; return false; }
+            // An ACK names whose packets it acknowledges; one that names another session is not about ours — and is not
+            // the peer to pin either: a packet of an earlier connection, replayed, acknowledges that one's client.
+            if (packet.Acks.Count > 0 && (packet.RemoteSessionId is null || !packet.RemoteSessionId.AsSpan().SequenceEqual(LocalSession))) { _dropped++; return false; }
+            PeerSession ??= packet.SessionId;
+            if (packet.Acks.Count > 0) _outgoing.RemoveAll(o => packet.Acks.Contains(o.Id));
 
             if (packet.MessageId is not { } id) return true;
-            // Acknowledge every copy, duplicates included: a duplicate means our earlier ACK was lost.
-            if (!_acksOwed.Contains(id)) _acksOwed.Add(id);
             if (id == _expected)
             {
                 Deliver(packet);
                 while (_early.Remove(_expected, out var next)) Deliver(next);
             }
-            else if (id > _expected && id - _expected < ReceiveWindow) _early.TryAdd(id, packet);
+            // One past the window is dropped unacknowledged, so its sender sends it again; a repeat of one delivered is
+            // acknowledged again, our earlier ACK having been lost.
+            else if (id > _expected && id - _expected >= ReceiveWindow) return true;
+            else if (id > _expected) _early.TryAdd(id, packet);
+            if (!_acksOwed.Contains(id)) _acksOwed.Add(id);
             return true;
         }
     }

@@ -57,7 +57,11 @@ internal sealed class TcpConnection : Stream, IHalfClosable
     private SocketException? _error;
     private bool _aborted, _disposed, _ackPending, _readablePending;
 
-    private uint _iss, _sndUna, _sndNxt, _rcvNxt;
+    // _sndMax: the highest sequence ever sent. A retransmit timeout rewinds _sndNxt, and the peer may already hold what
+    // went past it: its ACK up to _sndMax is still an ACK, not one for what was never sent.
+    private uint _iss, _sndUna, _sndNxt, _sndMax, _rcvNxt;
+    // Bytes held in _early: segments may overlap, so their sum, not their span, is what the window must bound.
+    private int _earlyBytes;
     private int _sndWnd, _sendMss = 536, _cwnd, _ssthresh = int.MaxValue, _dupAcks, _advertised;
     private byte _peerScale;
     private bool _scaling, _shutWrite, _finSent, _finAcked, _peerFin;
@@ -94,6 +98,9 @@ internal sealed class TcpConnection : Stream, IHalfClosable
     public int AcksSent { get; private set; }
     public int SegmentsIn { get; private set; }
 
+    /// <summary>Bytes held past a gap, overlaps counted each time they arrived.</summary>
+    internal int EarlyBytes { get { lock (_gate) return _earlyBytes; } }
+
     public void Open()
     {
         lock (_gate)
@@ -102,6 +109,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
             _iss = (uint)RandomNumberGenerator.GetInt32(int.MaxValue);
             _sndUna = _iss;
             _sndNxt = _iss + 1;
+            _sndMax = _sndNxt;
             _state = State.SynSent;
             _synSentAt = _clock();
             _rtoDue = _synSentAt + _rto;
@@ -231,7 +239,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
     private bool OnAck(in TcpSegment s, long now)
     {
         var window = s.Window << _peerScale;
-        if (Seq.Gt(s.Ack, _sndNxt))
+        if (Seq.Gt(s.Ack, _sndMax))
         {
             Emit(_sndNxt, TcpFlags.Ack, []);
             return false;
@@ -241,8 +249,11 @@ internal sealed class TcpConnection : Stream, IHalfClosable
             var acked = (int)(s.Ack - _sndUna);
             var data = Math.Min(acked, _send.Count);
             _send.Discard(data);
-            if (_finSent && acked > data) _finAcked = true;
+            // Past every byte written, an ACK can only be of the FIN — sent before a timeout took _finSent back.
+            if (acked > data) _finSent = _finAcked = true;
             _sndUna = s.Ack;
+            // The peer had what a timeout rewound past: sending goes on from what it has.
+            if (Seq.Gt(_sndUna, _sndNxt)) _sndNxt = _sndUna;
             if (_timing && Seq.Gt(s.Ack, _timedSeq))
             {
                 _timing = false;
@@ -298,9 +309,10 @@ internal sealed class TcpConnection : Stream, IHalfClosable
         // Past a gap: kept if it fits the window, and acknowledged at once, so the repeated ACK tells the peer what is missing.
         var offset = (int)(seq - _rcvNxt);
         SegmentsOutOfOrder++;
-        if (offset + data.Length <= _receive.Free && !_early.ContainsKey(seq))
+        if (offset + data.Length <= _receive.Free && _earlyBytes + data.Length <= _receive.Free && !_early.ContainsKey(seq))
         {
             _early[seq] = (data.ToArray(), fin);
+            _earlyBytes += data.Length;
             if (data.Length > 0) Hold(seq, seq + (uint)data.Length);
         }
         _lastEarly = seq;
@@ -327,6 +339,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
             var (seq, (data, fin)) = _early.First();
             if (Seq.Gt(seq, _rcvNxt)) break;
             _early.Remove(seq);
+            _earlyBytes -= data.Length;
             var skip = (int)(_rcvNxt - seq);
             if (skip > data.Length || skip == data.Length && !fin) continue;
             Accept(data.AsSpan(skip), fin);
@@ -334,6 +347,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
         if (_peerFin)
         {
             _early.Clear();
+            _earlyBytes = 0;
             _held.Clear();
             return;
         }
@@ -385,6 +399,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
                 }
                 Emit(_sndNxt, TcpFlags.Ack | TcpFlags.Psh, _segment.AsSpan(0, n));
                 _sndNxt += (uint)n;
+                if (Seq.Gt(_sndNxt, _sndMax)) _sndMax = _sndNxt;
                 BytesSent += n;
                 if (_rtoDue == 0) _rtoDue = now + _rto;
                 continue;
@@ -393,6 +408,7 @@ internal sealed class TcpConnection : Stream, IHalfClosable
             {
                 Emit(_sndNxt, TcpFlags.Ack | TcpFlags.Fin, []);
                 _sndNxt++;
+                if (Seq.Gt(_sndNxt, _sndMax)) _sndMax = _sndNxt;
                 _finSent = true;
                 if (_rtoDue == 0) _rtoDue = now + _rto;
             }

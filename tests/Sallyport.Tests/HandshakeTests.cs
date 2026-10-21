@@ -177,6 +177,46 @@ public class HandshakeTests
         Assert.Contains("not marked for server use", failed.Message);
     }
 
+    [Theory]
+    [InlineData("verify-x509-name server name", true)]
+    [InlineData("verify-x509-name serv name-prefix", true)]
+    [InlineData("verify-x509-name 'CN=server'", true)]
+    [InlineData("verify-x509-name other name", false)]
+    [InlineData("verify-x509-name 'CN=server, O=Elsewhere' subject", false)]
+    public async Task TheServersNameIsCheckedWhenTheProfilePinsIt(string line, bool connects)
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var (clientEnd, serverEnd) = MemoryTransport.Pair();
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var serving = new FakeServer().RunAsync(serverEnd, key, pki.Server, stop.Token);
+
+        var connecting = Client(pki.Profile(key) + $"\n{line}\n", clientEnd, TimeSpan.FromSeconds(30));
+        if (connects)
+        {
+            await connecting;
+            await serving;
+            return;
+        }
+        var failed = await Assert.ThrowsAsync<HandshakeFailed>(() => connecting);
+        await stop.CancelAsync();
+        await Assert.ThrowsAnyAsync<Exception>(() => serving);
+        Assert.Equal(HandshakeStage.Tls, failed.Stage);
+        Assert.Contains("verify-x509-name", failed.Message);
+        Assert.DoesNotContain("server", failed.Message.Replace("the server's", ""));
+    }
+
+    [Fact]
+    public async Task AFingerprintPinIsRefusedBeforeAnyPacketRatherThanSkipped()
+    {
+        using var pki = new TestPki();
+        var (clientEnd, _) = MemoryTransport.Pair();
+        var failed = await Assert.ThrowsAsync<HandshakeFailed>(() => Client(pki.Profile(TestKeys.StaticKey()) + "\npeer-fingerprint AB:CD\n", clientEnd, TimeSpan.FromSeconds(2)));
+        Assert.Equal(HandshakeStage.Profile, failed.Stage);
+        Assert.Contains("peer-fingerprint", failed.Message);
+        Assert.Equal(0, clientEnd.Sent);
+    }
+
     [Fact]
     public async Task AWrongStaticKeyGetsNoAnswerAndSaysSo()
     {

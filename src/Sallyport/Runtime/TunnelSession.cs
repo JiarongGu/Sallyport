@@ -53,6 +53,11 @@ public sealed class TunnelSession : IAsyncDisposable
     private volatile TunnelDispatcher? _dispatcher;
     // What tunnels already dropped carried, so the totals do not fall back to zero on a reconnect.
     private long _droppedIn, _droppedOut;
+    // The session's own end: disposing it stops its run, whatever the caller's token says, so a disposed session never
+    // connects again.
+    private readonly CancellationTokenSource _lifetime = new();
+    private Task _running = Task.CompletedTask;
+    private int _disposed;
 
     public TunnelSession(OvpnProfile profile, TunnelSessionOptions? options = null)
     {
@@ -112,11 +117,20 @@ public sealed class TunnelSession : IAsyncDisposable
     /// <summary>The tunnel itself, for tests that put a packet straight into it.</summary>
     internal Tunnel? CurrentTunnel => _tunnel;
 
-    /// <summary>Runs until <paramref name="ct"/> is cancelled, or until the session cannot go on: the profile cannot be
-    /// served (it names no remote, or asks for what this version does not do), the server refused its credentials and the
-    /// policy does not retry that, or the policy's rounds ran out.</summary>
-    public async Task RunAsync(CancellationToken ct)
+    /// <summary>Runs until <paramref name="ct"/> is cancelled or the session disposed, or until the session cannot go on:
+    /// the profile cannot be served (it names no remote, or asks for what this version does not do), the server refused
+    /// its credentials and the policy does not retry that, or the policy's rounds ran out.</summary>
+    public Task RunAsync(CancellationToken ct)
     {
+        var run = RunUntilAsync(ct);
+        _running = run;
+        return run;
+    }
+
+    private async Task RunUntilAsync(CancellationToken caller)
+    {
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(caller, _lifetime.Token);
+        var ct = lifetime.Token;
         var cannot = _profile.Remotes.Count == 0 ? "the profile names no remote"
             : Tunnel.Unsupported(_profile)
             ?? (_profile.AuthUserPass && _options.Tunnel.Login is null ? "the profile asks for a username and password, and none was given" : null);
@@ -256,7 +270,16 @@ public sealed class TunnelSession : IAsyncDisposable
 
     private static string Label(Remote remote) => $"{remote.Proto}/{remote.Port}";
 
-    public ValueTask DisposeAsync() => new(DropTunnelAsync());
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+        await _lifetime.CancelAsync();
+        // Whatever ended the run was its caller's to hear; here it only has to have ended — or, stuck past ten seconds in
+        // a step that does not hear its token, to have its tunnel taken from under it as before.
+        try { await _running.WaitAsync(TimeSpan.FromSeconds(10)); }
+        catch (Exception) { }
+        await DropTunnelAsync();
+    }
 }
 
 /// <summary>Dials through whichever tunnel a session has now, and answers "network down" in the gap between two — which

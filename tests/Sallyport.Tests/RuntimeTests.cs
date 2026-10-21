@@ -122,6 +122,29 @@ public class TunnelSessionTests
     }
 
     [Fact]
+    public async Task DisposingARunningSessionEndsItsRunAndNeverConnectsAgain()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key));
+        await using var farm = new ServerFarm(pki, key);
+        var session = new TunnelSession(profile, farm.Options(profile));
+        var log = new StatusLog();
+        session.StatusChanged += log.Add;
+        // The caller's token is never cancelled: disposing is all that ends it.
+        var running = session.RunAsync(CancellationToken.None);
+        await log.WaitAsync(s => s.State == SessionState.Up);
+
+        await session.DisposeAsync();
+        await running.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(300);
+
+        Assert.Equal(1, farm.Attempts);
+        Assert.Equal(SessionState.Stopped, log.All[^1].State);
+        Assert.DoesNotContain(log.All, s => s.State == SessionState.Reconnecting);
+    }
+
+    [Fact]
     public async Task WhenTheServerSaysRestartTheSessionConnectsAgainAndKeepsItsByteCounts()
     {
         using var pki = new TestPki();

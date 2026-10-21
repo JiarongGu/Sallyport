@@ -658,6 +658,24 @@ public class TcpReceiveTests
     }
 
     [Fact]
+    public async Task OverlappingEarlySegmentsHoldNoMoreThanTheWindow()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+
+        // Each starts one byte past the last, so each is new to the reassembly and almost all of it a repeat: 5,000 of
+        // them would hold 6.5 MB if each were kept whole.
+        for (var i = 1; i <= 5000; i++) rig.Data(rig.RcvBase + (uint)i, TcpRig.Bytes(1300, i));
+        rig.Sink.Drain();
+        Assert.InRange(rig.Conn.EarlyBytes, 1, TcpRig.Capacity);
+
+        // The hole filled, what was held is read out whole and in order, and nothing is held after.
+        rig.Data(rig.RcvBase, TcpRig.Bytes(1));
+        Assert.Equal(TcpRig.Bytes(1).Concat(TcpRig.Bytes(1300, 1)), await rig.Read(1301));
+        Assert.Equal(0, rig.Conn.EarlyBytes);
+    }
+
+    [Fact]
     public void WithTwoHolesTheFirstSackBlockHoldsTheLatestArrival()
     {
         var rig = new TcpRig();
@@ -1035,6 +1053,45 @@ public class TcpSendTests
         var rest = rig.Sink.Drain();
         Assert.Equal([rig.SndBase + 1360, rig.SndBase + 2720], rest.Select(p => p.Seg.Seq));
         Assert.Equal(data[1360..], TcpRig.Reassemble(rest, rig.SndBase + 1360));
+    }
+
+    [Fact]
+    public async Task AnAckForEverythingSentBeforeATimeoutIsTakenAfterIt()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+        var data = TcpRig.Bytes(4080);
+        await rig.Write(data);
+        Assert.Equal(3, rig.Sink.Drain().Count);
+
+        // All three arrived; their ACK was lost, and the timeout resent the first.
+        rig.Advance(TcpRig.RtoAfterHandshake);
+        Assert.Single(rig.Sink.Drain());
+
+        // The peer answers the repeat with an ACK of all three: past what was resent, never past what was sent.
+        rig.Acknowledge(rig.SndBase + 4080);
+        Assert.DoesNotContain(rig.Sink.Drain(), p => p.HasPayload);
+        rig.Advance(60_000);
+        Assert.Empty(rig.Sink.Drain());
+        Assert.Equal(1, rig.Conn.Retransmits);
+        await rig.Write([1, 2, 3]);
+        Assert.Equal(rig.SndBase + 4080, Assert.Single(rig.Sink.Drain()).Seg.Seq);
+    }
+
+    [Fact]
+    public async Task AnAckPastEverythingEverSentIsStillRefused()
+    {
+        var rig = new TcpRig();
+        rig.Establish(scale: 7);
+        await rig.Write(TcpRig.Bytes(1000));
+        rig.Sink.Drain();
+
+        rig.Acknowledge(rig.SndBase + 1001);
+        var answer = Assert.Single(rig.Sink.Drain());
+        Assert.Equal(TcpFlags.Ack, answer.Seg.Flags);
+        Assert.Equal(rig.SndBase + 1000, answer.Seg.Seq);
+        rig.Advance(TcpRig.RtoAfterHandshake);
+        Assert.Equal(1, rig.Conn.Retransmits);
     }
 
     [Fact]

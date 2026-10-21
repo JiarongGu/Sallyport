@@ -44,10 +44,10 @@ public static class PushOptions
 {
     private static readonly string[] Secret = ["auth-token", "auth-token-user"];
 
-    /// <summary>The option, with its value hidden when the value is a credential.</summary>
+    /// <summary>The option, with its value hidden when the value is a credential — however it is spaced.</summary>
     public static string Redact(string option)
     {
-        var name = option.Split(' ', 2)[0];
+        var name = option.TrimStart().Split((char[])[' ', '\t'], 2)[0];
         return Secret.Contains(name, StringComparer.OrdinalIgnoreCase) ? $"{name} [redacted]" : option;
     }
 }
