@@ -195,6 +195,20 @@ public class Socks5ServerTests
         Assert.Equal("hi"u8.ToArray(), back);
     }
 
+    // Remote resolution (socks5h): a browser behind the proxy sends names, and a tunnel's connector resolves them by the
+    // tunnel's DNS. Were the proxy to resolve them on the machine, a region-locked site would answer for the wrong region.
+    [Fact]
+    public async Task A_name_reaches_the_connector_as_sent_never_resolved_here()
+    {
+        using var cts = new CancellationTokenSource(Limit);
+        string? asked = null;
+        await using var server = Started(new StubConnector((host, _) => { asked = host; return new SocketException((int)SocketError.HostNotFound); }));
+        var (client, _, rep) = await HandshakeAsync(server, Domain("www.dmm.co.jp", 443), cts.Token);
+        client.Dispose();
+        Assert.Equal("www.dmm.co.jp", asked);
+        Assert.Equal(0x04, rep);
+    }
+
     [Fact]
     public async Task Greeting_without_no_auth_gets_no_acceptable_method()
     {
