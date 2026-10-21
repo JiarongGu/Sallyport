@@ -29,6 +29,14 @@ internal static partial class ProcessImage
         return !process.IsInvalid && GetProcessTimes(process, out created, out _, out _, out _);
     }
 
+    /// <summary>The Windows session the process runs in: whose desktop it belongs to. False when it cannot be read.</summary>
+    public static bool TrySession(int pid, out int session)
+    {
+        var read = ProcessIdToSessionId((uint)pid, out var value);
+        session = (int)value;
+        return read;
+    }
+
     private static unsafe string? ImagePath(SafeProcessHandle process)
     {
         var capacity = 512;
@@ -49,6 +57,10 @@ internal static partial class ProcessImage
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetProcessTimes(SafeProcessHandle process, out long creation, out long exit, out long kernel, out long user);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool ProcessIdToSessionId(uint pid, out uint session);
 
     [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

@@ -36,6 +36,8 @@ public sealed class GameRoute : IDisposable
         public volatile int Generation;
         public long DownAt;
         public Timer? Countdown;
+        // Which outage the countdown is of: a callback already queued when its outage ended must not end the next.
+        public int Outage;
         public RoutePhase Phase = RoutePhase.Armed;
         public DateTimeOffset? DownSince;
     }
@@ -57,7 +59,9 @@ public sealed class GameRoute : IDisposable
         _loss = loss;
         _lossOf = lossOf;
         _toTunnel = toTunnel;
-        Router = new Router(driver, adapter.Handle, selects, (lane, packet) => _toTunnel(Wire(lane, _lanes[lane].Generation), packet), onLink, discard, receivePath)
+        // Into the generation whose NAT turned the packet (Nat.Generation is its wire number), not whichever is current
+        // by the time it is sent.
+        Router = new Router(driver, adapter.Handle, selects, (nat, packet) => _toTunnel(nat.Generation, packet), onLink, discard, receivePath)
         {
             LaneOf = laneOf,
         };
@@ -124,7 +128,7 @@ public sealed class GameRoute : IDisposable
             lane.Countdown?.Dispose();
             lane.Countdown = null;
             lane.Generation = generation;
-            Router.Commit(index, new Nat(tunnelAddress, mss, mtu));
+            Router.Commit(index, new Nat(tunnelAddress, mss, mtu) { Generation = Wire(index, generation) });
             lane.DownSince = null;
             Volatile.Write(ref lane.DownAt, 0);
             Enter(index, RoutePhase.Routing);
@@ -164,7 +168,8 @@ public sealed class GameRoute : IDisposable
                     Router.Retire(index, direct: false);
                     Enter(index, RoutePhase.Held);
                     // Once per outage: failed attempts do not restart it, only a tunnel up again does.
-                    if (_loss.DirectAfter is { } after) lane.Countdown = new Timer(_ => GoDirect(index), null, after, Timeout.InfiniteTimeSpan);
+                    var outage = ++lane.Outage;
+                    if (_loss.DirectAfter is { } after) lane.Countdown = new Timer(_ => GoDirect(index, outage), null, after, Timeout.InfiniteTimeSpan);
                     break;
             }
         }
@@ -199,11 +204,11 @@ public sealed class GameRoute : IDisposable
         Router.FromTunnel(index, packet);
     }
 
-    private void GoDirect(int index)
+    private void GoDirect(int index, int outage)
     {
         lock (_lock)
         {
-            if (_lanes[index].Phase != RoutePhase.Held) return;
+            if (_lanes[index].Phase != RoutePhase.Held || _lanes[index].Outage != outage) return;
             Router.Retire(index, direct: true);
             Enter(index, RoutePhase.Direct);
         }

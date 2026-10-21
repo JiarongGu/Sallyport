@@ -147,6 +147,69 @@ public sealed class NatTests
         Assert.Equal(InboundRefusal.PieceAhead, nat.Inbound(later, out _));
     }
 
+    [Theory]
+    [InlineData(8)]
+    [InlineData(17)]
+    public void A_TCP_packet_too_short_for_its_header_is_refused_not_thrown_on(int segment)
+    {
+        // From the very peer the mapping sent to: once its ports matched, the rest of the header was read regardless.
+        var nat = new Nat(Address(Tunnel));
+        nat.Outbound(Tcp(Home, 50001, Server, 443, 0x02, 1360), Link);
+        var shortTcp = new byte[20 + segment];
+        Header(shortTcp, Flow.Tcp, Server, Tunnel);
+        BinaryPrimitives.WriteUInt16BigEndian(shortTcp.AsSpan(20), 443);
+        BinaryPrimitives.WriteUInt16BigEndian(shortTcp.AsSpan(22), 50001);
+        Checksum.WriteIpv4Header(shortTcp, 20);
+
+        Assert.Equal(InboundRefusal.Malformed, nat.Inbound(shortTcp, out var mapping));
+        Assert.Null(mapping);
+    }
+
+    [Fact]
+    public void A_TCP_header_whose_offset_runs_past_the_packet_is_refused()
+    {
+        var nat = new Nat(Address(Tunnel));
+        nat.Outbound(Tcp(Home, 50001, Server, 443, 0x02, 1360), Link);
+        var reply = Tcp(Server, 443, Tunnel, 50001, 0x12, 1360);
+        reply[20 + 12] = 15 << 4;   // 60 bytes of header in a 24-byte segment
+        Assert.Equal(InboundRefusal.Malformed, nat.Inbound(reply, out _));
+    }
+
+    [Fact]
+    public void A_damaged_reply_is_refused_rather_than_given_a_checksum_that_holds()
+    {
+        var nat = new Nat(Address(Tunnel));
+        nat.Outbound(Udp(Home, 50000, Server, 3478), Link);
+        var reply = Udp(Server, 3478, Tunnel, 50000);
+        reply[^1] ^= 0x20;   // one bit of the payload, past the server
+
+        Assert.Equal(InboundRefusal.BadChecksum, nat.Inbound(reply, out _));
+        Assert.Equal(InboundRefusal.None, nat.Inbound(Udp(Server, 3478, Tunnel, 50000, checksum: false), out _));
+    }
+
+    [Fact]
+    public void A_last_piece_of_a_few_bytes_follows_its_first()
+    {
+        var nat = new Nat(Address(Tunnel));
+        nat.Outbound(Udp(Home, 50000, Server, 3478), Link);
+        // The first piece: more fragments, offset 0 (its checksum is the whole datagram's, carried over, not checked).
+        var first = Udp(Server, 3478, Tunnel, 50000);
+        first[6] = 0x20;
+        BinaryPrimitives.WriteUInt16BigEndian(first.AsSpan(4), 0x4242);
+        Checksum.WriteIpv4Header(first, 20);
+        Assert.Equal(InboundRefusal.None, nat.Inbound(first, out var mapping));
+
+        // The last: three bytes, at offset 2 × 8.
+        var last = new byte[20 + 3];
+        Header(last, Flow.Udp, Server, Tunnel);
+        BinaryPrimitives.WriteUInt16BigEndian(last.AsSpan(4), 0x4242);
+        BinaryPrimitives.WriteUInt16BigEndian(last.AsSpan(6), 2);
+        Checksum.WriteIpv4Header(last, 20);
+        Assert.Equal(InboundRefusal.None, nat.Inbound(last, out var followed));
+        Assert.Same(mapping, followed);
+        Assert.Equal(Home, new IPAddress(last.AsSpan(16, 4)));
+    }
+
     [Fact]
     public void A_UDP_datagram_without_a_checksum_keeps_none()
     {

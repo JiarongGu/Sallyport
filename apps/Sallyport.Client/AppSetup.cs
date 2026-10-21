@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Sallyport.Runtime;
+using Sallyport.Windows.Apps;
 using Sallyport.Windows.Routing;
 
 namespace Sallyport.Client;

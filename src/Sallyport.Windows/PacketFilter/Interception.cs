@@ -24,8 +24,19 @@ public sealed class Interception : IDisposable
         _batch = new PacketBatch(batchSize);
         _up = new int[batchSize];
         _down = new int[batchSize];
-        driver.SetPacketEvent(adapter, _signal);
-        driver.SetMode(adapter, AdapterMode.SentTunnel | (receivePath ? AdapterMode.ReceiveTunnel : AdapterMode.None));
+        try
+        {
+            driver.SetPacketEvent(adapter, _signal);
+            driver.SetMode(adapter, AdapterMode.SentTunnel | (receivePath ? AdapterMode.ReceiveTunnel : AdapterMode.None));
+        }
+        catch
+        {
+            // Half made: nothing of it is left behind — the event unset, the native buffers freed.
+            try { driver.SetPacketEvent(adapter, null); } catch (Win32Exception) { }
+            _batch.Dispose();
+            _signal.Dispose();
+            throw;
+        }
     }
 
     public ulong Adapter { get; }
@@ -120,9 +131,14 @@ public sealed class Interception : IDisposable
 
     public void Dispose()
     {
-        Stop();
-        _batch.Dispose();
-        _signal.Dispose();
+        // A driver that refused to let the adapter go still leaves this process's buffers to free; the refusal is the
+        // caller's to hear.
+        try { Stop(); }
+        finally
+        {
+            _batch.Dispose();
+            _signal.Dispose();
+        }
     }
 
     public override string ToString() =>

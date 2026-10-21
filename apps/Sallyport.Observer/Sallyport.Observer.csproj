@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
@@ -8,6 +9,6 @@
   </ItemGroup>
   <!-- A game's programs are found as its profile finds them (GameFolder), so the observer watches what will be routed. -->
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Sallyport\Sallyport.csproj" />
+    <ProjectReference Include="..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
   </ItemGroup>
 </Project>

@@ -51,7 +51,7 @@ async Task<int> RouteAsync(string profilePath)
     // A game's folder stands for every program its profile would include (GameFolder): the app filter names programs by
     // exact path, never by folder (D16), so the folder is expanded here.
     var apps = Values("--app").Select(Path.GetFullPath)
-        .Concat(Values("--folder").SelectMany(folder => Sallyport.Runtime.GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path)))
+        .Concat(Values("--folder").SelectMany(folder => Sallyport.Windows.Apps.GameFolder.Scan(folder).Where(e => e.Included).Select(e => e.Path)))
         .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     if (apps.Count == 0) return Fail("route needs at least one --app or a --folder with a program in it");
     if (apps.FirstOrDefault(a => !File.Exists(a)) is { } missing) return Fail($"no program at {missing}");

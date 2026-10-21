@@ -21,7 +21,7 @@ internal static class Program
             // What a game profile made from this folder would route, and what it would leave out and why.
             try
             {
-                foreach (var found in Sallyport.Runtime.GameFolder.Scan(folder))
+                foreach (var found in Sallyport.Windows.Apps.GameFolder.Scan(folder))
                     Console.WriteLine($"{(found.Included ? "include" : "leave out")}  {found.Path}{(found.Reason is { } why ? $"  ({why})" : "")}");
                 return 0;
             }

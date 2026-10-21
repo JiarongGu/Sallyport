@@ -115,7 +115,7 @@ public sealed partial class OwnerTable
 
     /// <summary>Every TCP row on a local port, for saying why a flow was not found: its ends and its process.</summary>
     public IEnumerable<string> TcpRowsOn(ushort localPort) => _tcp.Where(r => r.Key.Item2 == localPort)
-        .Select(r => $"{new System.Net.IPAddress(r.Key.Item1)}:{r.Key.Item2} -> {new System.Net.IPAddress(r.Key.Item3)}:{r.Key.Item4} pid {r.Value}");
+        .Select(r => $"{Addresses.Masked(new System.Net.IPAddress(r.Key.Item1))}:{r.Key.Item2} -> {Addresses.Masked(new System.Net.IPAddress(r.Key.Item3))}:{r.Key.Item4} pid {r.Value}");
 
     /// <summary>Whether a socket still holds this local end in the snapshot — what keeps an idle mapping alive.</summary>
     public bool Holds(byte protocol, uint localAddress, ushort localPort) => protocol == Flow.Tcp

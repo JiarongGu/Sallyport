@@ -15,17 +15,27 @@ public sealed record ProgramRule(string Path, LossMode Loss = LossMode.Hold, int
 /// The programs a game profile includes, recognised by the executable each process runs — read when a flow's first
 /// packet names its PID, so a program is selected from its first packet however it was started (a launcher, a mod
 /// loader, by hand). A PID is remembered with its creation time: a recycled PID is another process (game-routing §1).
+/// With a <see cref="Session"/>, only that session's processes are selected: a program another person on this computer
+/// runs is theirs, never routed into this person's tunnel (product design §2).
 /// </summary>
 public sealed class ProgramSelection
 {
     private Dictionary<string, ProgramRule> _rules;
     private readonly Dictionary<int, (long Created, bool Selected)> _known = [];
-    private readonly HashSet<int> _unreadable = [];
+    // Written by the router's thread, read by whatever reports the route: the set's own lock-free dictionary.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> _unreadable = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _pathOf = new();
 
     public ProgramSelection(IEnumerable<string> executables) : this(executables.Select(e => new ProgramRule(e))) { }
 
-    public ProgramSelection(IEnumerable<ProgramRule> programs) => _rules = Rules(programs);
+    public ProgramSelection(IEnumerable<ProgramRule> programs, int? session = null)
+    {
+        _rules = Rules(programs);
+        Session = session;
+    }
+
+    /// <summary>The Windows session whose processes may be selected; null, any (a measuring tool's own run).</summary>
+    public int? Session { get; }
 
     public IReadOnlyCollection<string> Executables => _rules.Keys;
 
@@ -35,7 +45,7 @@ public sealed class ProgramSelection
 
     /// <summary>Processes whose executable could not be read: not selected, and kept apart from "not a game's"
     /// (rule 6) — a protected process refusing even limited query access lands here.</summary>
-    public IReadOnlyCollection<int> Unreadable => _unreadable;
+    public IReadOnlyCollection<int> Unreadable => [.. _unreadable.Keys];
 
     public bool Selects(int pid)
     {
@@ -43,20 +53,30 @@ public sealed class ProgramSelection
         if (pid <= 4) return false;
         if (!ProcessImage.TryCreated(pid, out var created))
         {
-            _unreadable.Add(pid);
+            _unreadable.TryAdd(pid, 0);
             return false;
         }
         if (_known.TryGetValue(pid, out var known) && known.Created == created) return known.Selected;
         if (!ProcessImage.TryRead(pid, out created, out var path) || path is null)
         {
-            _unreadable.Add(pid);
+            _unreadable.TryAdd(pid, 0);
             return false;
         }
         var selected = _rules.TryGetValue(path, out var chosen);
+        if (selected && Session is { } session)
+        {
+            // Whose it is cannot be read: not selected, and said so (rule 6), as a process whose image cannot be.
+            if (!ProcessImage.TrySession(pid, out var its))
+            {
+                _unreadable.TryAdd(pid, 0);
+                return false;
+            }
+            selected = its == session;
+        }
         _known[pid] = (created, selected);
         if (selected) _pathOf[pid] = chosen!.Path;
         else _pathOf.TryRemove(pid, out _);
-        _unreadable.Remove(pid);
+        _unreadable.TryRemove(pid, out _);
         return selected;
     }
 

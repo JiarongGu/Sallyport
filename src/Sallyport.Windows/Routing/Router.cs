@@ -85,7 +85,7 @@ public sealed class ProcessRouted
 /// what the tunnel returns (<see cref="FromTunnel"/>). Tunnels come and go under it (<see cref="Commit"/>,
 /// <see cref="Retire"/>); the interception and every flow's decision stay, so nothing selected slips out between two.
 /// </summary>
-public sealed class Router : IDisposable
+public sealed partial class Router : IDisposable
 {
     /// <summary>How stale the owner tables may grow before a UDP decision is checked again: a port let go and taken
     /// by another process was misattributed for 250 ms when nothing refreshed (measured, gate 3).</summary>
@@ -96,10 +96,6 @@ public sealed class Router : IDisposable
     public static readonly TimeSpan Idle = TimeSpan.FromMinutes(2);
 
     private static readonly TimeSpan SweepEvery = TimeSpan.FromSeconds(10);
-    // A datagram's pieces leave within microseconds of each other, and through the tunnel within milliseconds.
-    private const long PieceLifeMs = 30_000, AheadLifeMs = 2_000;
-    private const int MostAhead = 64;
-
     private readonly PacketDriver _driver;
     private readonly Interception _interception;
     private readonly OwnerTable _owners = new();
@@ -107,7 +103,7 @@ public sealed class Router : IDisposable
     public const int Lanes = 8;
 
     private readonly Func<int, bool> _selects;
-    private readonly Action<int, byte[]> _toTunnel;
+    private readonly Action<Nat, byte[]> _toTunnel;
     private readonly Func<DriverPacket, bool>? _discard;
     // Each lane's tunnel, as the other threads commit and retire it: read with Volatile, written whole.
     private readonly Nat?[] _nats = new Nat?[Lanes];
@@ -115,10 +111,6 @@ public sealed class Router : IDisposable
     private readonly (uint Network, uint Mask)[] _onLink;
     private readonly Dictionary<Flow, FlowDecision> _flows = [];
     private readonly Dictionary<Flow6, FlowDecision> _flows6 = [];
-    // What the first piece of a datagram Windows sent in pieces was decided: its later pieces carry no ports.
-    private readonly Dictionary<(uint, uint, byte, ushort), (FlowDecision Decision, long Since)> _pieces = [];
-    private readonly Dictionary<(UInt128, UInt128, uint), (FlowDecision Decision, long Since)> _pieces6 = [];
-    private readonly List<(int Lane, uint Source, byte Protocol, ushort Id, byte[] Packet, long At)> _ahead = [];
     private readonly long[] _blocked = new long[Enum.GetValues<BlockReason>().Length];
     private readonly Lock _injectLock = new();
     private readonly PacketBatch _inject = new(1);
@@ -139,8 +131,9 @@ public sealed class Router : IDisposable
     /// addresses): a selected program's packets to them are blocked, the tunnel having no way back to them.</param>
     /// <param name="discard">A measurement's cut: packets it picks are dropped before anything else, both ways when
     /// <paramref name="receivePath"/> takes what arrives too. Null in use.</param>
-    /// <param name="toTunnel">Where a routed packet goes: its lane, and the packet.</param>
-    public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Action<int, byte[]> toTunnel,
+    /// <param name="toTunnel">Where a routed packet goes: the NAT that turned it (whose <see cref="Nat.Generation"/> names
+    /// the tunnel), and the packet.</param>
+    public Router(PacketDriver driver, ulong adapter, Func<int, bool> selects, Action<Nat, byte[]> toTunnel,
         IEnumerable<(uint Network, uint Mask)>? onLink = null, Func<DriverPacket, bool>? discard = null, bool receivePath = false)
     {
         _driver = driver;
@@ -172,6 +165,7 @@ public sealed class Router : IDisposable
     {
         Volatile.Write(ref _nats[lane], nat);
         Volatile.Write(ref _paths[lane], (int)SelectedPath.Tunnel);
+        ForgetAhead(lane);
     }
 
     public void Commit(Nat nat) => Commit(0, nat);
@@ -181,6 +175,7 @@ public sealed class Router : IDisposable
     {
         Volatile.Write(ref _paths[lane], (int)(direct ? SelectedPath.Direct : SelectedPath.Held));
         Volatile.Write(ref _nats[lane], null);
+        ForgetAhead(lane);
     }
 
     public void Retire(bool direct) => Retire(0, direct);
@@ -204,81 +199,6 @@ public sealed class Router : IDisposable
     /// the far end then receives the datagram as it was sent. Split, it receives pieces, and Google's STUN server, which
     /// answers a whole 1500-byte request, answered neither of two split ones (measured, gate 5).</summary>
     public bool SplitOversized { get; set; }
-
-    public Interception Interception => _interception;
-    public OwnerTable Owners => _owners;
-    public long RoutedPackets { get; private set; }
-    public long DirectPackets { get; private set; }
-    public long UnownedPackets { get; private set; }
-    /// <summary>Selected packets dropped rather than sent direct: no tunnel port free, a frame shorter than the packet it
-    /// holds, or IP options on one too big for the tunnel.</summary>
-    public long HeldBack { get; private set; }
-    /// <summary>Flows first decided direct or unowned that a later look found a selected process owning: what of a
-    /// selected program left directly, counted (rule 6: coverage failed, not unknown).</summary>
-    public long LateFlows { get; private set; }
-    public long LatePackets { get; private set; }
-    public long HandedUp { get; private set; }
-    /// <summary>Selected packets dropped while held, and passed on while direct: no tunnel to take them.</summary>
-    public long HeldWhileDown { get; private set; }
-    public long DirectWhileDown { get; private set; }
-    /// <summary>Packets the tunnel returned with no generation to take them (between two tunnels).</summary>
-    public long NoTunnel { get; private set; }
-    /// <summary>Packets a measurement's cut dropped.</summary>
-    public long Discarded { get; private set; }
-    public long HandUpRefused { get; private set; }
-    public long RoutedFlows { get; private set; }
-    public long RoutedTcpFlows { get; private set; }
-    public long BlockedFlows { get; private set; }
-    /// <summary>Resets handed to a selected program for a connection it may not open (<see cref="BlockReason"/>).</summary>
-    public long ResetsSent { get; private set; }
-    /// <summary>"Fragmentation needed" handed to a selected program for a don't-fragment packet too big for the tunnel.</summary>
-    public long TooBig { get; private set; }
-    /// <summary>Routed packets too big for the tunnel in one piece and free to be split: sent as pieces, or whole
-    /// (<see cref="SplitOversized"/>).</summary>
-    public long SplitPackets { get; private set; }
-    public long OversizedWhole { get; private set; }
-    /// <summary>Later pieces of datagrams Windows sent in pieces, routed after their first.</summary>
-    public long PiecesRouted { get; private set; }
-    /// <summary>Later pieces whose first piece was never seen: passed on, their owner unknown.</summary>
-    public long LonePieces { get; private set; }
-    /// <summary>Pieces from the tunnel that came before their first piece, held for it; and those it never came for.</summary>
-    public long PiecesAhead { get; private set; }
-    public long PiecesAheadLost { get; private set; }
-    /// <summary>ICMP errors from the tunnel about a routed packet, turned back and handed up; and by type and code.</summary>
-    public long ErrorsHandedUp { get; private set; }
-    public IReadOnlyDictionary<(byte Type, byte Code), long> Errors { get { lock (_injectLock) return new Dictionary<(byte, byte), long>(_errors); } }
-    /// <summary>The last ICMP errors handed up: their type and code, and the flow each was about.</summary>
-    public IReadOnlyList<(byte Type, byte Code, Flow About)> LastErrors { get { lock (_injectLock) return [.. _lastErrors]; } }
-    /// <summary>TCP connections whose SYN found no owner — decided unowned, so direct, for their whole life — and what
-    /// the owner table held then: the last 16, to say why (rule 6: coverage that failed is named).</summary>
-    public IReadOnlyList<string> SynMisses { get { lock (_synMisses) return [.. _synMisses]; } }
-    private readonly Queue<string> _synMisses = new();
-
-    /// <summary>The largest packet routed, before any split.</summary>
-    public int LargestRouted { get; private set; }
-    public long ExpiredFlows { get; private set; }
-    public long ExpiredMappings { get; private set; }
-    public IReadOnlyDictionary<InboundRefusal, long> Refused { get { lock (_injectLock) return new Dictionary<InboundRefusal, long>(_refused); } }
-
-    /// <summary>Routed TCP handshakes through the tunnel: a SYN leaving to its SYN-ACK handed up — the network's round
-    /// trip to that server, the tunnel included.</summary>
-    public RoundTrips Handshakes { get; } = new();
-
-    /// <summary>A routed UDP datagram to the next one back from its peer, per flow: a game's request waiting for its
-    /// server — the round trip plus however long the server takes, or less when the server sends unasked.</summary>
-    public RoundTrips UdpReplies { get; } = new();
-
-    /// <summary>Packets blocked, by why.</summary>
-    public IReadOnlyDictionary<BlockReason, long> Blocked =>
-        Enum.GetValues<BlockReason>().Where(r => Volatile.Read(ref _blocked[(int)r]) > 0).ToDictionary(r => r, r => Volatile.Read(ref _blocked[(int)r]));
-
-    public IReadOnlyDictionary<Flow, FlowDecision> Flows => _flows;
-
-    /// <summary>Routed flows and packets by process, from the start of the route: what a window says per program. Safe to
-    /// read while routing, unlike <see cref="Flows"/>.</summary>
-    public IReadOnlyDictionary<int, ProcessRouted> ByProcess => _byProcess;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, ProcessRouted> _byProcess = new();
-    public IReadOnlyDictionary<Flow6, FlowDecision> Flows6 => _flows6;
 
     /// <summary>Drains and decides until <paramref name="ct"/> is cancelled, then gives the adapter back.</summary>
     public void Run(CancellationToken ct)
@@ -308,22 +228,6 @@ public sealed class Router : IDisposable
             }
         }
         finally { _interception.Stop(); }
-    }
-
-    /// <summary>Moments the router's loop stood still longer than 200 ms, and in what: while it stands, everything Windows
-    /// sends on the adapter waits in the driver (measured, item 2 step 4), so a stall is named. The last 32.</summary>
-    public IReadOnlyList<string> Stalls { get { lock (_stalls) return [.. _stalls]; } }
-    private readonly Queue<string> _stalls = new();
-
-    private void Timed(string what, long since, long? until = null)
-    {
-        var took = Stopwatch.GetElapsedTime(since, until ?? Stopwatch.GetTimestamp());
-        if (took < TimeSpan.FromMilliseconds(200)) return;
-        lock (_stalls)
-        {
-            _stalls.Enqueue($"{DateTime.Now:HH:mm:ss.fff} {what}: {took.TotalMilliseconds:F0} ms");
-            if (_stalls.Count > 32) _stalls.Dequeue();
-        }
     }
 
     /// <summary>A packet a lane's tunnel returned: turned back and handed up, or refused and counted.</summary>
@@ -424,7 +328,7 @@ public sealed class Router : IDisposable
         Volatile.Write(ref mapping.Tally, decision.Tally);
         if (decision.Tally is { } tally) Interlocked.Add(ref tally._bytesOut, total);
         Asked(flow, ip, decision.Tally);
-        ToTunnel(lane, copy, nat.Mtu);
+        ToTunnel(nat, copy);
         return true;
     }
 
@@ -465,32 +369,6 @@ public sealed class Router : IDisposable
         }
     }
 
-    // A later piece of a datagram Windows sent in pieces: it follows its first.
-    private bool DecidePiece(ReadOnlySpan<byte> frame)
-    {
-        var link = LinkLength(frame);
-        var ip = frame[link..];
-        if (!_pieces.TryGetValue(PieceKey(ip), out var set)) { LonePieces++; return false; }
-        switch (set.Decision.Verdict)
-        {
-            case Verdict.Direct: DirectPackets++; return false;
-            case Verdict.Unowned: UnownedPackets++; return false;
-            case Verdict.Blocked: Block(set.Decision.Reason, frame[..link], ip, tcpAt: -1); return true;
-        }
-        var lane = set.Decision.Lane;
-        if (WhileDown(set.Decision.Pid, lane) is { } passed) return passed;
-        var nat = NatOf(lane);
-        if (nat is null) { HeldWhileDown++; return true; }
-        var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
-        if (total > ip.Length) { HeldBack++; return true; }
-        var copy = ip[..total].ToArray();
-        nat.OutboundPiece(copy);
-        PiecesRouted++;
-        if (set.Decision.Tally is { } tally) Interlocked.Add(ref tally._bytesOut, total);
-        ToTunnel(lane, copy, nat.Mtu);
-        return true;
-    }
-
     private bool Decide6(ReadOnlySpan<byte> frame)
     {
         var kind = Frames.TryReadOutbound6(frame, out var flow, out var transport, out var fragmentId);
@@ -523,9 +401,14 @@ public sealed class Router : IDisposable
 
     private FlowDecision Decision(in Flow flow, ReadOnlySpan<byte> ip)
     {
-        if (!_flows.TryGetValue(flow, out var decision))
+        var syn = flow.Protocol == Flow.Tcp && (ip[(ip[0] & 0x0F) * 4 + 13] & 0x12) == 0x02;
+        _flows.TryGetValue(flow, out var decision);
+        // A SYN opens a connection, whoever had this four-tuple before: decided afresh, and the old decision kept only
+        // when it is the same one — a retransmitted SYN counts nothing twice.
+        var fresh = decision is null || syn ? Classify(flow, syn) : null;
+        if (fresh is not null && (decision is null || fresh.Verdict != decision.Verdict || fresh.Pid != decision.Pid || fresh.Lane != decision.Lane))
         {
-            decision = Classify(flow, flow.Protocol == Flow.Tcp && (ip[(ip[0] & 0x0F) * 4 + 13] & 0x12) == 0x02);
+            decision = fresh;
             _flows[flow] = decision;
             if (decision.Verdict == Verdict.Routed)
             {
@@ -534,7 +417,7 @@ public sealed class Router : IDisposable
             }
             else if (decision.Verdict == Verdict.Blocked) BlockedFlows++;
         }
-        decision.Packets++;
+        decision!.Packets++;
         decision.LastSeen = Environment.TickCount64;
         if (decision.Verdict == Verdict.Routed) Count(decision);
         return decision;
@@ -564,20 +447,22 @@ public sealed class Router : IDisposable
         }
     }
 
-    // A packet routed, split first if it is too big for the tunnel in one piece and the policy splits.
-    private void ToTunnel(int lane, byte[] packet, int mtu)
+    // A packet routed, split first if it is too big for the tunnel in one piece and the policy splits — into the tunnel
+    // of the NAT that turned it.
+    private void ToTunnel(Nat nat, byte[] packet)
     {
+        var mtu = nat.Mtu;
         if (packet.Length > mtu && SplitOversized && (packet[0] & 0x0F) != 5) { HeldBack++; return; }
         RoutedPackets++;
         if (packet.Length > LargestRouted) LargestRouted = packet.Length;
         if (packet.Length <= mtu || !SplitOversized)
         {
             if (packet.Length > mtu) OversizedWhole++;
-            _toTunnel(lane, packet);
+            _toTunnel(nat, packet);
             return;
         }
         SplitPackets++;
-        foreach (var piece in Replies.Split(packet, mtu)) _toTunnel(lane, piece);
+        foreach (var piece in Replies.Split(packet, mtu)) _toTunnel(nat, piece);
     }
 
     // A blocked packet is dropped; a connection it opens is refused at once (a reset), so the program goes on to another
@@ -642,14 +527,16 @@ public sealed class Router : IDisposable
         return BlockReason.None;
     }
 
-    // A UDP port can change hands between snapshots; a TCP four-tuple cannot, so only UDP decisions are looked at again.
+    // A UDP port can change hands between snapshots, so every UDP decision is looked at again; a TCP four-tuple cannot,
+    // so only one whose owner was not yet in the table at its first packet is — found later to be a selected program's,
+    // it left direct, and is counted as such (router.md §4: could not be checked until it is known, failed once it is).
     private void RecheckUdp()
     {
         Refresh();
         _lastRecheck = _lastRefresh;
         foreach (var (flow, decision) in _flows)
         {
-            if (flow.Protocol != Flow.Udp) continue;
+            if (flow.Protocol != Flow.Udp && decision.Verdict != Verdict.Unowned) continue;
             var answer = _owners.Owner(flow, out var pid);
             if (answer != Ownership.Owned || pid == decision.Pid) continue;
             Reconsider(decision, Selected(pid, flow.RemoteAddress));
@@ -703,20 +590,23 @@ public sealed class Router : IDisposable
         decision.Lane = now.Lane;
     }
 
-    // Decisions and mappings idle past Idle go, unless a socket still holds their local end: a game's UDP socket quiet in
-    // a menu keeps its tunnel port, so the server can still reach it.
+    // Decisions and mappings idle past Idle go, unless a routed one's socket still holds its local end: a game's UDP
+    // socket quiet in a menu keeps its tunnel port, so the server can still reach it. Any other is decided again at its
+    // next packet — kept while its socket lived, one unselected program talking to many peers on one socket (a torrent's,
+    // DHT's) would hold a decision per peer for as long as it ran.
     private void Sweep()
     {
         _lastSweep = Stopwatch.GetTimestamp();
         var idleSince = Environment.TickCount64 - (long)Idle.TotalMilliseconds;
-        foreach (var flow in _flows.Where(f => f.Value.LastSeen < idleSince && !_owners.Holds(f.Key.Protocol, f.Key.LocalAddress, f.Key.LocalPort))
+        foreach (var flow in _flows.Where(f => f.Value.LastSeen < idleSince
+                         && (f.Value.Verdict != Verdict.Routed || !_owners.Holds(f.Key.Protocol, f.Key.LocalAddress, f.Key.LocalPort)))
                      .Select(f => f.Key).ToList())
         {
             _flows.Remove(flow);
             ExpiredFlows++;
         }
-        foreach (var flow in _flows6.Where(f => f.Value.LastSeen < idleSince && !_owners.Holds(f.Key.Protocol, f.Key.LocalAddress, f.Key.LocalPort))
-                     .Select(f => f.Key).ToList())
+        // Never routed: the tunnel carries IPv4 only.
+        foreach (var flow in _flows6.Where(f => f.Value.LastSeen < idleSince).Select(f => f.Key).ToList())
         {
             _flows6.Remove(flow);
             ExpiredFlows++;
@@ -733,31 +623,6 @@ public sealed class Router : IDisposable
         }
         for (var lane = 0; lane < Lanes; lane++)
             if (NatOf(lane) is { } nat) ExpiredMappings += nat.Expire(idleSince, m => _owners.Holds(m.Protocol, m.LocalAddress, m.LocalPort));
-    }
-
-    private void HoldAhead(int lane, byte[] packet)
-    {
-        var now = Environment.TickCount64;
-        PiecesAheadLost += _ahead.RemoveAll(a => now - a.At > AheadLifeMs);
-        if (_ahead.Count >= MostAhead)
-        {
-            _ahead.RemoveAt(0);
-            PiecesAheadLost++;
-        }
-        _ahead.Add((lane, BinaryPrimitives.ReadUInt32LittleEndian(packet.AsSpan(12)), packet[9], BinaryPrimitives.ReadUInt16BigEndian(packet.AsSpan(4)), packet, now));
-        PiecesAhead++;
-    }
-
-    private void ReleaseAhead(int lane, byte[] first)
-    {
-        var source = BinaryPrimitives.ReadUInt32LittleEndian(first.AsSpan(12));
-        var id = BinaryPrimitives.ReadUInt16BigEndian(first.AsSpan(4));
-        foreach (var held in _ahead.Where(a => a.Lane == lane && a.Source == source && a.Protocol == first[9] && a.Id == id).ToList())
-        {
-            _ahead.Remove(held);
-            if (NatOf(lane)?.Inbound(held.Packet, out var mapping) == InboundRefusal.None && Inject(Nat.Frame(mapping!, held.Packet))) HandedUp++;
-            else PiecesAheadLost++;
-        }
     }
 
     // A packet this router made, handed up as if it came from the far end of the frame it answers.
@@ -787,9 +652,6 @@ public sealed class Router : IDisposable
     }
 
     private static int LinkLength(ReadOnlySpan<byte> frame) => BinaryPrimitives.ReadUInt16BigEndian(frame[12..]) == 0x8100 ? 18 : 14;
-
-    private static (uint, uint, byte, ushort) PieceKey(ReadOnlySpan<byte> ip) =>
-        (BinaryPrimitives.ReadUInt32LittleEndian(ip[12..]), BinaryPrimitives.ReadUInt32LittleEndian(ip[16..]), ip[9], BinaryPrimitives.ReadUInt16BigEndian(ip[4..]));
 
     // A miss reads the tables again unless they were read after this packet's batch left the driver: such a read holds
     // every socket that sent a packet in it. One read a batch at most, then, and none missed for being a moment old —

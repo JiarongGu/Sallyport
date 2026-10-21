@@ -9,11 +9,11 @@ public sealed class AttributionTests
     private static readonly IPAddress Here = IPAddress.Parse("192.168.1.20");
     private static readonly IPAddress There = IPAddress.Parse("203.0.113.7");
 
-    // An Ethernet frame around an IPv4 header and the first four bytes of a transport header (its ports).
-    private static byte[] Frame(byte protocol, ushort sourcePort, ushort destinationPort, ushort fragment = 0, bool vlan = false)
+    // An Ethernet frame around an IPv4 header and a transport header of its own length (TCP 20, UDP 8), its ports set.
+    private static byte[] Frame(byte protocol, ushort sourcePort, ushort destinationPort, ushort fragment = 0, bool vlan = false, int? transport = null)
     {
         var link = vlan ? 18 : 14;
-        var frame = new byte[link + 20 + 8];
+        var frame = new byte[link + 20 + (transport ?? (protocol == Flow.Tcp ? 20 : 8))];
         if (vlan)
         {
             BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(12), 0x8100);
@@ -47,6 +47,14 @@ public sealed class AttributionTests
     {
         Assert.Equal(FrameKind.Flow, Frames.TryReadOutbound(Frame(6, 50001, 443, vlan: true), out var flow));
         Assert.Equal((Flow.Tcp, 50001, 443), (flow.Protocol, flow.LocalPort, flow.RemotePort));
+    }
+
+    [Fact]
+    public void A_TCP_frame_too_short_for_its_header_is_malformed_not_a_flow()
+    {
+        // The router reads TCP's flags at byte 13: a frame that ends before them is not one it may decide on.
+        Assert.Equal(FrameKind.Malformed, Frames.TryReadOutbound(Frame(6, 50001, 443, transport: 8), out _));
+        Assert.Equal(FrameKind.Malformed, Frames.TryReadOutbound(Frame(17, 50001, 443, transport: 4), out _));
     }
 
     [Fact]

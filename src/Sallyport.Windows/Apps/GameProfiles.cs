@@ -3,16 +3,16 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-namespace Sallyport.Runtime;
+namespace Sallyport.Windows.Apps;
 
 /// <summary>One executable of a game, and whether it is routed. <see cref="Reason"/> says why one is left out by default;
 /// the person's choice overrides it either way.</summary>
 public sealed record GameExecutable(string Path, bool Included, string? Reason = null);
 
 /// <summary>
-/// A game as Sallyport routes it: the executables that are the game, found by scanning its folder and each included or
-/// left out by the person. Run with a VPN profile, its included executables are the programs whose traffic is selected —
-/// by Windows' app filter today (D16, which names programs by exact path, never by folder), by a driver later (D17).
+/// A game as an earlier Sallyport kept it: the executables that are the game, found by scanning its folder and each
+/// included or left out by the person — what the router selects by exact path, never by folder. Read now only to move
+/// a game into the apps (the client's <c>RoutedItemStore</c>).
 /// </summary>
 public sealed record GameProfile(string Id, string Name, string? Folder, IReadOnlyList<GameExecutable> Executables, DateTimeOffset Created)
 {
@@ -61,8 +61,8 @@ public static partial class GameFolder
 }
 
 /// <summary>
-/// Game profiles, one JSON file each, in a folder of their own beside the VPN profiles. Nothing in one is secret: paths,
-/// names and choices.
+/// The earlier store of game profiles, one JSON file each, in a folder of their own beside the VPN profiles — read once,
+/// to migrate it. Nothing in one is secret: paths, names and choices.
 /// </summary>
 public sealed class GameProfileStore
 {

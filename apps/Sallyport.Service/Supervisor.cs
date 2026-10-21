@@ -176,7 +176,8 @@ sealed class Supervisor(Log log)
             RedirectStandardInput = true, RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true,
         })!;
         _job.Add(worker);
-        await worker.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new WorkerSetup(programs), RouterProtocol.Json));
+        // The client's session from Windows, never from what the client says: the run routes that person's programs only.
+        await worker.StandardInput.WriteLineAsync(JsonSerializer.Serialize(new WorkerSetup(programs, peer.SessionId), RouterProtocol.Json));
         await worker.StandardInput.FlushAsync();
 
         // The worker says "ready" once its pipe exists, or why it could not start.
@@ -356,5 +357,6 @@ sealed class Supervisor(Log log)
     }
 }
 
-/// <summary>What the supervisor hands a new worker on its standard input: the programs, each with its loss policy.</summary>
-sealed record WorkerSetup(ProgramRule[] Programs);
+/// <summary>What the supervisor hands a new worker on its standard input: the programs, each with its loss policy, and
+/// the session of the client the run is for — whose processes alone it selects.</summary>
+sealed record WorkerSetup(ProgramRule[] Programs, int? Session = null);

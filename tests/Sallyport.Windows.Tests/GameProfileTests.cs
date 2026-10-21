@@ -1,6 +1,6 @@
-using Sallyport.Runtime;
+using Sallyport.Windows.Apps;
 
-namespace Sallyport.Tests;
+namespace Sallyport.Windows.Tests;
 
 public sealed class GameProfileTests : IDisposable
 {

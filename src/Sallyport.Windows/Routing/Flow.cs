@@ -16,7 +16,31 @@ public readonly record struct Flow(byte Protocol, uint LocalAddress, ushort Loca
 
     public IPAddress Remote => new(RemoteAddress);
 
-    public override string ToString() => $"{(Protocol == Tcp ? "TCP" : "UDP")} {Local}:{LocalPort} -> {Remote}:{RemotePort}";
+    /// <summary>For a log or a measurement's output: a public address masked (<see cref="Addresses.Masked"/>).</summary>
+    public override string ToString() => $"{(Protocol == Tcp ? "TCP" : "UDP")} {Addresses.Masked(Local)}:{LocalPort} -> {Addresses.Masked(Remote)}:{RemotePort}";
+}
+
+/// <summary>Addresses as anything written down may show them (AGENTS.md rule 2): a public one with its last part masked
+/// — <c>A.B.C.x</c>, or an IPv6 one's first three groups and <c>x</c> — and one of this side's own networks as it is,
+/// which names nobody.</summary>
+public static class Addresses
+{
+    public static string Masked(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        var bytes = address.GetAddressBytes();
+        if (bytes.Length == 4)
+            return bytes switch
+            {
+                [10, ..] or [127, ..] or [0, ..] or [172, >= 16 and <= 31, ..] or [192, 168, ..] or [169, 254, ..] or [100, >= 64 and <= 127, ..]
+                    or [>= 224, ..] => address.ToString(),
+                _ => $"{bytes[0]}.{bytes[1]}.{bytes[2]}.x",
+            };
+        // Link-local (fe80::/10), unique local (fc00::/7), loopback and unspecified are this side's own.
+        if (address.IsIPv6LinkLocal || (bytes[0] & 0xFE) == 0xFC || IPAddress.IPv6Loopback.Equals(address) || IPAddress.IPv6None.Equals(address))
+            return address.ToString();
+        return $"{bytes[0] << 8 | bytes[1]:x}:{bytes[2] << 8 | bytes[3]:x}:{bytes[4] << 8 | bytes[5]:x}::x";
+    }
 }
 
 /// <summary>An IPv6 TCP or UDP packet's five-tuple, from this machine's side; addresses read big-endian from their 16
@@ -34,7 +58,7 @@ public readonly record struct Flow6(byte Protocol, UInt128 LocalAddress, ushort 
         return new IPAddress(bytes);
     }
 
-    public override string ToString() => $"{(Protocol == Flow.Tcp ? "TCP" : "UDP")} [{Local}]:{LocalPort} -> [{Remote}]:{RemotePort}";
+    public override string ToString() => $"{(Protocol == Flow.Tcp ? "TCP" : "UDP")} [{Addresses.Masked(Local)}]:{LocalPort} -> [{Addresses.Masked(Remote)}]:{RemotePort}";
 }
 
 /// <summary>What an Ethernet frame is, as far as attributing it goes.</summary>
@@ -70,7 +94,8 @@ public static class Frames
         if (protocol is not (Flow.Tcp or Flow.Udp)) return FrameKind.OtherIpv4;
         // Fragment offset: the low 13 bits of bytes 6-7, in 8-byte units.
         if ((BinaryPrimitives.ReadUInt16BigEndian(ip[6..]) & 0x1FFF) != 0) return FrameKind.Fragment;
-        if (ip.Length < headerLength + 4) return FrameKind.Malformed;
+        // The whole transport header, which the router reads past the ports (TCP's flags at 13).
+        if (ip.Length < headerLength + (protocol == Flow.Tcp ? 20 : 8)) return FrameKind.Malformed;
 
         var transport = ip[headerLength..];
         flow = new(protocol,

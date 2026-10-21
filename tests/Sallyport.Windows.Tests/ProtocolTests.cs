@@ -46,6 +46,25 @@ public sealed class ProtocolTests
     }
 
     [Fact]
+    public void Sallyports_own_folder_is_known_however_its_path_is_written_and_what_passes_is_made_whole()
+    {
+        var routable = RouterProtocol.Routable(
+            [new(@"D:\Program Files\Sallyport\data\..\Sallyport.Client.exe"), new(@"D:\PROGRAM FILES\sallyport\.\Sallyport.Client.exe"),
+             new("E:\\Games\\a\0b.exe"), new(@"E:\Games\ZZZ\..\ZZZ\ZenlessZoneZero.exe")],
+            @"D:\Program Files\Sallyport");
+
+        Assert.Equal(@"E:\Games\ZZZ\ZenlessZoneZero.exe", Assert.Single(routable).Path);
+    }
+
+    [Fact]
+    public async Task A_packet_frame_too_short_for_its_generation_is_refused_where_it_is_read()
+    {
+        var head = new byte[] { 3, 0, 0, 0, RouterProtocol.PacketFrame, 1, 2 };
+        var reader = new FrameStream(new MemoryStream(head));
+        await Assert.ThrowsAsync<InvalidDataException>(async () => await reader.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_packet_keeps_its_generation_and_bytes()
     {
         var packet = Enumerable.Range(0, 1500).Select(i => (byte)i).ToArray();

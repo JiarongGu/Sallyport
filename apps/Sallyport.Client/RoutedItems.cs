@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sallyport.Runtime;
+using Sallyport.Windows.Apps;
 using Sallyport.Windows.Routing;
 
 namespace Sallyport.Client;

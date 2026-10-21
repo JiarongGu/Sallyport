@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Sallyport.Runtime;
+using Sallyport.Windows.Apps;
 using Shenora;
 using Shenora.Core.Shell;
 using Shenora.Core.WebView;

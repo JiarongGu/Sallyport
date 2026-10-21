@@ -49,10 +49,12 @@ public static partial class ServiceControl
         }
     }
 
-    /// <summary>Removes the service, stopping it first; nothing to do when it is not installed.</summary>
+    /// <summary>Removes the service, stopping it first; nothing to do when it is not installed. Throws when it did not
+    /// stop in <paramref name="wait"/>: a service still running is not removed, and nothing after it should be.</summary>
     public static void Uninstall(string name, TimeSpan wait)
     {
-        Stop(name, wait);
+        // ERROR_SERVICE_REQUEST_TIMEOUT: what the service manager itself says of a service that did not answer in time.
+        if (!Stop(name, wait)) throw new Win32Exception(1053);
         using var scm = Manager(SC_MANAGER_ALL_ACCESS);
         using var service = OpenServiceW(scm, name, DELETE);
         if (service.IsInvalid)
@@ -73,12 +75,18 @@ public static partial class ServiceControl
             throw new Win32Exception(e);
     }
 
-    /// <summary>Asks the service to stop and waits up to <paramref name="wait"/> for it to.</summary>
+    /// <summary>Asks the service to stop and waits up to <paramref name="wait"/> for it to: true when it is stopped (or
+    /// not installed), false when it is still running after the wait. Throws when it could not be asked (rule 6: that
+    /// is neither).</summary>
     public static bool Stop(string name, TimeSpan wait)
     {
         using var scm = Manager(SC_MANAGER_CONNECT);
         using var service = OpenServiceW(scm, name, SERVICE_ALL_ACCESS);
-        if (service.IsInvalid) return Marshal.GetLastPInvokeError() == ERROR_SERVICE_DOES_NOT_EXIST;
+        if (service.IsInvalid)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            return error == ERROR_SERVICE_DOES_NOT_EXIST ? true : throw new Win32Exception(error);
+        }
         var status = new uint[7];
         if (!ControlService(service, SERVICE_CONTROL_STOP, status) && Marshal.GetLastPInvokeError() is var e && e != ERROR_SERVICE_NOT_ACTIVE)
             throw new Win32Exception(e);
@@ -208,67 +216,6 @@ public static partial class ServiceControl
         public IntPtr ActionList;
     }
 
-    // ---- Being a service ----
-
-    private static string? _name;
-    private static IntPtr _statusHandle;
-    private static Func<CancellationToken, Task>? _body;
-    private static readonly CancellationTokenSource Stopping = new();
-    private static readonly ServiceMainProc Main = ServiceMain;
-    private static readonly HandlerProc Handler = OnControl;
-
-    /// <summary>Runs <paramref name="body"/> as the service <paramref name="name"/> until the manager stops it (or the
-    /// machine shuts down) and the body returns. Blocks the calling thread for the service's life, as the manager's
-    /// dispatcher does.</summary>
-    public static void Host(string name, Func<CancellationToken, Task> body)
-    {
-        _name = name;
-        _body = body;
-        var table = new ServiceTableEntry[] { new() { Name = Marshal.StringToHGlobalUni(name), Proc = Marshal.GetFunctionPointerForDelegate(Main) }, default };
-        if (!StartServiceCtrlDispatcherW(table)) throw new Win32Exception(Marshal.GetLastPInvokeError());
-    }
-
-    private static void ServiceMain(int argc, IntPtr argv)
-    {
-        _statusHandle = RegisterServiceCtrlHandlerExW(_name!, Marshal.GetFunctionPointerForDelegate(Handler), IntPtr.Zero);
-        Report(SERVICE_START_PENDING, 0, 3000);
-        Report(SERVICE_RUNNING, SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN, 0);
-        var exit = 0u;
-        try { _body!(Stopping.Token).GetAwaiter().GetResult(); }
-        catch (Exception) { exit = 1; }
-        Report(SERVICE_STOPPED, 0, 0, exit);
-    }
-
-    private static uint OnControl(uint control, uint type, IntPtr data, IntPtr context)
-    {
-        if (control is SERVICE_CONTROL_STOP or SERVICE_CONTROL_SHUTDOWN)
-        {
-            Report(SERVICE_STOP_PENDING, 0, 10000);
-            Stopping.Cancel();
-        }
-        return 0;
-    }
-
-    private static void Report(uint state, uint accepted, uint waitHint, uint exitCode = 0)
-    {
-        // SERVICE_STATUS: type, state, controls accepted, Win32 exit code, service exit code, checkpoint, wait hint.
-        var status = new uint[] { SERVICE_WIN32_OWN_PROCESS, state, accepted, exitCode == 0 ? 0u : 1066u, exitCode, 0, waitHint };
-        SetServiceStatus(_statusHandle, status);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ServiceTableEntry
-    {
-        public IntPtr Name;
-        public IntPtr Proc;
-    }
-
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate void ServiceMainProc(int argc, IntPtr argv);
-
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate uint HandlerProc(uint control, uint type, IntPtr data, IntPtr context);
-
     private sealed class SafeServiceHandle() : Microsoft.Win32.SafeHandles.SafeHandleZeroOrMinusOneIsInvalid(true)
     {
         protected override bool ReleaseHandle() => CloseServiceHandle(handle);
@@ -316,14 +263,4 @@ public static partial class ServiceControl
     [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CloseServiceHandle(IntPtr handle);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool StartServiceCtrlDispatcherW(ServiceTableEntry[] table);
-
-    [LibraryImport("advapi32.dll", EntryPoint = "RegisterServiceCtrlHandlerExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    private static partial IntPtr RegisterServiceCtrlHandlerExW(string name, IntPtr handler, IntPtr context);
-
-    [LibraryImport("advapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool SetServiceStatus(IntPtr handle, uint[] status);
 }

@@ -45,6 +45,40 @@ public sealed class SelectionTests
     }
 
     [Fact]
+    public void A_run_for_one_session_selects_that_sessions_processes_only()
+    {
+        using var self = Process.GetCurrentProcess();
+        var here = new ProgramSelection([new ProgramRule(Environment.ProcessPath!)], session: self.SessionId);
+        var elsewhere = new ProgramSelection([new ProgramRule(Environment.ProcessPath!)], session: self.SessionId + 1);
+
+        Assert.True(here.Selects(Environment.ProcessId));
+        // Another person's copy of the same program: theirs, not this run's — and not "unreadable" either.
+        Assert.False(elsewhere.Selects(Environment.ProcessId));
+        Assert.Empty(elsewhere.Selected);
+        Assert.Empty(elsewhere.Unreadable);
+    }
+
+    [Theory]
+    [InlineData("203.0.113.7", "203.0.113.x")]
+    [InlineData("192.168.1.20", "192.168.1.20")]
+    [InlineData("10.8.0.6", "10.8.0.6")]
+    [InlineData("172.20.1.1", "172.20.1.1")]
+    [InlineData("100.64.3.4", "100.64.3.4")]
+    [InlineData("127.0.0.1", "127.0.0.1")]
+    [InlineData("2001:db8:1:2::5", "2001:db8:1::x")]
+    [InlineData("fe80::1", "fe80::1")]
+    public void An_address_written_down_is_masked_when_it_is_public(string address, string written) =>
+        Assert.Equal(written, Addresses.Masked(IPAddress.Parse(address)));
+
+    [Fact]
+    public void A_flow_written_down_masks_its_public_end()
+    {
+        var flow = new Flow(Flow.Tcp, BinaryPrimitives.ReadUInt32LittleEndian(IPAddress.Parse("192.168.1.20").GetAddressBytes()), 50000,
+            BinaryPrimitives.ReadUInt32LittleEndian(IPAddress.Parse("203.0.113.7").GetAddressBytes()), 443);
+        Assert.Equal("TCP 192.168.1.20:50000 -> 203.0.113.x:443", flow.ToString());
+    }
+
+    [Fact]
     public void A_process_running_another_executable_is_not()
     {
         var selection = new ProgramSelection([Path.Combine(Path.GetTempPath(), "not-a-game.exe")]);

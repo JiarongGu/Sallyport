@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Sallyport\Sallyport.csproj" />
+    <!-- A game's folder read as the router's selection reads it (GameFolder). -->
+    <ProjectReference Include="..\..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
   </ItemGroup>
 
 </Project>

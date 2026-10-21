@@ -113,7 +113,9 @@ public sealed class PacketFilterSetup(string folder)
         if (installer is null) return new(false, false, false, -1, $"{action} could not be started", null);
         using (installer)
         {
-            await installer.WaitForExitAsync(ct);
+            // Waited for whatever the caller's token says: the installer runs on regardless, and the file stays held
+            // until Windows Installer is done with it — given up early, another could put other bytes in its place.
+            await installer.WaitForExitAsync(CancellationToken.None);
             return Interpret(installer.ExitCode, action, File.Exists(log) ? log : null);
         }
     }

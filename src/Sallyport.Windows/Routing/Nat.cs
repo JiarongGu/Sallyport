@@ -35,7 +35,7 @@ public sealed class NatMapping
 
 /// <summary>Why the tunnel's packet was not handed up. <see cref="PieceAhead"/>: a later piece of a datagram that came
 /// before the first, which alone carries the ports that name its mapping.</summary>
-public enum InboundRefusal { None, NotIpv4, NotToTunnel, NotTcpOrUdp, PieceAhead, NoMapping, UnknownPeer, Malformed }
+public enum InboundRefusal { None, NotIpv4, NotToTunnel, NotTcpOrUdp, PieceAhead, NoMapping, UnknownPeer, Malformed, BadChecksum }
 
 /// <summary>
 /// Moves a selected program's packets between this machine's address and the tunnel's (docs/design/router.md §5).
@@ -70,6 +70,10 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss, int mtu
     private int _nextPort = FirstDynamicPort;
 
     public uint TunnelAddress { get; } = tunnelAddress;
+
+    /// <summary>The generation whose tunnel this NAT turns packets for, as whoever committed it numbers it: a packet goes
+    /// into that tunnel with the NAT that turned it, never into a later one that came between the two.</summary>
+    public int Generation { get; init; }
 
     /// <summary>The largest packet sent into the tunnel whole (<see cref="DefaultMtu"/>).</summary>
     public int Mtu { get; } = mtu;
@@ -143,7 +147,8 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss, int mtu
         if (ip.Length < 20 || ip[0] >> 4 != 4) return InboundRefusal.NotIpv4;
         var headerLength = (ip[0] & 0x0F) * 4;
         var total = BinaryPrimitives.ReadUInt16BigEndian(ip[2..]);
-        if (headerLength < 20 || total > ip.Length || total < headerLength + 8) return InboundRefusal.Malformed;
+        // A later piece may carry a single byte; what a first piece or a whole packet needs is the transport's own below.
+        if (headerLength < 20 || total > ip.Length || total <= headerLength) return InboundRefusal.Malformed;
         if (BinaryPrimitives.ReadUInt32LittleEndian(ip[16..]) != TunnelAddress) return InboundRefusal.NotToTunnel;
         var protocol = ip[9];
         var source = BinaryPrimitives.ReadUInt32LittleEndian(ip[12..]);
@@ -161,12 +166,19 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss, int mtu
             Checksum.WriteIpv4Header(ip, headerLength);
             return InboundRefusal.None;
         }
-        if (protocol == Icmp) return InboundError(ip, headerLength, total, out mapping);
+        if (protocol == Icmp) return total < headerLength + 8 ? InboundRefusal.Malformed : InboundError(ip, headerLength, total, out mapping);
         if (protocol is not (Flow.Tcp or Flow.Udp)) return InboundRefusal.NotTcpOrUdp;
 
         var segment = ip[headerLength..total];
+        // UDP's 8-byte header, or TCP's 20 and the options its data offset says: everything below reads them, from
+        // whichever peer sent it — a first piece too short to hold them is the tiny-fragment trick (RFC 1858), refused.
+        if (protocol == Flow.Udp ? segment.Length < 8 : segment.Length < 20 || (segment[12] >> 4) * 4 is var offset && (offset < 20 || offset > segment.Length))
+            return InboundRefusal.Malformed;
         var peer = (source, BinaryPrimitives.ReadUInt16BigEndian(segment));
         var more = MorePieces(ip);
+        // Whole, its checksum is checked before it is rewritten: recomputed over a damaged packet, it would hand the
+        // program bytes that verify. A first piece's covers the whole datagram, so it is carried over instead.
+        if (!more && !TransportVerifies(ip[..total], headerLength)) return InboundRefusal.BadChecksum;
         lock (_lock)
         {
             if (!_byTunnelPort.TryGetValue((protocol, BinaryPrimitives.ReadUInt16BigEndian(segment[2..])), out mapping)) return InboundRefusal.NoMapping;
@@ -235,6 +247,14 @@ public sealed class Nat(uint tunnelAddress, ushort mss = Nat.DefaultMss, int mtu
         BinaryPrimitives.WriteUInt16BigEndian(icmp[2..], Checksum.Fold(Checksum.Sum(icmp)));
         Checksum.WriteIpv4Header(ip, headerLength);
         return InboundRefusal.None;
+    }
+
+    // A UDP checksum of 0 is "none computed" (RFC 768), and holds.
+    private static bool TransportVerifies(ReadOnlySpan<byte> ip, int headerLength)
+    {
+        var segment = ip[headerLength..];
+        if (ip[9] == Flow.Udp && segment[6] == 0 && segment[7] == 0) return true;
+        return Checksum.Fold(Checksum.Sum(segment, Checksum.Sum(ip.Slice(12, 8)) + ip[9] + (uint)segment.Length)) == 0;
     }
 
     private static bool MorePieces(ReadOnlySpan<byte> ip) => (ip[6] & 0x20) != 0;

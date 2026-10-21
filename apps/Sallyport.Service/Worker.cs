@@ -35,7 +35,7 @@ static class Worker
         using (driver)
         {
             if (driver.InternetAdapter() is not { } adapter) { Say("error No network adapter carries the route to the internet."); return 1; }
-            var selection = new ProgramSelection(setup.Programs);
+            var selection = new ProgramSelection(setup.Programs, setup.Session);
             // What the router routed waits here for the pipe, so the router never waits on the pipe (product design §2:
             // never block forwarding behind it); the oldest goes first when the client falls behind.
             var outbound = Channel.CreateBounded<(int, byte[])>(new BoundedChannelOptions(2048) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
