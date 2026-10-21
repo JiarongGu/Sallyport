@@ -158,12 +158,14 @@ internal sealed partial class ClientCore
                 throw new UpdateUnavailable(e.NativeErrorCode == 1223 ? L.T("setup was not allowed to run as administrator") : e.Message);
             }
         }
-        catch (Exception e) when (e is UpdateUnavailable or InvalidDataException or IOException or UnauthorizedAccessException)
+        // Whatever stopped it, the update is not under way any more and says why: left as "Downloading", it held Settings'
+        // buttons until Sallyport was started again.
+        catch (Exception e)
         {
             lock (_updates)
             {
                 _updatePhase = UpdatePhase.Failed;
-                _updateProblem = e.Message;
+                _updateProblem = e is UpdateUnavailable or InvalidDataException or IOException or UnauthorizedAccessException ? e.Message : e.GetType().Name;
                 _heldSetup?.Dispose();
                 _heldSetup = null;
             }

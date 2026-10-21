@@ -282,9 +282,16 @@ internal sealed partial class ClientCore
             return;
         }
         Downloaded got;
-        lock (_gate) _fetching = token;
+        bool signIn;
+        lock (_gate)
+        {
+            _fetching = token;
+            // Only to the address that asked, for the sign-in it asked for: a link changed since is another server, which
+            // gets no password until it asks too — whatever the page still holds.
+            signIn = values.SignIn && _askedToSignIn is { } asked && asked.Token == token && asked.Address == address;
+        }
         Publish();
-        try { got = await ProfileDownload.GetAsync(Downloads, address, values.SignIn ? values.Username : null, values.SignIn ? values.Password : null, CancellationToken.None); }
+        try { got = await ProfileDownload.GetAsync(Downloads, address, signIn ? values.Username : null, signIn ? values.Password : null, CancellationToken.None); }
         // Never a way past it: a server that cannot prove who it is gets no password and sends no keys.
         catch (HttpRequestException e) when (e.InnerException is System.Security.Authentication.AuthenticationException)
         { got = new(null, false, L.T("Could not verify {0}'s identity. Check the address or contact your provider.", address.Host)); }
@@ -298,7 +305,9 @@ internal sealed partial class ClientCore
             {
                 if (_editor?.Token != token) return;
                 _reading = null;
-                _editor = new OpenEditor(NewToken(), "new-profile", "", values with { Source = "link", SignIn = true, Password = "" },
+                var asking = NewToken();
+                _askedToSignIn = (asking, address);
+                _editor = new OpenEditor(asking, "new-profile", "", values with { Source = "link", SignIn = true, Password = "" },
                     new Dictionary<string, string>
                     {
                         [got.Why is null ? "form" : "password"] = got.Why ?? L.T("{0} asks who you are: type the username and password your VPN provider gave you.", address.Host),
@@ -307,11 +316,14 @@ internal sealed partial class ClientCore
             Publish();
             return;
         }
-        Read(token, values with { Source = "link", Password = "" }, address.Host, ProfileDownload.NameFor(address), got.Text, got.Why);
+        Read(token, values with { Source = "link", Password = "" }, (got.From ?? address).Host, ProfileDownload.NameFor(address), got.Text, got.Why);
     }
 
     // The import page's token while a link is being fetched: its button says so.
     private string? _fetching;
+
+    // The sign-in a link's server asked for: the token of the page that asks it, and the address that asked.
+    private (string Token, Uri Address)? _askedToSignIn;
 
     // What was read, looked at: kept under a new token (the page takes the name suggested) or refused where it was asked.
     private void Read(string token, NewProfileValues values, string origin, string suggested, string? text, string? why)
@@ -662,8 +674,7 @@ internal sealed partial class ClientCore
         var profile = Profile(id);
         var endpoint = ClientView.Endpoint(_connections.ProxyPortOf(id)
             ?? throw new ShenoraException("NOT_CONNECTED", "id", id, L.T("Connect {0} first: its proxy takes a free port when it connects.", profile.Name)));
-        Clipboard(endpoint);
-        Notify(NoticeKind.Info, L.T("Copied {0}.", endpoint), new("profile", id));
+        if (Clipboard(endpoint)) Notify(NoticeKind.Info, L.T("Copied {0}.", endpoint), new("profile", id));
     }
 
     public void RequestRemoveProfile(string id)
@@ -841,7 +852,8 @@ internal sealed partial class ClientCore
         var name = values.Name?.Trim() ?? "";
         if (name.Length is 0 or > LongestName) errors["name"] = L.T("Use 1 to {0} characters.", LongestName);
         var through = (values.ProfileIds ?? []).Distinct().ToList();
-        if (through.Any(id => _store.Find(id) is null)) errors["profileId"] = L.T("Choose a VPN profile.");
+        // Only a profile this version can connect, as the page offers them: the host checks what it is sent.
+        if (through.Any(id => _store.Find(id) is not { Unsupported: null })) errors["profileId"] = L.T("Choose a VPN profile.");
         if (!Enum.IsDefined(values.Loss)) errors["loss"] = L.T("Choose what happens when the VPN drops.");
         int? directAfter = null;
         var directAfterText = values.DirectAfterText?.Trim() ?? "";
@@ -1019,10 +1031,10 @@ internal sealed partial class ClientCore
         if (on)
         {
             if (!item.RoutesPackets) throw new ShenoraException("APP_PROXY_ONLY", "id", id, L.T("{0} uses the VPN when it is launched from here: use Launch.", item.Name));
-            if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}.", stored.Name, why));
+            if (stored.Unsupported is { } why) throw new ShenoraException("PROFILE_UNSUPPORTED", "id", id, L.T("This version cannot connect {0}: {1}", stored.Name, ClientView.CannotConnect(why)));
             if (item.PacketPrograms.Count == 0) throw new ShenoraException("APP_EMPTY", "id", id, L.T("Include at least one of {0}'s programs sending all its traffic.", item.Name));
         }
-        if (item.UseOf(profileId)?.On != on) _items.Put(item.WithUse(profileId, on));
+        _items.Update(id, now => now.UseOf(profileId)?.On != on ? now.WithUse(profileId, on) : now);
         // Turning one on is asking again, as a connect is: a route that ended on its own is tried once more.
         if (on) _runner.Retry();
         Replan();
@@ -1035,7 +1047,7 @@ internal sealed partial class ClientCore
         var item = Item(id);
         var stored = Profile(profileId);
         if (item.UseOf(profileId) is not null) return;
-        _items.Put(item.WithUse(profileId, true));
+        _items.Update(id, now => now.UseOf(profileId) is null ? now.WithUse(profileId, true) : now);
         _runner.Retry();
         Replan();
         Notify(NoticeKind.Info, L.T("{0} goes through {1} whenever {1} is connected.", item.Name, stored.Name), new("app", id));
@@ -1046,7 +1058,7 @@ internal sealed partial class ClientCore
     {
         var item = Item(id);
         if (item.UseOf(profileId) is null) return;
-        _items.Put(item.WithUse(profileId, null, remove: true));
+        _items.Update(id, now => now.UseOf(profileId) is null ? now : now.WithUse(profileId, null, remove: true));
         Replan();
         Publish();
     }
@@ -1056,7 +1068,7 @@ internal sealed partial class ClientCore
     {
         var item = Item(id);
         if (!item.Programs.Any(p => p.Id == programId)) throw new ShenoraException("APP_PROGRAM", "id", id, L.T("That program is not one of this app's."));
-        _items.Put(item with { IconProgramId = programId });
+        _items.Update(id, now => now with { IconProgramId = programId });
         Publish();
     }
 
@@ -1089,7 +1101,7 @@ internal sealed partial class ClientCore
     {
         foreach (var item in carried.Select(_items.Find).OfType<RoutedItem>().Where(i => i.UseOf(profileId) is { On: true } && i.Loss == LossMode.Stop))
         {
-            _items.Put(item.WithUse(profileId, false));
+            _items.Update(item.Id, now => now.UseOf(profileId) is { On: true } ? now.WithUse(profileId, false) : now);
             Notify(NoticeKind.Warning, L.T("The connection was lost, so {0}'s Use VPN was turned off, as its setup says. It uses your own connection now.", item.Name),
                 new("app", item.Id));
         }
@@ -1139,8 +1151,9 @@ internal sealed partial class ClientCore
             if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
             else
             {
-                _items.Put(item with { Name = name, Loss = values.Loss, DirectAfterSeconds = directAfter, LaunchProgramId = values.LaunchProgramId,
-                    IconProgramId = values.IconProgramId ?? item.IconProgramId });
+                // What the page edits, onto the app as it is now: its sections (Use VPN) may have changed since it was read.
+                _items.Update(item.Id, now => now with { Name = name, Loss = values.Loss, DirectAfterSeconds = directAfter, LaunchProgramId = values.LaunchProgramId,
+                    IconProgramId = values.IconProgramId ?? now.IconProgramId });
                 _editor = null;
             }
         }
@@ -1177,9 +1190,9 @@ internal sealed partial class ClientCore
             if (errors.Count > 0) { _editor = _editor with { Values = values, Errors = errors }; }
             else
             {
-                _items.Put(item with
+                _items.Update(item.Id, now => now with
                 {
-                    Programs = [.. item.Programs.Select(p => p.Id != programId ? p : p with
+                    Programs = [.. now.Programs.Select(p => p.Id != programId ? p : p with
                     {
                         Packets = values.Packets,
                         // A program keeps its own browser folder once it has one, so its sign-ins survive a change of method.
@@ -1232,9 +1245,12 @@ internal sealed partial class ClientCore
     public async Task LaunchAsync(string id, string? programId, string? profileId, CancellationToken ct)
     {
         var item = Item(id);
-        var target = programId is null ? AppViews.LaunchTarget(item) : item.Programs.FirstOrDefault(p => p.Id == programId && p.Included);
+        // What the page offers to start, and through: a program of its started with proxy settings (one routed by its
+        // packets starts as the person starts it, D22), through a profile the app is in — the host checks what it is sent.
+        var target = programId is null ? AppViews.LaunchTarget(item) : item.Programs.FirstOrDefault(p => p.Id == programId && p.Included && p.Proxy is not null);
         if (target is null) throw new ShenoraException("APP_NO_TARGET", "id", id, L.T("Choose what Launch starts for {0} (Edit).", item.Name));
         if (!File.Exists(target.Path)) throw new ShenoraException("APP_MISSING", "id", id, L.T("{0} is not where it was added from.", Path.GetFileName(target.Path)));
+        if (profileId is not null && item.UseOf(profileId) is null) profileId = null;
         profileId ??= item.LaunchProfile(_connections.IsWanted)
             ?? throw new ShenoraException("APP_NO_PROFILE", "id", id, L.T("Add {0} to a VPN first, on its page or on Overview.", item.Name));
         var profile = Profile(profileId);
@@ -1429,7 +1445,15 @@ internal sealed partial class ClientCore
         lock (_gate) importing = _importing is { } open && open.Token == token ? open : null;
         if (importing is not { File: var file, Name: var name }) return;
         var errors = new Dictionary<string, string>();
-        var profiles = values.Profiles && file.Profiles is { } sealedProfiles ? Backup.Open(sealedProfiles, values.Password ?? "") : [];
+        IReadOnlyList<(SealedProfile Entry, string Text)>? profiles;
+        // Read, the file was whole; opened, a profile in it may still be cut short or sealed in a way this version
+        // does not know: said beside the form, as the file's other faults are.
+        try { profiles = values.Profiles && file.Profiles is { } sealedProfiles ? Backup.Open(sealedProfiles, values.Password ?? "") : []; }
+        catch (InvalidDataException e)
+        {
+            Refuse(token, values, new Dictionary<string, string> { ["form"] = L.T("{0} was not imported: {1}.", name, e.Message) });
+            return;
+        }
         if (values.Profiles && profiles is null) errors["password"] = L.T("That password does not open the VPN profiles in {0}.", name);
         if (!values.Profiles && !values.Apps && !values.Connection) errors["form"] = L.T("Choose at least one thing to import.");
         if (errors.Count > 0)
@@ -1560,7 +1584,11 @@ internal sealed partial class ClientCore
         var now = Environment.TickCount64;
         if (_driverFacts is { } cached && now - cached.At < DriverFactsLast) return cached.Facts with { Working = _driverWork is not null, WorkingText = _driverWork };
         var driver = _driverSetup.Status();
-        var (service, _) = ServiceControl.Status(RouterProtocol.ServiceName);
+        // Read on whichever thread publishes, a timer's among them, where a throw would end Sallyport: a service manager
+        // that would not say is a service whose state is not known (rule 6), as the driver's own already is.
+        Windows.PacketFilter.ServiceState service;
+        try { (service, _) = ServiceControl.Status(RouterProtocol.ServiceName); }
+        catch (System.ComponentModel.Win32Exception) { service = Windows.PacketFilter.ServiceState.Unknown; }
         var facts = new DriverFacts(service != Windows.PacketFilter.ServiceState.NotInstalled, service == Windows.PacketFilter.ServiceState.Running,
             driver.Service is not (Windows.PacketFilter.ServiceState.NotInstalled or Windows.PacketFilter.ServiceState.Unknown),
             driver.Service == Windows.PacketFilter.ServiceState.Running, driver.VersionText, _driverWork is not null, _driverWork);
@@ -1570,8 +1598,7 @@ internal sealed partial class ClientCore
 
     public void CopyGuideExample()
     {
-        Clipboard(ClientView.CurlExample(GuideEndpoint(Snapshot().Profiles)));
-        Notify(NoticeKind.Info, L.T("Copied the example."));
+        if (Clipboard(ClientView.CurlExample(GuideEndpoint(Snapshot().Profiles)))) Notify(NoticeKind.Info, L.T("Copied the example."));
     }
 
     // ---- the view
@@ -1665,7 +1692,7 @@ internal sealed partial class ClientCore
                 // connect is said before it is imported, not after.
                 editor.Kind == "profile-edit" ? PolicyHint(editor.SubjectId) : editor.Kind == "new-app" ? setup?.Preview.Summary
                     : editor.Kind == "new-profile" && profileRead is { Preview.Unsupported: { } cannot }
-                        ? L.T("This version cannot connect it yet: {0}. You can import it now; a later version can connect it.", cannot)
+                        ? L.T("This version cannot connect it: {0} You can import it now.", ClientView.CannotConnect(cannot))
                     // What the file is; what each part holds and what its password does are Settings' help (the "?").
                     : editor.Kind == "import" && importing is { } read ? L.T("{0}, exported {1}.", read.Name, L.Date(read.File.Exported)) : null,
                 editor.Kind switch
@@ -1787,13 +1814,26 @@ internal sealed partial class ClientCore
         }
     }
 
-    /// <summary>The clipboard wants a single-threaded apartment; an intent may arrive on any thread.</summary>
-    private static void Clipboard(string text)
+    /// <summary>The clipboard wants a single-threaded apartment; an intent may arrive on any thread. False, and said, when
+    /// another program held the clipboard throughout: thrown on a thread of its own, that would end Sallyport.</summary>
+    private bool Clipboard(string text)
     {
-        var copying = new Thread(() => System.Windows.Forms.Clipboard.SetText(text));
+        var copied = false;
+        var copying = new Thread(() =>
+        {
+            // Windows' clipboard is one program's at a time: asked again a few times, as Windows Forms can.
+            try
+            {
+                System.Windows.Forms.Clipboard.SetDataObject(text, copy: true, retryTimes: 10, retryDelay: 50);
+                copied = true;
+            }
+            catch (System.Runtime.InteropServices.ExternalException) { }
+        });
         copying.SetApartmentState(ApartmentState.STA);
         copying.Start();
         copying.Join();
+        if (!copied) Notify(NoticeKind.Warning, L.T("Nothing was copied: another program is using the clipboard. Try again."));
+        return copied;
     }
 
 }

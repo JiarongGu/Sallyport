@@ -190,7 +190,21 @@ public sealed class UpdateTests : IDisposable
         var longer = Setup.Concat(new byte[] { 0 }).ToArray();
         e = await Assert.ThrowsAsync<InvalidDataException>(() => new Updater(UpdateSource.Default, new Web(new() { [setupUri.ToString()] = () => Body(longer) })).DownloadAsync(offer, _folder));
         Assert.Equal("the download is larger than the release says", e.Message);
-        // Neither is left behind, finished or not.
+        // Neither is left behind, finished or not, nor put in place of the good one fetched before.
         Assert.Equal(["Sallyport-0.2.0-win-x64-setup.exe"], Directory.EnumerateFiles(_folder).Select(Path.GetFileName));
+        Assert.Equal(Setup, File.ReadAllBytes(Path.Combine(_folder, "Sallyport-0.2.0-win-x64-setup.exe")));
+    }
+
+    [Fact]
+    public async Task A_download_with_no_answer_is_an_update_unavailable_not_a_failure_of_its_own()
+    {
+        var manifest = ReleaseManifest.Parse(Encoding.UTF8.GetBytes(Manifest("0.2.0")));
+        var setupUri = new Uri("https://github.com/JiarongGu/Sallyport/releases/download/v0.2.0/Sallyport-0.2.0-win-x64-setup.exe");
+        var offer = new UpdateOffer(new Version(0, 2, 0), manifest, setupUri);
+
+        // The host answers nothing for it (the fake's 404): the window's Update says so, and is not left downloading.
+        var e = await Assert.ThrowsAsync<UpdateUnavailable>(() => new Updater(UpdateSource.Default, new Web([])).DownloadAsync(offer, _folder));
+        Assert.Contains("404", e.Message);
+        Assert.Empty(Directory.EnumerateFiles(_folder));
     }
 }

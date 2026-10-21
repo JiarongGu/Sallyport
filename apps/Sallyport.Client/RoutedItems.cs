@@ -332,6 +332,26 @@ internal sealed class RoutedItemStore
         }
     }
 
+    /// <summary>Changes one app, from the app as it is now, under the store's lock; null when it is no longer listed. Two
+    /// changes at once — the person saving its page while a lost connection turns its Use VPN off — each see the other's,
+    /// where a copy taken, changed and put back would quietly undo the first. <paramref name="change"/> must not call
+    /// back into the store.</summary>
+    public RoutedItem? Update(string id, Func<RoutedItem, RoutedItem> change)
+    {
+        lock (_gate)
+        {
+            var at = _items.FindIndex(i => i.Id == id);
+            if (at < 0) return null;
+            var changed = change(_items[at]);
+            if (changed.Id != id) throw new ArgumentException("an app's change may not change its id", nameof(change));
+            if (ReferenceEquals(changed, _items[at])) return changed;
+            var next = new List<RoutedItem>(_items) { [at] = changed };
+            Write(next, verify: false);
+            _items = next;
+            return changed;
+        }
+    }
+
     public bool Remove(string id)
     {
         lock (_gate)

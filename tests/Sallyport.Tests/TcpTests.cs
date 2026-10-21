@@ -271,9 +271,13 @@ internal sealed class FakeSink : IPacketSink
 {
     private ushort _id;
     private readonly List<SentPacket> _pending = [];
+    private readonly List<SentPacket> _all = [];
+    // A writer's continuation sends from the pool while the test drains on its own thread: both under one lock, or a
+    // packet sent between the copy and the clear would be lost to the test.
+    private readonly Lock _gate = new();
 
     /// <summary>Everything ever sent, for counting; <see cref="Drain"/> hands out only what is new.</summary>
-    public List<SentPacket> All { get; } = [];
+    public List<SentPacket> All { get { lock (_gate) return [.. _all]; } }
 
     public void Send(byte[] packet)
     {
@@ -284,17 +288,26 @@ internal sealed class FakeSink : IPacketSink
         Assert.Equal(TcpRig.Remote, header.Destination);
         Assert.True(Tcp.TryRead(packet, header, out var segment), "the connection emitted a packet that is not valid TCP");
         var sent = new SentPacket(packet, segment);
-        All.Add(sent);
-        _pending.Add(sent);
+        lock (_gate)
+        {
+            _all.Add(sent);
+            _pending.Add(sent);
+        }
     }
 
-    public ushort NextIpId() => ++_id;
+    public ushort NextIpId()
+    {
+        lock (_gate) return ++_id;
+    }
 
     public List<SentPacket> Drain()
     {
-        var taken = _pending.ToList();
-        _pending.Clear();
-        return taken;
+        lock (_gate)
+        {
+            var taken = _pending.ToList();
+            _pending.Clear();
+            return taken;
+        }
     }
 }
 

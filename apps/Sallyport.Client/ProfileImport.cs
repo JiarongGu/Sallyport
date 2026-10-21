@@ -22,8 +22,9 @@ internal sealed record SignInValues(string Username, string Password, bool Remem
 internal sealed record ProfileEditValues(string Name, string Username, string Password, bool ChangePassword, bool ForgetPassword,
     bool NeedsLogin = false, bool PasswordSaved = false, bool OwnSettings = false, PolicyValues? Policy = null);
 
-/// <summary>A profile fetched from a link: its text, or that the server wants the person signed in, or why not.</summary>
-internal sealed record Downloaded(string? Text, bool SignIn, string? Why);
+/// <summary>A profile fetched from a link: its text, or that the server wants the person signed in, or why not.
+/// <see cref="From"/>: the address that answered, past any redirect — what the review names as where it came from.</summary>
+internal sealed record Downloaded(string? Text, bool SignIn, string? Why, Uri? From = null);
 
 /// <summary>
 /// Getting a profile from a link (the owner: OpenVPN Connect "has different way to setup profile"). HTTPS only — a
@@ -70,7 +71,7 @@ internal static class ProfileDownload
             buffer.Write(chunk, 0, read);
             if (buffer.Length > Largest) return new(null, false, L.T("{0} sent far more than any profile.", address.Host));
         }
-        return new(Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length), false, null);
+        return new(Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length), false, null, response.RequestMessage?.RequestUri);
     }
 
     /// <summary>A name for what was fetched: the file's own name when the link names one, else the server's.</summary>

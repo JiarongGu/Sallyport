@@ -137,22 +137,16 @@ switch (args.FirstOrDefault())
         foreach (var remote in cutProfile.Remotes)
             try { addresses.AddRange((await Dns.GetHostAddressesAsync(remote.Host, AddressFamily.InterNetwork)).Select(a => a.ToString())); }
             catch (SocketException) { }
-        Firewall("delete rule name=\"Sallyport measurement cut\"");
-        foreach (var direction in new[] { "out", "in" })
-            Firewall($"add rule name=\"Sallyport measurement cut\" dir={direction} action=block protocol=any remoteip={string.Join(',', addresses.Distinct())}");
+        if (!Cut([.. addresses.Distinct()], Now)) return 2;
         Console.WriteLine($"{Now()} CUT: the profile's {addresses.Distinct().Count()} server address(es) blocked both ways for {Option("--for", 30)} s");
         try { await Task.Delay(TimeSpan.FromSeconds(Option("--for", 30))); }
-        finally
-        {
-            Firewall("delete rule name=\"Sallyport measurement cut\"");
-            Console.WriteLine($"{Now()} FREED");
-        }
+        finally { Uncut(Now); }
         return 0;
     }
     case "reset":
         return Reset();
     case "guard":
-        return await GuardAsync(Option("--seconds", 120));
+        return await Guard.RunAsync(Option("--seconds", 120), args.Contains("--may-remove"), internet, Reset, setup);
     default:
         Console.Error.WriteLine("usage: Sallyport.Driver status | fetch | install | uninstall | adapters"
             + " | pass [--seconds N] [--crash-after S] [--batch N] [--mode send|both] | inject [--mode send|both]"
@@ -204,6 +198,14 @@ static void Print(PacketFilterStatus status)
 }
 
 static string Now() => DateTime.Now.ToString("HH:mm:ss.fff");
+
+// What an echo saw — this machine's or the VPN's public address, often with a port — as a measurement may print it
+// (AGENTS.md rule 2: a measurement's output goes into commits).
+static string Echoed(string? text) =>
+    text is null ? "-"
+    : IPEndPoint.TryParse(text, out var endpoint) && text.Contains(':') ? $"{Addresses.Masked(endpoint.Address)}:{endpoint.Port}"
+    : IPAddress.TryParse(text, out var address) ? Addresses.Masked(address)
+    : "(not an address)";
 
 PacketDriver? OpenDriver()
 {
@@ -1333,16 +1335,10 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
             try { addresses.AddRange((await Dns.GetHostAddressesAsync(remote.Host, AddressFamily.InterNetwork)).Select(a => a.ToString())); }
             catch (SocketException) { }
         await Task.Delay(TimeSpan.FromSeconds(cutAfter));
-        Firewall("delete rule name=\"Sallyport measurement cut\"");
-        foreach (var direction in new[] { "out", "in" })
-            Firewall($"add rule name=\"Sallyport measurement cut\" dir={direction} action=block protocol=any remoteip={string.Join(',', addresses.Distinct())}");
+        if (!Cut([.. addresses.Distinct()], () => $"{T()} ")) return;
         Console.WriteLine($"{T()}  CUT: the server's {addresses.Distinct().Count()} address(es) blocked both ways by the firewall for {cutFor} s");
         try { await Task.Delay(TimeSpan.FromSeconds(cutFor)); }
-        finally
-        {
-            Firewall("delete rule name=\"Sallyport measurement cut\"");
-            Console.WriteLine($"{T()}  FREED");
-        }
+        finally { Uncut(() => $"{T()} "); }
     }) : Task.CompletedTask;
     // The second lane's own session of the profile, and its pump.
     RunPump? current1 = null;
@@ -1447,10 +1443,38 @@ async Task<int> ServiceRouteAsync(string? profilePath, int seconds, string? chil
     return 0;
 }
 
-static void Firewall(string arguments)
+static bool Firewall(string arguments)
 {
     using var netsh = Process.Start(new ProcessStartInfo("netsh", "advfirewall firewall " + arguments) { RedirectStandardOutput = true, RedirectStandardError = true })!;
     netsh.WaitForExit();
+    return netsh.ExitCode == 0;
+}
+
+// Blocks the profile's server addresses both ways — an outage the measurement makes — or says it could not (rule 6): a
+// cut that was not made would measure a reconnect after no outage at all.
+static bool Cut(IReadOnlyCollection<string> addresses, Func<string> now)
+{
+    Firewall("delete rule name=\"Sallyport measurement cut\"");
+    if (addresses.Count == 0)
+    {
+        Console.WriteLine($"{now()} CUT NOT MADE: no address of the profile's servers resolved");
+        return false;
+    }
+    foreach (var direction in new[] { "out", "in" })
+        if (!Firewall($"add rule name=\"Sallyport measurement cut\" dir={direction} action=block protocol=any remoteip={string.Join(',', addresses)}"))
+        {
+            Firewall("delete rule name=\"Sallyport measurement cut\"");
+            Console.WriteLine($"{now()} CUT NOT MADE: Windows Firewall refused the rule (this needs administrator)");
+            return false;
+        }
+    return true;
+}
+
+static void Uncut(Func<string> now)
+{
+    Console.WriteLine(Firewall("delete rule name=\"Sallyport measurement cut\"")
+        ? $"{now()} FREED"
+        : $"{now()} THE CUT MAY STILL BE IN PLACE: Windows Firewall did not delete \"Sallyport measurement cut\"; delete it by hand");
 }
 
 // Step 3: the service's front door, as this process meets it — who it says it is, or why it refused.
@@ -1706,7 +1730,7 @@ static async Task ExerciseAsync()
             catch (OperationCanceledException) { }
         }
         times.Sort();
-        Console.WriteLine($"  udp: STUN from local port {((IPEndPoint)udp.LocalEndPoint!).Port}: {times.Count}/5 answered, far end saw {seen ?? "-"},"
+        Console.WriteLine($"  udp: STUN from local port {((IPEndPoint)udp.LocalEndPoint!).Port}: {times.Count}/5 answered, far end saw {Echoed(seen)},"
             + $" round trip p50 {(times.Count > 0 ? times[times.Count / 2] : double.NaN):F1} ms");
     }
 
@@ -1715,7 +1739,7 @@ static async Task ExerciseAsync()
     try
     {
         var body = (await http.GetStringAsync("https://api4.ipify.org")).Trim();
-        Console.WriteLine($"  tcp: HTTPS address echo saw {body} in {Stopwatch.GetElapsedTime(begun).TotalMilliseconds:F0} ms");
+        Console.WriteLine($"  tcp: HTTPS address echo saw {Echoed(body)} in {Stopwatch.GetElapsedTime(begun).TotalMilliseconds:F0} ms");
     }
     catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { Console.WriteLine($"  tcp: HTTPS failed: {e.GetType().Name} {e.Message}"); }
 
@@ -1777,84 +1801,6 @@ int Reset()
     catch (Win32Exception e) { Console.WriteLine($"{Now()} reset: refused, Win32 error {e.NativeErrorCode}"); }
     Console.WriteLine($"{Now()} reset: adapter 0x{adapter.Handle:X} mode {before} -> {driver.Mode(adapter.Handle)}, queue {driver.QueueSize(adapter.Handle)}");
     return 0;
-}
-
-// Outside every interceptor (D13): probes the direct path twice a second and, when it has been dead 3 s, undoes
-// interception — its own handle first, then killing the interceptors (both measured to give the adapter back, gate
-// 1). Removing the driver, also measured to give the network back (D18), only with --may-remove: over a game session
-// the direct path can die for reasons of its own (Wi-Fi), and removal is not undone by the path coming back.
-async Task<int> GuardAsync(int seconds)
-{
-    var mayRemove = args.Contains("--may-remove");
-    var targets = new[] { new IPEndPoint(internet, 443), new IPEndPoint(IPAddress.Parse("8.8.8.8"), 443) };
-    var clock = Stopwatch.StartNew();
-    TimeSpan? deadSince = null;
-    var stage = 0;
-    int rounds = 0, failed = 0;
-    var longest = TimeSpan.Zero;
-    Console.WriteLine($"{Now()} guard: {seconds} s, probing {string.Join(" and ", targets.Select(t => t.ToString()))}");
-    while (clock.Elapsed.TotalSeconds < seconds)
-    {
-        var round = clock.Elapsed;
-        var times = await Task.WhenAll(targets.Select(ProbeAsync));
-        rounds++;
-        var best = times.Where(t => t is not null).Select(t => t!.Value).DefaultIfEmpty(-1).Min();
-        if (best >= 0)
-        {
-            Console.WriteLine($"{Now()} ok {best:F1} ms");
-            if (deadSince is { } since)
-            {
-                var outage = round - since;
-                longest = outage > longest ? outage : longest;
-                Console.WriteLine($"{Now()} guard: direct path back after {outage.TotalSeconds:F1} s");
-            }
-            deadSince = null;
-            stage = 0;
-        }
-        else
-        {
-            failed++;
-            deadSince ??= round;
-            var dead = round - deadSince.Value;
-            Console.WriteLine($"{Now()} FAIL (dead {dead.TotalSeconds:F1} s)");
-            if (stage == 0 && dead >= TimeSpan.FromSeconds(3)) { stage = 1; Reset(); }
-            else if (stage == 1 && dead >= TimeSpan.FromSeconds(8)) { stage = 2; KillInterceptors(); }
-            else if (stage == 2 && mayRemove && dead >= TimeSpan.FromSeconds(18))
-            {
-                stage = 3;
-                Console.WriteLine($"{Now()} guard: removing the driver");
-                Report(await setup.UninstallAsync());
-            }
-        }
-        var wait = TimeSpan.FromMilliseconds(500) - (clock.Elapsed - round);
-        if (wait > TimeSpan.Zero) await Task.Delay(wait);
-    }
-    Console.WriteLine($"{Now()} guard: {rounds} rounds, {failed} failed, longest outage {longest.TotalSeconds:F1} s"
-        + (deadSince is not null ? ", STILL DEAD at the end" : ""));
-    return deadSince is null ? 0 : 1;
-
-    static async Task<double?> ProbeAsync(IPEndPoint target)
-    {
-        using var socket = new Socket(target.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            await socket.ConnectAsync(target, timeout.Token);
-            return Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        }
-        catch (Exception e) when (e is SocketException or OperationCanceledException) { return null; }
-    }
-
-    static void KillInterceptors()
-    {
-        var self = Environment.ProcessId;
-        foreach (var p in Process.GetProcessesByName("Sallyport.Driver").Where(p => p.Id != self))
-        {
-            Console.WriteLine($"{Now()} guard: killing interceptor {p.Id}");
-            try { p.Kill(); } catch (Exception e) when (e is Win32Exception or InvalidOperationException) { }
-        }
-    }
 }
 
 // One tunnel generation's side of a game route: it commits the generation, hands the route what the tunnel returns

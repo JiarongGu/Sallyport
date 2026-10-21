@@ -215,11 +215,28 @@ internal sealed class Updater(UpdateSource source, HttpMessageHandler? handler =
             }
             return held;
         }
+        // No answer, or one that is not the file, is the update unavailable now — said as a check's is (rule 6), never
+        // left as a download still under way.
+        catch (HttpRequestException e)
+        {
+            Discard(partial);
+            throw new UpdateUnavailable(e.StatusCode is { } status ? L.T("the server answered {0}", (int)status) : L.T("no answer ({0})", e.HttpRequestError));
+        }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+        {
+            Discard(partial);
+            throw new UpdateUnavailable(L.T("no answer in time"));
+        }
         catch
         {
-            try { File.Delete(partial); } catch (IOException) { }
+            Discard(partial);
             throw;
         }
+    }
+
+    private static void Discard(string partial)
+    {
+        try { File.Delete(partial); } catch (IOException) { }
     }
 
     private async Task<byte[]> ReadAsync(Uri uri, CancellationToken ct)

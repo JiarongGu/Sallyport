@@ -10,13 +10,32 @@ public sealed class RoutedItemStoreTests : IDisposable
 {
     private static readonly DateTimeOffset At = new(2026, 10, 20, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly string _folder = Path.Combine(Path.GetTempPath(), "sallyport-tests", Guid.NewGuid().ToString("N"));
+    // A folder of its own at the top of %TEMP%: a parent shared with another test assembly, deleted when it looked empty,
+    // refused that one's new folder while its delete was pending.
+    private readonly string _folder = Path.Combine(Path.GetTempPath(), "sallyport-items-tests-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
     {
         if (Directory.Exists(_folder)) Directory.Delete(_folder, recursive: true);
-        try { Directory.Delete(Path.GetDirectoryName(_folder)!); }
-        catch (IOException) { }
+    }
+
+    [Fact]
+    public void A_change_is_made_to_the_app_as_it_is_now_not_to_a_copy_read_before()
+    {
+        var store = Open([Zenless], choices: new Dictionary<string, GameChoice> { [Zenless.Id] = new("ad50a53b0da826ad", LossMode.Stop, null) });
+        store.Update(Zenless.Id, now => now.WithUse("ad50a53b0da826ad", true));
+        // The page's copy, Use VPN on.
+        var read = store.Find(Zenless.Id)!;
+
+        // A lost connection turns its Use VPN off while the person's edit of the page, read before it, is saved.
+        store.Update(Zenless.Id, now => now.WithUse("ad50a53b0da826ad", false));
+        store.Update(Zenless.Id, now => now with { Name = "ZZZ" });
+
+        var after = store.Find(Zenless.Id)!;
+        Assert.True(read.UseOf("ad50a53b0da826ad")!.On);
+        Assert.Equal("ZZZ", after.Name);
+        Assert.False(after.UseOf("ad50a53b0da826ad")!.On);
+        Assert.Null(store.Update("ffffffffffff", now => now));
     }
 
     private static readonly GameProfile Zenless = new("0123456789abcdef", "Zenless Zone Zero", @"E:\Games\ZZZ",

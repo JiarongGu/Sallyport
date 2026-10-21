@@ -94,8 +94,9 @@ internal sealed class MainForm : OptimizedForm
             OnClientReady = _ =>
             {
                 _pageOwnsCaptionButtons = true;
-                // The page asks nothing on load: it is sent what to show, and sent it again after a reload.
-                _core.Publish();
+                // The page asks nothing on load: it is sent what to show, and sent it again after a reload. A page loaded
+                // anew shows no app's own page, so none is watched (D22: while that page is open, and only then).
+                _core.WatchApp(null);
             },
         });
         _tray = new StatusTray(this, core);
@@ -154,6 +155,16 @@ internal sealed class MainForm : OptimizedForm
         try
         {
             await _host.InitializeAsync();
+            // Only Sallyport's own page, served here or (developing) by Vite: a link dropped or followed would put another
+            // page where this one is, sent the whole state and able to send any intent back.
+            _webView.CoreWebView2.NavigationStarting += (_, navigation) =>
+            {
+                if (!Uri.TryCreate(navigation.Uri, UriKind.Absolute, out var to)) navigation.Cancel = true;
+                else if (!(to.Host.Equals(Program.VirtualHost, StringComparison.OrdinalIgnoreCase) || to.IsLoopback && to.Port == Program.DevPort
+                           || to.AbsoluteUri == "about:blank"))
+                    navigation.Cancel = true;
+            };
+            _webView.CoreWebView2.NewWindowRequested += (_, request) => request.Handled = true;
             _bridge.Attach();
             _webView.CoreWebView2.NavigationCompleted += (_, args) =>
             {

@@ -536,7 +536,9 @@ public sealed class ProfileStoreTests : IDisposable
     private static string WithoutBlock(string profile, string tag) =>
         System.Text.RegularExpressions.Regex.Replace(profile, $"<{tag}>.*?</{tag}>", "", System.Text.RegularExpressions.RegexOptions.Singleline);
 
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), "sallyport-tests", Guid.NewGuid().ToString("N"));
+    // A folder of its own at the top of %TEMP%: a parent shared with another test assembly, deleted when it looked empty,
+    // refused that one's new folder while its delete was pending.
+    private readonly string _directory = Path.Combine(Path.GetTempPath(), "sallyport-store-tests-" + Guid.NewGuid().ToString("N"));
     private readonly TestPki _pki = new();
     private readonly byte[] _key = TestKeys.StaticKey();
 
@@ -544,9 +546,6 @@ public sealed class ProfileStoreTests : IDisposable
     {
         _pki.Dispose();
         if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true);
-        // The shared parent too, once the last test is done with it: the tests leave nothing behind.
-        try { Directory.Delete(Path.GetDirectoryName(_directory)!); }
-        catch (IOException) { }
     }
 
     [Fact]

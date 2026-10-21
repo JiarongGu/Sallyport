@@ -3,8 +3,10 @@ using Sallyport;
 using Sallyport.Net;
 using Sallyport.Profile;
 
-// Connects to a real server and says how far it got. Prints nothing secret: no key, no certificate, no host name — the
-// profile is read in place, never copied, and the push reply goes through Redact.
+// Connects to a real server and says how far it got. Prints nothing secret: no key and no profile text — the profile is
+// read in place, never copied, and the push reply goes through Redact. What it does print to name the server — its
+// certificate's subject — and every public address it is told (the egress's above all) is the owner's to mask before a
+// measurement is written down; the addresses it masks itself (A.B.C.x).
 // Exit code: 0 holds, 1 failed (the server answered and refused), 2 unverifiable (no answer, or could not try).
 
 if (args.Length < 1 || args[0].StartsWith("--", StringComparison.Ordinal))
@@ -71,7 +73,7 @@ await using (tunnel)
         {
             var answer = await TunnelDns.QueryAsync(tunnel, server, name, TimeSpan.FromSeconds(10));
             answered++;
-            Console.WriteLine($"{label}: {name} via {server} -> [{string.Join(", ", answer.Addresses)}] rcode {answer.ResponseCode} "
+            Console.WriteLine($"{label}: {name} via {server} -> [{string.Join(", ", answer.Addresses.Select(Addresses.Masked))}] rcode {answer.ResponseCode} "
                 + $"in {answer.Elapsed.TotalMilliseconds:0} ms ({answer.OtherPacketsSkipped} other packet(s) skipped)");
         }
         catch (OperationCanceledException) { Console.WriteLine($"{label}: {name} via {server} -> no answer in 10 s"); }

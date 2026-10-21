@@ -65,7 +65,7 @@ internal static class Phase3
             var clock = Stopwatch.StartNew();
             using var info = JsonDocument.Parse(await http.GetStringAsync("https://ipinfo.io/json"));
             var root = info.RootElement;
-            Console.WriteLine($"ipinfo.io over the tunnel's TCP: {root.GetProperty("ip")} {root.GetProperty("country")} {root.GetProperty("city")} "
+            Console.WriteLine($"ipinfo.io over the tunnel's TCP: {Addresses.Masked(root.GetProperty("ip").GetString())} {root.GetProperty("country")} {root.GetProperty("city")} "
                 + $"({(root.TryGetProperty("org", out var org) ? org : default)}) in {clock.ElapsedMilliseconds} ms");
 
             clock.Restart();
@@ -85,6 +85,12 @@ internal static class Phase3
             }
             Console.WriteLine("outcome: holds — TCP through the tunnel carried TLS and a whole 10 MB download");
             return 0;
+        }
+        // No answer in time says nothing of the tunnel's TCP either way (rule 6): a service on the far side may be down.
+        catch (TaskCanceledException e)
+        {
+            Console.WriteLine($"outcome: unverifiable — no answer in time ({e.Message})");
+            return 2;
         }
         catch (Exception e)
         {
@@ -109,7 +115,7 @@ internal static class Phase3
         var traces = await Task.WhenAll(Enumerable.Range(0, count).Select(i =>
             Task.Run(() => GetAsync(proxy, $"https://{TraceHosts[i % TraceHosts.Length]}/cdn-cgi/trace", keep: true))));
         var wall = clock.Elapsed.TotalSeconds;
-        var egress = traces.Where(t => t.Ip is not null).GroupBy(t => (t.Ip, t.Loc)).Select(g => $"{g.Key.Ip} {g.Key.Loc} ×{g.Count()}").ToList();
+        var egress = traces.Where(t => t.Ip is not null).GroupBy(t => (t.Ip, t.Loc)).Select(g => $"{Addresses.Masked(g.Key.Ip)} {g.Key.Loc} ×{g.Count()}").ToList();
         Console.WriteLine($"concurrent, round 1: {count} connections at once to {Math.Min(count, TraceHosts.Length)} host(s), /cdn-cgi/trace: "
             + $"{traces.Count(t => t.Whole)} answered whole, {traces.Count(t => t.Error is not null)} failed, in {wall:0.0} s "
             + $"({Spread(traces)}); at most {peak.Reset()} through the proxy at once");

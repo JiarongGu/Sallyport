@@ -91,16 +91,16 @@ internal static class Backup
     /// <summary>Every profile's text, or null when the password does not open them.</summary>
     public static IReadOnlyList<(SealedProfile Entry, string Text)>? Open(SealedProfiles profiles, string password)
     {
-        if (!profiles.Sealed) return [.. profiles.Items.Select(e => (e, Encoding.UTF8.GetString(Convert.FromBase64String(e.Sealed))))];
+        if (!profiles.Sealed) return [.. profiles.Items.Select(e => (e, Encoding.UTF8.GetString(Bytes(e.Sealed))))];
         if (profiles.Kdf != "PBKDF2-SHA256" || profiles.Iterations is < 100_000 or > 10_000_000) throw new InvalidDataException("its profiles are sealed in a way this version does not know");
-        var key = Key(password, Convert.FromBase64String(profiles.Salt), profiles.Iterations);
+        var key = Key(password, Bytes(profiles.Salt), profiles.Iterations);
         try
         {
             using var aes = new AesGcm(key, TagSize);
             var opened = new List<(SealedProfile, string)>();
             foreach (var entry in profiles.Items)
             {
-                var sealedBytes = Convert.FromBase64String(entry.Sealed);
+                var sealedBytes = Bytes(entry.Sealed);
                 if (sealedBytes.Length < NonceSize + TagSize) throw new InvalidDataException("a profile in it is cut short");
                 var plain = new byte[sealedBytes.Length - NonceSize - TagSize];
                 try { aes.Decrypt(sealedBytes.AsSpan(0, NonceSize), sealedBytes.AsSpan(NonceSize + TagSize), sealedBytes.AsSpan(NonceSize, TagSize), plain, Bound(entry.Id, entry.Name)); }
@@ -114,6 +114,13 @@ internal static class Backup
     }
 
     private static byte[] Bound(string id, string name) => Encoding.UTF8.GetBytes($"{FormatName}/{Version}/{id}/{name}");
+
+    // A file edited or cut short says so as every other bad file does, not as a format exception of .NET's.
+    private static byte[] Bytes(string base64)
+    {
+        try { return Convert.FromBase64String(base64); }
+        catch (FormatException) { throw new InvalidDataException("a profile in it is cut short"); }
+    }
 
     public static byte[] Write(SealedProfiles? profiles, IReadOnlyList<RoutedItem>? apps, ConnectionPart? connection) =>
         JsonSerializer.SerializeToUtf8Bytes(new BackupFile(FormatName, Version, DateTimeOffset.Now, profiles, apps, connection), Json);

@@ -93,20 +93,21 @@ public sealed partial class LanguageTests
     }
 
     [Theory]
-    [InlineData(null, "en")]
-    [InlineData("en", "en")]
-    [InlineData("zh-Hans", "zh-Hans")]
-    public void The_setting_names_the_language_and_Windows_decides_the_rest(string? setting, string code)
+    [InlineData(null, "en-US", "en")]
+    [InlineData(null, "zh-CN", "zh-Hans")]
+    [InlineData("en", "zh-CN", "en")]
+    [InlineData("zh-Hans", "en-US", "zh-Hans")]
+    public void The_setting_names_the_language_and_Windows_decides_the_rest(string? setting, string windows, string code)
     {
-        var before = L.Current;
+        // Windows' language as the test says, whatever this machine's is (the owner's is Chinese): checked either way.
+        var before = (L.Current, System.Globalization.CultureInfo.CurrentUICulture);
         try
         {
+            System.Globalization.CultureInfo.CurrentUICulture = new System.Globalization.CultureInfo(windows);
             L.Current = L.Resolve(setting);
-            // This machine's own display language is not Chinese, so "follow Windows" is English here.
-            if (setting is null && System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)) return;
             Assert.Equal(code, L.Code);
         }
-        finally { L.Current = before; }
+        finally { (L.Current, System.Globalization.CultureInfo.CurrentUICulture) = before; }
     }
 
     [Fact]

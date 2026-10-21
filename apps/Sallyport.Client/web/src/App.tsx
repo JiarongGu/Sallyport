@@ -31,16 +31,20 @@ export function App() {
   const editorToken = useRef<string | null>(null);
   const navigationRequest = useRef<number | null>(null);
   // A profile dropped anywhere on the window goes to the host as the file itself — WebView2 hands it the path — and never
-  // as its text; the host decides what it is. Without this the window would open the file as a page.
+  // as its text; the host decides what it is. Without this the window would open the file as a page. Anything else
+  // dragged in is refused here, a link above all, which WebView2 would otherwise follow away from this page.
   useEffect(() => {
     let depth = 0;
     const files = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false;
     const enter = (event: DragEvent) => { if (files(event)) { depth++; setDropping(true); } };
-    const over = (event: DragEvent) => { if (files(event)) { event.preventDefault(); event.dataTransfer!.dropEffect = 'copy'; } };
+    const over = (event: DragEvent) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = files(event) ? 'copy' : 'none';
+    };
     const leave = (event: DragEvent) => { if (files(event) && --depth <= 0) { depth = 0; setDropping(false); } };
     const drop = (event: DragEvent) => {
-      if (!files(event)) return;
       event.preventDefault();
+      if (!files(event)) return;
       depth = 0;
       setDropping(false);
       const dropped = [...(event.dataTransfer?.files ?? [])];
@@ -158,10 +162,12 @@ export function App() {
   const profileEdit = shown === 'profiles' && state?.editor?.kind === 'profile-edit' ? state.editor : null;
   const editedProfile = profileEdit ? state?.profiles.find((profile) => profile.id === profileEdit.subjectId) ?? null : null;
   const openApp = shown === 'apps' && !newApp && appPage ? state?.apps.find((app) => app.id === appPage) ?? null : null;
-  // Leaving a view inside a page leaves what was being edited there.
+  // Leaving a view inside a page leaves what was being edited there — Settings' export and import too, which would
+  // otherwise stay open out of sight and refuse a profile dropped on another page.
   const leaveViews = () => {
     const editor = state?.editor;
     if (editor && (editor.kind === 'new-app' || editor.kind === 'new-profile' || editor.kind === 'profile-edit'
+      || editor.kind === 'export' || editor.kind === 'import'
       || ((editor.kind === 'app' || editor.kind === 'program') && appPage)))
       post('CANCEL_EDIT', { token: editor.token });
     setAppPage(null);

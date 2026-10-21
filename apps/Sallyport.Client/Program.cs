@@ -17,6 +17,11 @@ namespace Sallyport.Client;
 //   and each run's router) and setup (the release's file, which installs itself; /uninstall, which removes it).
 internal static class Program
 {
+    /// <summary>The page's own host inside WebView2, and the port Vite serves it on while developing: the only places the
+    /// window navigates to (MainForm).</summary>
+    public const string VirtualHost = "sallyport.local";
+    public const int DevPort = 3920;
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -78,8 +83,8 @@ internal static class Program
             Environment = sp.GetRequiredService<WebViewEnvironmentOptions>(),
             Pipeline = sp.GetRequiredService<WebViewPipeline>(),
             // web/vite.config.ts serves here in development.
-            DevUrl = "http://localhost:3920",
-            VirtualHost = "sallyport.local",
+            DevUrl = $"http://localhost:{DevPort}",
+            VirtualHost = Program.VirtualHost,
             ResourceProvider = sp.GetRequiredService<IWebViewResourceProvider>(),
             ColorScheme = sp.GetService<IColorScheme>(),
             BackgroundColor = Theme.Current().Background,
