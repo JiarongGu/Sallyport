@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-10-21
 
 - Routing an app works from a client that is not elevated (2026-10-21). The client checked the router service by
   opening the service's own process, which Windows lets only the system and elevated administrators do; started
