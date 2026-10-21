@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <!-- The one place the version is written: the release workflow steps it (apps/Sallyport.Setup/version.ps1). -->
-    <Version>0.1.1</Version>
+    <Version>0.1.2</Version>
     <Authors>Jiarong Gu</Authors>
     <!-- What Windows shows of every program, beside each one's own AssemblyTitle (its "File description"). -->
     <Product>Sallyport</Product>

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-10-21
 
 - A full code review (2026-10-21, `docs/design/code-review.md`, D35), and what it fixed that a person would notice:
   - A profile that names its server (`verify-x509-name`) has the name checked; one that checks its server by
