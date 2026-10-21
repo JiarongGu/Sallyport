@@ -9,13 +9,6 @@ owner can give.
 The owner, 2026-10-21: "next session will be a full code review + perpare for nuget release for our core (the MIT
 library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, After 0.1.0.
 
-The owner's reports since, each first:
-- **App updates, from GitHub for now, the address in config.** "we will need to support app update (via github for now)
-  and the address should be able to change in config (so we might use other host in future)". **Done when:** Settings
-  says whether a newer version is out, and updates with one press (download, every file checked against the manifest,
-  setup's elevated apply); the address a setting in `data\`, GitHub's releases by default; measured from a rehearsal
-  release to the installed copy.
-
 1. **A full code review**, before anything is published from it.
    - **Scope:** the library first (`src/Sallyport`: Profile, Protocol, Tunnel, Net, Proxy, Runtime), then
      `src/Sallyport.Windows` (the driver, the router, the service's protocol), then the one program (`apps/Sallyport.Client`
@@ -33,6 +26,8 @@ The owner's reports since, each first:
    - **Its public API:** 46 public types now; decide what is meant to be public (`OvpnProfile`, `Tunnel`, `TunnelOptions`
      and `Login`, `TunnelNetwork`, `Socks5Server`, `TunnelService`, `ProfileStore`…) and make the rest internal; XML docs
      on every public member (CS1591 is suppressed today: lift it for the library); its README's examples compiled.
+   - **Its JSON:** the profile store's records by reflection, which a trimmed build reports (IL2026, D31):
+     source-generated for the package, so that a trimmed or ahead-of-time app can take it.
    - **The package:** repository and project URLs, an icon (the mark), symbols (`.snupkg`) and SourceLink,
      `ContinuousIntegrationBuild` on CI, `EnablePackageValidation` with a baseline from its first version on — as
      Tyanor's `src/Directory.Build.props` does.

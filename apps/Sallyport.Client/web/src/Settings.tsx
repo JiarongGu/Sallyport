@@ -102,6 +102,18 @@ export function Settings({ state, expanded, toggle, moveForm }: {
             </HelpButton>
           </div>
         </div>
+        {/* A newer one, as the version's next line: what is known, and the one press that updates (D34). */}
+        {settings.update && <div className="row-head update-row">
+          <span className="update-status">
+            <span className={settings.update.phase === 'failed' || settings.update.phase === 'unavailable' ? 'location-unavailable' : 'secondary'}
+              role="status">{settings.update.statusText}</span>
+            {settings.update.done !== null && <progress value={settings.update.done} max={1} aria-label={settings.update.statusText} />}
+          </span>
+          <div className="actions">
+            <ActionButton action={settings.update.apply} primary onClick={() => post('APPLY_UPDATE', {})} />
+            <ActionButton action={settings.update.check} onClick={() => post('CHECK_UPDATE', {})} />
+          </div>
+        </div>}
         {settings.uninstall?.visible && <div className="row-head uninstall">
           <p className="secondary">{t('Removes Sallyport from this computer. You choose whether your profiles, apps and settings stay.')}</p>
           <div className="actions"><ActionButton action={settings.uninstall} danger onClick={() => post('UNINSTALL', {})} /></div>

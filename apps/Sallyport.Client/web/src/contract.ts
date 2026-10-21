@@ -225,6 +225,17 @@ export interface SettingsView {
   move: { export: Action; import: Action } | null;
   /** About's Uninstall Sallyport…: setup's removal, for an installed copy only. Posts UNINSTALL. */
   uninstall: Action | null;
+  /** A newer Sallyport (D34), for an installed copy only: check posts CHECK_UPDATE, apply APPLY_UPDATE. */
+  update: UpdateView | null;
+}
+
+/** What is known of a newer Sallyport and what can be done; done, how far a download is (0 to 1). */
+export interface UpdateView {
+  phase: 'unchecked' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'starting' | 'failed' | 'unavailable';
+  statusText: string;
+  check: Action;
+  apply: Action;
+  done: number | null;
 }
 
 /** One program of an app, as its row shows it. */
@@ -526,6 +537,8 @@ export interface Commands {
   SET_START_WITH_WINDOWS: { enabled: boolean };
   SET_LANGUAGE: { language: string };
   UNINSTALL: Record<string, never>;
+  CHECK_UPDATE: Record<string, never>;
+  APPLY_UPDATE: Record<string, never>;
   SET_PROTOCOL: { protocol: string };
   /** The app whose page is open (its programs are looked at while it is), or null when none is. */
   WATCH_APP: { id: string | null };

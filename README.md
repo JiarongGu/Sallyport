@@ -84,9 +84,16 @@ other programs to use.
   **Remember password**.
 - Sallyport talks to nothing but your VPN server, except: NT Kernel's release on GitHub, to download the packet driver
   when you install it (checked against a pinned SHA-256); 1.1.1.1, through the VPN, every 30 seconds while a VPN is
-  connected, to show its latency; ipinfo.io, through the VPN, when you check the exit location; and a link you
-  type to import a profile. There is no telemetry and no account.
+  connected, to show its latency; ipinfo.io, through the VPN, when you check the exit location; GitHub's release
+  API, once a day and when you check for updates, and GitHub's download of a newer Sallyport when you update; and a
+  link you type to import a profile. There is no telemetry and no account.
 - To report a security problem, see [SECURITY.md](SECURITY.md).
+
+## Update
+
+**Settings → About → Check for updates** says whether a newer Sallyport is out (Sallyport also looks once a day and
+says so). **Update to …** downloads it, checks every byte against the release's manifest, and installs it: Sallyport
+closes for a few seconds and opens again. Your profiles, apps and settings are kept.
 
 ## Uninstall
 

@@ -23,7 +23,7 @@ namespace Sallyport.Client;
 /// what may be saved or removed. It never sees a profile's text (D14). Games are run through the router service
 /// (<see cref="GameRunner"/>, docs/design/product.md).
 /// </summary>
-internal sealed class ClientCore
+internal sealed partial class ClientCore
 {
     public const string Module = "CLIENT";
 
@@ -109,6 +109,7 @@ internal sealed class ClientCore
         else if (items.Migrated is { Unreadable: > 0 and var lost })
             Notify(NoticeKind.Warning, L.Count(lost, "Some apps could not be migrated: 1 earlier game file could not be read. It is kept as it was.",
                 "Some apps could not be migrated: {0} earlier game files could not be read. They are kept as they were."));
+        StartUpdates();
     }
 
     public ClientState Snapshot()
@@ -126,7 +127,9 @@ internal sealed class ClientCore
         Changed?.Invoke();
     }
 
-    public void Notify(NoticeKind kind, string text, NoticeSubject? subject = null)
+    /// <summary>A notice; <paramref name="stays"/>, one that waits to be dismissed whatever its kind (an update's outcome,
+    /// said as the window opens: it would otherwise be gone before the page is drawn).</summary>
+    public void Notify(NoticeKind kind, string text, NoticeSubject? subject = null, bool stays = false)
     {
         var notice = new Notice(Interlocked.Increment(ref _noticeIds).ToString(CultureInfo.InvariantCulture), kind, text, subject, DateTimeOffset.Now,
             UiAction.Shown(L.T("Dismiss")));
@@ -136,7 +139,7 @@ internal sealed class ClientCore
             if (_notices.Count > NoticesKept) _notices.RemoveRange(NoticesKept, _notices.Count - NoticesKept);
         }
         // An outcome worth a moment, not a record: it leaves on its own. A warning or an error waits to be dismissed.
-        if (kind == NoticeKind.Info) _ = Task.Delay(InfoNoticeLasts).ContinueWith(_ => Dismiss(notice.Id), TaskScheduler.Default);
+        if (kind == NoticeKind.Info && !stays) _ = Task.Delay(InfoNoticeLasts).ContinueWith(_ => Dismiss(notice.Id), TaskScheduler.Default);
         _events.Emit(Module, "NOTICE", JsonSerializer.SerializeToElement(notice, ClientView.Json));
         Publish();
         Noticed?.Invoke(notice);
@@ -696,6 +699,7 @@ internal sealed class ClientCore
             case "remove-app": RemoveApp(confirmation.SubjectId); break;
             case "driver-install": await ManageDriverAsync(install: true); break;
             case "driver-remove": await ManageDriverAsync(install: false); break;
+            case "update": await ApplyUpdateAsync(); break;
         }
     }
 
@@ -1647,7 +1651,7 @@ internal sealed class ClientCore
                 stored.ToDictionary(p => p.Id, p => _connections.LatencyOf(p.Id)), stored.ToDictionary(p => p.Id, p => _connections.TrafficOf(p.Id)), sections),
             WindowViews.Settings(driver, startsWithWindows, guide, _paths.DataDir, InstallLayout.InstalledHere(),
                 editor is not null, _settings.Language, _settings.Connection,
-                dialog is null ? null : L.T("A file dialog is open."), editor?.Kind is "export" or "import"),
+                dialog is null ? null : L.T("A file dialog is open."), editor?.Kind is "export" or "import", UpdateViewNow()),
             // Where a first look is useful: with nothing to route through yet, the page that imports one; else the Overview,
             // where the switch is.
             stored.Count == 0 ? Page.Profiles : Page.Network,

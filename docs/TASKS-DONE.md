@@ -9,6 +9,8 @@ names has the rest. What a record says could not be checked stays open in `TASKS
 Each was one item of TASKS §0, done in its own commit (newest first), whose message has its measurement on the
 installed copy.
 
+- D34 Updates: Settings → About looks for a newer Sallyport (GitHub, or the host data\update.json names), fetches and
+  checks it against its manifest, and setup applies it; measured 0.1.1 → 0.1.2 → 0.1.3 on the installed copy.
 - D33 The release as a folder too: the installed files zipped, manifest.json of their sizes and SHA-256, checked before
   publishing (verify-release.ps1); the format chosen from the sibling repositories.
 - D32 A small uninstaller beside the program: setup's removal compiled ahead of time, 4.4 MB, in Windows' own dialog.

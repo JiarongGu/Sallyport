@@ -69,6 +69,8 @@ internal sealed class ClientModule(ClientCore core, IEventBus events) : ModuleBa
             "CANCEL_CONFIRMATION" => () => Done(() => core.CancelConfirmation(Token())),
             "COPY_GUIDE_EXAMPLE" => () => Done(core.CopyGuideExample),
             "UNINSTALL" => () => Done(core.Uninstall),
+            "CHECK_UPDATE" => () => core.CheckUpdateAsync(),
+            "APPLY_UPDATE" => core.RequestUpdateAsync,
             "SET_START_WITH_WINDOWS" => () => Done(() => core.SetStartWithWindows(PayloadHelper.GetRequiredValue<bool>(request.Payload, "enabled"))),
             "DISMISS_NOTICE" => () => Done(() => core.Dismiss(Id())),
             _ => throw UnknownType(request),

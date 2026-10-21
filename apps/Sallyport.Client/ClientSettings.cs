@@ -81,6 +81,10 @@ internal sealed class ClientSettings
         public PolicyOverride Connection { get; set; } = new();
         /// <summary>"en", "zh-Hans", or null for Windows' own display language.</summary>
         public string? Language { get; set; }
+        /// <summary>When updates were last looked for (D34): once a day on its own.</summary>
+        public DateTimeOffset? UpdatesCheckedAt { get; set; }
+        /// <summary>The version an update was started for, until a start of this program says whether it came.</summary>
+        public string? UpdatingTo { get; set; }
     }
 
     public ClientSettings(string file)
@@ -108,6 +112,32 @@ internal sealed class ClientSettings
             lock (_gate)
             {
                 _saved.Language = value;
+                Save();
+            }
+        }
+    }
+
+    public DateTimeOffset? UpdatesCheckedAt
+    {
+        get { lock (_gate) return _saved.UpdatesCheckedAt; }
+        set
+        {
+            lock (_gate)
+            {
+                _saved.UpdatesCheckedAt = value;
+                Save();
+            }
+        }
+    }
+
+    public string? UpdatingTo
+    {
+        get { lock (_gate) return _saved.UpdatingTo; }
+        set
+        {
+            lock (_gate)
+            {
+                _saved.UpdatingTo = value;
                 Save();
             }
         }

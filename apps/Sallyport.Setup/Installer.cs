@@ -546,7 +546,7 @@ sealed class Installer
     // Written by the system and administrators only, read and run by users, inherited by everything inside, whatever the
     // drive's own rights would have given it. Owned by Administrators: whoever made the folder first (anyone may, where
     // the drive lets users create folders) keeps no right to change it back.
-    private static void Protect(string folder)
+    internal static void Protect(string folder)
     {
         var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
         var security = new DirectorySecurity();

@@ -31,6 +31,10 @@
   refusing to be read).
 - Uninstalling where a person looks (2026-10-21): the Start menu has a Sallyport folder with Sallyport and Uninstall
   Sallyport, and Settings → About has Uninstall Sallyport…; each opens the removal, as Windows' installed apps do.
+- Updates (2026-10-21, D34): Settings → About says whether a newer Sallyport is out, looked for once a day and when
+  asked, and Update to … downloads it from GitHub's releases, checks it against the release's manifest, and installs it
+  as a quiet upgrade that opens Sallyport again; asked first while apps go through a VPN. Where it looks can be changed
+  in `data\update.json` (another GitHub feed, or any host's `manifest.json`), which only an administrator can change.
 - The release as a folder too (2026-10-21, D33): beside the setup, `Sallyport-<version>-win-x64.zip` (the installed
   folder's files as they are installed) and `manifest.json` (each file's size and SHA-256, and the two downloads'),
   checked against each other before anything is published (`verify-release.ps1`, which also checks a download).

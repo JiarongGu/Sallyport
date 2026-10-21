@@ -949,3 +949,56 @@ Measured 2026-10-21 (a 0.1.1 rehearsal): `Sallyport-0.1.1-win-x64.zip`, 27,807,6
 1,462 bytes; `verify-release.ps1` "verified: Sallyport 0.1.1, 3 files …", and, on a copy whose manifest had
 `WebView2Loader.dll`'s digest changed, "WebView2Loader.dll's SHA-256 in the zip is not the manifest's" (thrown). Not
 measured: the workflow publishing them (it publishes everything `artifacts/release` holds; its next run is the owner's).
+
+## D34 — Updates: the window looks and fetches, the release's manifest checks, setup applies (2026-10-21; measured)
+
+The owner: "we will need to support app update (via github for now) and the address should be able to change in
+config (so we might use other host in future)". The sibling repositories' updaters (D33) apply from a launcher outside
+the app's folder; Sallyport has none, and its setup already swaps the folder and puts it back on failure (D30), so the
+update is the front half of theirs — Yaorin's above all — and setup is the back half.
+
+- **Where it looks** (`UpdateSource`): GitHub's releases of Sallyport (`api.github.com/repos/JiarongGu/Sallyport/
+  releases/latest`) unless `data\update.json` names another — `{"source": "…", "assetHosts": [ … ]}`, another GitHub
+  feed or any host's `manifest.json`, the release's files beside it. In data's own folder, which only administrators can
+  change (its areas are everyone's, D25): what it names is run as administrator. `SALLYPORT_UPDATE_SOURCE` overrides it
+  for one start (a rehearsal). An address and its hosts come from one place, never mixed (Yaorin's lesson); HTTPS only,
+  plain HTTP to this computer alone.
+- **The check** (`Updater.CheckAsync`), as the person, on asking and once a day on its own (a newer one said as a
+  notice): only a version strictly newer than this one, three numbers (a preview is not an update); GitHub's
+  `/latest` (no drafts, no previews), its `manifest.json` and setup taken from that same release's assets — "latest"
+  asked again could be another — the manifest for that version, its setup the size the release says. Three outcomes
+  (rule 6): newer, the newest, or could not be told and why (the server's status, no answer, an answer that is not a
+  release, a release without a manifest, a host not allowed).
+- **The download** (`Updater.DownloadAsync`): redirects followed here, at most six, each hop's host allowed; into
+  `data\cache\updates`, its size kept to the manifest's as it comes and its SHA-256 checked against the setup's and the
+  program's (D33); a file that is not those bytes deleted, never kept; then held open, others reading it and nothing
+  else, from its check until setup has read itself (`--exit` closes this program after that).
+- **The apply**: the setup started through the shell with `/quiet --start-after` — it asks to be administrator, as it
+  does; while apps go through a VPN the window asks first ("Update Sallyport to …?"), as the swap gives them back to
+  the person's own connection until it is open again. **Found by measuring:** the fetched setup is inside the folder it
+  replaces, and a folder a running program is in cannot be moved aside (setup waited its 30 s and gave up, everything
+  left as it was, the window opened again saying the update did not finish). So setup, finding itself inside the
+  install, copies itself to `<folder>.update` (administrators only, as `.new` and `.old`), runs again from there with
+  `--staged`, and the first start ends; the staged run removes its copy once it has exited, and `--start-after` opens
+  Sallyport again as the person (through the shell), done or not.
+- **The outcome, said once**: the version an update was started for is kept (`UpdatingTo`); the next start says
+  "Sallyport is updated to …" (a notice that stays until dismissed: one that leaves on its own was gone before the
+  page was drawn, measured), or that it did not finish and that this is still the version it was.
+
+Not chosen: a signature on the manifest (no sibling app signs; the trust is HTTPS to an allowed host, an address only an
+administrator can change, and the person's own consent at setup's prompt — a signature checked by the program, its key
+compiled in and the private half a repository secret, is the step before an update applied without asking); the
+service applying it (LocalSystem, silent: only with that signature); a delta per file (three files, one of them the
+setup itself).
+
+Measured 2026-10-21 on the owner's machine, from rehearsal packages of this tree: the default source asked of GitHub
+itself — its latest, 0.1.0, older than the installed 0.1.1: "已是最新版本。". A 0.1.2 package served on 127.0.0.1 and named
+by `SALLYPORT_UPDATE_SOURCE`: "Sallyport 0.1.2 已发布。", then 更新到 0.1.2 — the server served manifest.json and the setup
+(200 each); setup ran from the download, ran again from `D:\Program Files\Sallyport.update`, closed the window at 6.0 s,
+the service stopped and running again at 7.6 s, the new window at 13.1 s, the installed program 0.1.2, the copy's
+folder gone a few seconds after. Again 0.1.2 to 0.1.3 in 8 s, the new window saying "Sallyport 已更新到 0.1.3。" and
+keeping it. With jp connected (Zenless's route held) and 0.1.4 offered: "将 Sallyport 更新到 0.1.4？", 暂不 — nothing
+started. Before the fix, the failure: setup gave up after 30 s, 0.1.1 and the service as they were, the window opened
+again saying "更新到 0.1.2 没有完成：当前仍是 0.1.1。…". Not measured: the once-a-day look on its own (it waits for a day
+since the last look, which the measurements made), a machine with UAC on (setup's prompt is the one), a release from
+the workflow (its next run is the owner's), and GitHub's own redirects to its storage (the tests stand them in).

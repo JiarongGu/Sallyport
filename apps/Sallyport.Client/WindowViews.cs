@@ -54,7 +54,7 @@ internal sealed record LanguageView(string Setting, IReadOnlyList<EditorOption> 
 
 internal sealed record SettingsView(DriverView Routing, StartupView Startup, ClientState.GuideView Guide, IReadOnlyList<Fact> About,
     LanguageView Language, ConnectionSettingsView Connection, IReadOnlyList<Fact>? Places = null, MoveView? Move = null,
-    UiAction? Uninstall = null);
+    UiAction? Uninstall = null, UpdateView? Update = null);
 
 /// <summary>Settings' export and import of the profiles, the apps and the connection settings (D26): BEGIN_EXPORT, BEGIN_IMPORT.</summary>
 internal sealed record MoveView(UiAction Export, UiAction Import);
@@ -150,7 +150,7 @@ internal static class WindowViews
 
     public static SettingsView Settings(DriverView routing, bool startsWithWindows, ClientState.GuideView guide, string dataFolder, string? installedIn,
         bool editing, string? languageSetting = null, PolicyOverride? connection = null,
-        string? dialogOpen = null, bool moving = false)
+        string? dialogOpen = null, bool moving = false, UpdateView? update = null)
     {
         // The driver and the service are said once, under Packet routing.
         var about = new List<Fact> { new(L.T("Version"), Version) };
@@ -175,7 +175,7 @@ internal static class WindowViews
                 UiAction.Shown(L.T("Export…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first.")),
                 UiAction.Shown(L.T("Import…"), !editing && dialogOpen is null, dialogOpen ?? L.T("Finish the open edit first."))),
             // Only an installed copy has setup's removal to start; a development build has nothing installed.
-            installedIn is null ? UiAction.Hidden : UiAction.Shown(L.T("Uninstall Sallyport…")));
+            installedIn is null ? UiAction.Hidden : UiAction.Shown(L.T("Uninstall Sallyport…")), update);
     }
 
     /// <summary>The language choice, each named in itself; until the person picks one, the one setup ran in, or Windows'.</summary>

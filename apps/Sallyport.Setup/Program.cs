@@ -4,7 +4,7 @@ using System.Reflection;
 using System.Security.Principal;
 using System.Text;
 
-// Sallyport-<version>-win-x64-setup.exe [/uninstall] [/quiet] [--folder <install folder>] [--payload <folder or zip>]
+// Sallyport-<version>-win-x64-setup.exe [/uninstall] [/quiet [--start-after]] [--folder <install folder>] [--payload <folder or zip>]
 //   [--no-driver] [--remove-data] [--language en|zh-Hans]
 //   Installs Sallyport, or with /uninstall removes it (as Windows' installed-apps list runs it), in the folder chosen (an
 //   update stays where Sallyport is; a first install defaults to Program Files). A window says each step;
@@ -49,7 +49,32 @@ public static class SetupProgram
             return 2;
         }
         var folder = existing ?? asked ?? Installer.DefaultFolder;
-        if (quiet) return RunQuiet(uninstall, choices, payloadArg, folder);
+        // An update the window fetched (D34) is a file inside the folder it replaces (data\cache), and a folder with a
+        // running program in it cannot be moved aside (measured: the swap waited its 30 s and gave up, the install left
+        // as it was). So setup runs again from beside the folder, and this start ends; the window, opened again by that
+        // run (--start-after), says how it went.
+        if (!uninstall && existing is not null && !args.Contains("--staged") && Within(Environment.ProcessPath!, existing))
+            return RunBeside(args, existing, quiet);
+        if (quiet)
+        {
+            var exit = RunQuiet(uninstall, choices, payloadArg, folder);
+            // An update started from Sallyport's window (D34), which this run closed: opened again, as the person and not
+            // as administrator (the shell starts it), whether the install came to an end or not.
+            if (!uninstall && args.Contains("--start-after"))
+                try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{Path.Combine(Installer.ExistingFolder() ?? folder, Installer.Program)}\"") { UseShellExecute = false })?.Dispose(); }
+                catch (System.ComponentModel.Win32Exception) { }
+            // Run from beside the folder (above): its copy and the folder it is in go once it has exited.
+            if (args.Contains("--staged") && Path.GetDirectoryName(Environment.ProcessPath) is { } beside && beside.EndsWith(".update", StringComparison.OrdinalIgnoreCase))
+                try
+                {
+                    Process.Start(new ProcessStartInfo("cmd.exe", $"/d /c ping -n 4 127.0.0.1 >nul & rd /s /q \"{beside}\"")
+                    {
+                        UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+                    })?.Dispose();
+                }
+                catch (System.ComponentModel.Win32Exception) { }
+            return exit;
+        }
 
         Application.EnableVisualStyles();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
@@ -69,6 +94,31 @@ public static class SetupProgram
             folder = existing ?? form.FolderLeft ?? folder;
             choices = form.Choices(choices);
             at = form.Location;
+        }
+    }
+
+    private static bool Within(string path, string folder) =>
+        Path.GetFullPath(path).StartsWith(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    // Copied into <folder>.update, a folder only administrators can change, as setup's .new and .old are, and started
+    // from there with the same arguments; that run removes the copy once it has exited.
+    private static int RunBeside(string[] args, string folder, bool quiet)
+    {
+        var beside = Path.TrimEndingDirectorySeparator(folder) + ".update";
+        try
+        {
+            if (Directory.Exists(beside)) Directory.Delete(beside, recursive: true);
+            Directory.CreateDirectory(beside);
+            Installer.Protect(beside);
+            var copy = Path.Combine(beside, Path.GetFileName(Environment.ProcessPath!));
+            File.Copy(Environment.ProcessPath!, copy);
+            using var again = Process.Start(new ProcessStartInfo(copy, string.Join(" ", args.Append("--staged").Select(Quote))) { UseShellExecute = false });
+            return again is null ? 1 : 0;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            if (quiet) Console.WriteLine(e.Message);
+            return 1;
         }
     }
 
