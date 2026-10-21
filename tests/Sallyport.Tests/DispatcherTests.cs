@@ -46,21 +46,22 @@ public class DispatcherTests
     }
 
     [Theory]
-    [InlineData(6, 40960, TunnelDispatcher.Destination.Proxy)]
-    [InlineData(6, 49151, TunnelDispatcher.Destination.Proxy)]
-    [InlineData(17, 45000, TunnelDispatcher.Destination.Proxy)]
-    [InlineData(6, 49152, TunnelDispatcher.Destination.Router)]
-    [InlineData(17, 50000, TunnelDispatcher.Destination.Router)]
-    [InlineData(6, 40959, TunnelDispatcher.Destination.Router)]
-    public void TCP_and_UDP_go_by_their_destination_port(byte protocol, int port, TunnelDispatcher.Destination expected) =>
-        Assert.Equal(expected, TunnelDispatcher.Classify(Ports(protocol, 443, (ushort)port), Here));
+    [InlineData(6, 40960, "Proxy")]
+    [InlineData(6, 49151, "Proxy")]
+    [InlineData(17, 45000, "Proxy")]
+    [InlineData(6, 49152, "Router")]
+    [InlineData(17, 50000, "Router")]
+    [InlineData(6, 40959, "Router")]
+    // By name: the classifier is internal, and a theory's parameters are on a public method.
+    public void TCP_and_UDP_go_by_their_destination_port(byte protocol, int port, string expected) =>
+        Assert.Equal(expected, TunnelDispatcher.Classify(Ports(protocol, 443, (ushort)port), Here).ToString());
 
     [Theory]
-    [InlineData(3, 6, 41000, TunnelDispatcher.Destination.Proxy)]     // fragmentation needed, for a proxy connection
-    [InlineData(11, 17, 41000, TunnelDispatcher.Destination.Proxy)]   // time exceeded, for the proxy's DNS
-    [InlineData(3, 17, 52000, TunnelDispatcher.Destination.Router)]   // port unreachable, for a routed program
-    public void An_ICMP_error_goes_by_the_source_port_it_quotes(byte type, byte protocol, int port, TunnelDispatcher.Destination expected) =>
-        Assert.Equal(expected, TunnelDispatcher.Classify(IcmpError(type, protocol, (ushort)port), Here));
+    [InlineData(3, 6, 41000, "Proxy")]     // fragmentation needed, for a proxy connection
+    [InlineData(11, 17, 41000, "Proxy")]   // time exceeded, for the proxy's DNS
+    [InlineData(3, 17, 52000, "Router")]   // port unreachable, for a routed program
+    public void An_ICMP_error_goes_by_the_source_port_it_quotes(byte type, byte protocol, int port, string expected) =>
+        Assert.Equal(expected, TunnelDispatcher.Classify(IcmpError(type, protocol, (ushort)port), Here).ToString());
 
     [Fact]
     public void An_echo_reply_and_other_protocols_go_to_the_router() =>

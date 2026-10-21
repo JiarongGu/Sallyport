@@ -36,6 +36,10 @@ public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
     // What connections already forgotten contributed, so the totals do not shrink when one expires.
     private long _closedRetransmits, _closedIn, _closedOutOfOrder, _closedRepeated, _closedAcks;
 
+    /// <summary>A userspace TCP/IP stack on a tunnel opened by <see cref="Tunnel.ConnectAsync(Profile.OvpnProfile, Profile.Remote, TimeSpan, TunnelOptions?, Action{string}?, CancellationToken)"/>,
+    /// for a host that keeps its tunnel up its own way; a <see cref="Runtime.TunnelSession"/> makes one for each of its
+    /// tunnels. It reads <see cref="Tunnel.Packets"/> — be its only reader — unless given <paramref name="inbound"/>.</summary>
+    /// <exception cref="InvalidOperationException">The server pushed no IPv4 address for this client.</exception>
     public TunnelNetwork(Tunnel tunnel, ChannelReader<byte[]>? inbound = null)
     {
         _tunnel = tunnel;
@@ -50,8 +54,10 @@ public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
             Task.Run(() => TickLoopAsync(_stop.Token)));
     }
 
+    /// <summary>This client's address inside the tunnel, as the server pushed it.</summary>
     public IPAddress LocalAddress => _local;
 
+    /// <summary>The stack's connections and segments, since it started.</summary>
     public NetworkCounters Counters
     {
         get
@@ -108,7 +114,8 @@ public sealed class TunnelNetwork : IAsyncDisposable, IPacketSink
 
     void IPacketSink.Send(byte[] packet) => Send(packet);
     private void Send(byte[] packet) => _outbound.Writer.TryWrite(packet);
-    public ushort NextIpId() => (ushort)Interlocked.Increment(ref _ipId);
+    ushort IPacketSink.NextIpId() => NextIpId();
+    private ushort NextIpId() => (ushort)Interlocked.Increment(ref _ipId);
     private static long Clock() => Environment.TickCount64;
 
     private async Task ReadLoopAsync(CancellationToken ct)

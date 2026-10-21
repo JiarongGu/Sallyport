@@ -50,7 +50,7 @@ why), *open* (in TASKS, with why it waits).
 | LB2 | arch. | `Tunnel.cs` holds the handshake and the running tunnel | — | taken: `Protocol/TunnelHandshake.cs`, `Protocol/TlsInbox.cs` |
 | LB3 | arch. | `TcpConnection` mixes reassembly and sending | — | refused for now: L3 and L5 changed it in place; split after the live run |
 | LB4 | arch. | game discovery and the old game store are the Windows app's, in the NuGet package | — | taken: `Sallyport.Windows/Apps`; the observer `net10.0-windows`, the bridge referencing it |
-| LB5 | arch. | measurement helpers in the public surface | — | open: TASKS §0 item 2 (the public API) |
+| LB5 | arch. | measurement helpers in the public surface | — | fixed (D36): `Handshake`, `TunnelDns` and the classifier internal; `PushOptions.Redact` kept public, for a host to show pushed options |
 | LC1–3 | docs | README's preflight; a listening proxy is not a working route; `OtherMessages` may hold a later push | hold | fixed: `src/Sallyport/README.md`, the members' comments |
 
 ## `Sallyport.Windows` — Codex
@@ -165,7 +165,7 @@ why), *open* (in TASKS, with why it waits).
 | TA15 | low | the probe reports a timeout as failed | holds | fixed: unverifiable (2) |
 | TA16 | low | `GameRoute` untested without a driver | holds | open (TASKS §2.10): needs a seam |
 | TB1 | arch. | the Driver's 2,006-line `Program.cs` | — | taken in part: `Guard.cs`; the rest open (TASKS §2.10) |
-| TB2 | arch. | the tools reach into the library's internals | — | open: TASKS §0 item 2 |
+| TB2 | arch. | the tools reach into the library's internals | — | kept (D36): the measuring tools are this repository's, not the package's users; their reach is `InternalsVisibleTo`, nothing public |
 | TB3–7 | arch. | duplicated echo, STUN parsers, a router seam, identity checks in one place, shared test helpers | — | open (TASKS §2.10) |
 | TC1–6 | docs | D13's guard; a stale remedy comment; the probe's own claim; the Driver's usage; temp folders; the service-failure record | hold | fixed: DECISIONS' index, `Guard.cs`, the probe's header, CONTRIBUTING; the usage text open |
 

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Sallyport.Profile;
 
 namespace Sallyport.Runtime;
@@ -10,7 +11,9 @@ namespace Sallyport.Runtime;
 /// is DPAPI for the person (D14), so a copied file opens for no other account and on no other computer.</summary>
 public interface IProfileProtector
 {
+    /// <summary>Seals <paramref name="plain"/>; the store zeroes it afterwards.</summary>
     byte[] Protect(byte[] plain);
+    /// <summary>Opens what <see cref="Protect"/> sealed; throws when it cannot, rather than return something else.</summary>
     byte[] Unprotect(byte[] sealedBytes);
 }
 
@@ -40,12 +43,12 @@ public sealed record LoginState(string? Username, bool PasswordSaved);
 public sealed class ProfileStore
 {
     private const int LongestName = 64;
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly string _directory;
     private readonly IProfileProtector _protector;
     private readonly object _gate = new();
 
+    /// <summary>A store in <paramref name="directory"/>, made if it is not there.</summary>
     public ProfileStore(string directory, IProfileProtector protector)
     {
         _directory = Path.GetFullPath(directory);
@@ -53,6 +56,7 @@ public sealed class ProfileStore
         Directory.CreateDirectory(_directory);
     }
 
+    /// <summary>Every profile held, oldest first; one whose files do not read is left out.</summary>
     public IReadOnlyList<StoredProfile> List()
     {
         lock (_gate)
@@ -62,13 +66,14 @@ public sealed class ProfileStore
             {
                 // An entry whose sealed half is gone, or whose description does not read, is not offered: it could not be used.
                 if (!IsId(Path.GetFileNameWithoutExtension(file)) || !File.Exists(Path.ChangeExtension(file, ".profile"))) continue;
-                try { if (JsonSerializer.Deserialize<StoredProfile>(File.ReadAllBytes(file), Json) is { } entry) found.Add(entry); }
+                try { if (JsonSerializer.Deserialize(File.ReadAllBytes(file), StoreJson.Default.StoredProfile) is { } entry) found.Add(entry); }
                 catch (JsonException) { }
             }
             return [.. found.OrderBy(p => p.Imported)];
         }
     }
 
+    /// <summary>The profile with this id, or null.</summary>
     public StoredProfile? Find(string id) => List().FirstOrDefault(p => p.Id == id);
 
     /// <summary>Keeps a sealed copy of <paramref name="text"/> under <paramref name="name"/>. Throws
@@ -89,7 +94,7 @@ public sealed class ProfileStore
             {
                 // The sealed text first: a description without it is never listed, so a crash in between leaves nothing usable half-made.
                 WriteWhole(FileOf(id, ".profile"), _protector.Protect(plain));
-                WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(entry, Json));
+                WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(entry, StoreJson.Default.StoredProfile));
             }
         }
         finally { CryptographicOperations.ZeroMemory(plain); }
@@ -138,7 +143,7 @@ public sealed class ProfileStore
     public void SetLogin(string id, string username, string? password)
     {
         if (Find(id) is null) throw new FileNotFoundException("no such profile");
-        var plain = JsonSerializer.SerializeToUtf8Bytes(new KeptLogin(username.Trim(), password), Json);
+        var plain = JsonSerializer.SerializeToUtf8Bytes(new KeptLogin(username.Trim(), password), StoreJson.Default.KeptLogin);
         try { lock (_gate) WriteWhole(FileOf(id, ".login"), _protector.Protect(plain)); }
         finally { CryptographicOperations.ZeroMemory(plain); }
     }
@@ -151,7 +156,7 @@ public sealed class ProfileStore
         lock (_gate)
         {
             var renamed = (Find(id) ?? throw new FileNotFoundException("no such profile")) with { Name = name };
-            WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(renamed, Json));
+            WriteWhole(FileOf(id, ".json"), JsonSerializer.SerializeToUtf8Bytes(renamed, StoreJson.Default.StoredProfile));
             return renamed;
         }
     }
@@ -166,16 +171,9 @@ public sealed class ProfileStore
             sealedBytes = File.ReadAllBytes(path);
         }
         var plain = _protector.Unprotect(sealedBytes);
-        try { return JsonSerializer.Deserialize<KeptLogin>(plain, Json); }
+        try { return JsonSerializer.Deserialize(plain, StoreJson.Default.KeptLogin); }
         catch (JsonException) { return null; }
         finally { CryptographicOperations.ZeroMemory(plain); }
-    }
-
-    // A class, not a record: nothing may print the password it holds.
-    private sealed class KeptLogin(string username, string? password)
-    {
-        public string Username { get; } = username;
-        public string? Password { get; } = password;
     }
 
     private static OvpnProfile Read(string text)
@@ -201,6 +199,7 @@ public sealed class ProfileStore
         finally { CryptographicOperations.ZeroMemory(plain); }
     }
 
+    /// <summary>Removes the profile and its kept login; false when the store held no such profile.</summary>
     public bool Remove(string id)
     {
         lock (_gate)
@@ -231,3 +230,17 @@ public sealed class ProfileStore
         File.Move(temporary, path, overwrite: true);
     }
 }
+
+// A class, not a record: nothing may print the password it holds.
+internal sealed class KeptLogin(string username, string? password)
+{
+    public string Username { get; } = username;
+    public string? Password { get; } = password;
+}
+
+// Generated, not reflected: a host may trim the library or compile it ahead of time. The web defaults the store has
+// always written (camelCase names), so files written before read the same.
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
+[JsonSerializable(typeof(StoredProfile))]
+[JsonSerializable(typeof(KeptLogin))]
+internal sealed partial class StoreJson : JsonSerializerContext;

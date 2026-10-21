@@ -116,6 +116,23 @@ commits the version, tags it and drafts the release with the setup, its `.sha256
 notes; it refuses to release on a tag that names another commit, and runs each action by a pinned commit. Rehearse first,
 install the rehearsal's setup, then run it for real.
 
+### The library's package
+
+The library (`src/Sallyport`) is also a NuGet package, with a version of its own in its project, its own
+`src/Sallyport/CHANGELOG.md`, and its own workflow, **NuGet** (`.github/workflows/nuget.yml`, D36): the library's tests
+on Linux and Windows, `dotnet pack` (the package and its symbols, kept as the run's artifact), and — unless it is a
+rehearsal — the push to nuget.org by Trusted Publishing (no API key; nuget.org's policy names `nuget.yml`), the version
+committed and the tag `nuget-v<version>`. It never makes a GitHub release: every installed app updates from the latest
+one. Locally:
+
+```
+powershell -File apps\Sallyport.Setup\version.ps1 -VersionFile src\Sallyport\Sallyport.csproj -ChangelogFile src\Sallyport\CHANGELOG.md -TagPrefix nuget-v -Bump minor
+dotnet pack src\Sallyport -c Release -o artifacts\nuget
+```
+
+Every public member of the library carries an XML comment (the build fails one without), and the library stays
+reflection-free: it is marked trimmable and ahead-of-time compatible, and the analyzers fail what is not.
+
 ## Working with coding agents
 
 [AGENTS.md](AGENTS.md) is the brief every agent works from (Claude Code reads it through `CLAUDE.md`; Codex reads it as

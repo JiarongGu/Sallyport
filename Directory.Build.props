@@ -13,5 +13,7 @@
     <Product>Sallyport</Product>
     <Copyright>Copyright © 2026 Jiarong Gu. MIT License.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- One package, the library (src/Sallyport, nuget.yml): everything else is the app, shipped by release.yml. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 </Project>

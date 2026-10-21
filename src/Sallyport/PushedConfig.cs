@@ -11,19 +11,26 @@ public sealed class PushedConfig
     public IPAddress? Address { get; init; }
     /// <summary>The tunnel subnet's mask under <c>topology subnet</c>; the peer's address under <c>net30</c>/<c>p2p</c>.</summary>
     public IPAddress? IfconfigSecond { get; init; }
+    /// <summary>The pushed <c>topology</c>: <c>net30</c> (the default), <c>subnet</c> or <c>p2p</c>.</summary>
     public string Topology { get; init; } = "net30";
+    /// <summary>The pushed <c>route-gateway</c>, or null.</summary>
     public IPAddress? Gateway { get; init; }
+    /// <summary>The DNS servers pushed (<c>dhcp-option DNS</c>), in order; a session resolves through these.</summary>
     public IReadOnlyList<IPAddress> DnsServers { get; init; } = [];
     /// <summary>Seconds of silence after which to send a keepalive; 0 when none was pushed.</summary>
     public int Ping { get; init; }
     /// <summary>Seconds of silence from the server after which the tunnel is dead; 0 when none was pushed.</summary>
     public int PingRestart { get; init; }
+    /// <summary>The pushed <c>peer-id</c>, which each data packet then carries; null when none was pushed.</summary>
     public uint? PeerId { get; init; }
+    /// <summary>The data channel's cipher, as the server chose it.</summary>
     public string? Cipher { get; init; }
+    /// <summary>The server asked to be told when this client leaves (<c>explicit-exit-notify</c>).</summary>
     public bool ExplicitExitNotify { get; init; }
+    /// <summary>The pushed <c>protocol-flags</c>.</summary>
     public IReadOnlyList<string> ProtocolFlags { get; init; } = [];
 
-    public static PushedConfig Parse(IEnumerable<string> options)
+    internal static PushedConfig Parse(IEnumerable<string> options)
     {
         IPAddress? address = null, second = null, gateway = null;
         var dns = new List<IPAddress>();

@@ -15,9 +15,13 @@ public sealed record ServerName(string Name, string Type);
 /// </summary>
 public sealed class OvpnProfile
 {
+    /// <summary>The servers to try, in the profile's order (<c>remote</c>).</summary>
     public IReadOnlyList<Remote> Remotes { get; init; } = [];
+    /// <summary>The certificate authority that signs the server's certificate (<c>&lt;ca&gt;</c>).</summary>
     public string? CaPem { get; init; }
+    /// <summary>This client's certificate (<c>&lt;cert&gt;</c>), or null for a profile that signs in by password alone.</summary>
     public string? CertPem { get; init; }
+    /// <summary>This client's private key (<c>&lt;key&gt;</c>). Never show or log it.</summary>
     public string? KeyPem { get; init; }
     /// <summary>The 256-byte static key of <c>tls-crypt</c> (v1), or null.</summary>
     public byte[]? TlsCryptKey { get; init; }
@@ -25,11 +29,15 @@ public sealed class OvpnProfile
     public byte[]? TlsAuthKey { get; init; }
     /// <summary>The profile carries a <c>tls-crypt-v2</c> client key — recognised, not yet supported.</summary>
     public bool TlsCryptV2 { get; init; }
+    /// <summary>The profile's <c>cipher</c>, which an older server may still insist on.</summary>
     public string Cipher { get; init; } = "AES-256-CBC";
+    /// <summary>The ciphers the profile offers the server (<c>data-ciphers</c>); empty for the client's own.</summary>
     public IReadOnlyList<string> DataCiphers { get; init; } = [];
+    /// <summary>The profile's <c>auth</c> digest.</summary>
     public string Auth { get; init; } = "SHA1";
     /// <summary>The profile asks for a username and password as well as (or instead of) a certificate.</summary>
     public bool AuthUserPass { get; init; }
+    /// <summary><c>remote-cert-tls server</c>: the server's certificate must be marked for a server.</summary>
     public bool RemoteCertTlsServer { get; init; }
     /// <summary><c>verify-x509-name</c>: the server's certificate must also carry this name; null when the profile names none.</summary>
     public ServerName? VerifyName { get; init; }
@@ -37,12 +45,16 @@ public sealed class OvpnProfile
     /// <c>verify-hash</c>, <c>tls-verify</c>, or a <c>verify-x509-name</c> of another type: such a profile is refused
     /// rather than connected with the check skipped.</summary>
     public string? UnsupportedCheck { get; init; }
+    /// <summary>The profile's <c>dev</c>; only <c>tun</c> is served.</summary>
     public string Dev { get; init; } = "tun";
     /// <summary>The reconnection directives the profile carries, over this client's defaults.</summary>
     public ConnectionPolicy Policy { get; init; } = new();
     /// <summary><c>persist-tun</c>: the profile's author wants nothing to leave outside the tunnel while it reconnects.</summary>
     public bool PersistTun { get; init; }
 
+    /// <summary>Reads a profile's text. Directives this client does not act on are passed over; what it cannot honour
+    /// safely is kept so <see cref="Tunnel.Unsupported(OvpnProfile)"/> can say so.</summary>
+    /// <exception cref="FormatException">A key block is malformed. The message never quotes the text.</exception>
     public static OvpnProfile Parse(string text)
     {
         var remotes = new List<Remote>();

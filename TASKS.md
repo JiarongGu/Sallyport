@@ -17,24 +17,29 @@ library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, Aft
    - **Done when:** the live run — the installed copy on this tree, jp connected, an app through it (TCP and UDP), a
      download through the proxy, the guard beside it, the window's pages opened — recorded in the review's record.
    - **Needs (the owner):** a moment with no game running: the deploy restarts the client and the service.
-2. **`src/Sallyport` on NuGet** as `Sallyport` (free on nuget.org on 2026-10-21, as is `Sallyport.OpenVpn`).
-   - **Its public API:** 46 public types now; decide what is meant to be public (`OvpnProfile`, `Tunnel`, `TunnelOptions`
-     and `Login`, `TunnelNetwork`, `Socks5Server`, `TunnelService`, `ProfileStore`…) and make the rest internal; XML docs
-     on every public member (CS1591 is suppressed today: lift it for the library); its README's examples compiled. The
-     code review's part of it: the measurement helpers in the public surface (`Handshake`, `TunnelDns`, the dispatcher's
-     classification — LB5) and the tools' reach into the internals (`InternalsVisibleTo` Probe and Driver — TB2).
-   - **Its JSON:** the profile store's records by reflection, which a trimmed build reports (IL2026, D31):
-     source-generated for the package, so that a trimmed or ahead-of-time app can take it.
-   - **The package:** repository and project URLs, an icon (the mark), symbols (`.snupkg`) and SourceLink,
-     `ContinuousIntegrationBuild` on CI, `EnablePackageValidation` with a baseline from its first version on — as
-     Tyanor's `src/Directory.Build.props` does.
-   - **Its own version**, apart from the app's (D28's `version.ps1` writes one `<Version>` for everything): where it is
-     written, its own CHANGELOG section, and its first (a preview?).
-   - **Publishing:** a workflow beside `release.yml`, started by hand, a rehearsal by default, NuGet Trusted Publishing
-     (OIDC, `id-token: write`, `NuGet/login@v1`, `--skip-duplicate`) as Tyanor's `release.yml` does.
-   - **Needs (the owner):** a nuget.org account's Trusted Publishing policy for `JiarongGu/Sallyport` and that workflow.
-   - **Done when:** a rehearsal's `.nupkg` and `.snupkg` looked inside (README, XML docs, licence, SourceLink); a sample
-     project on the local package connects to the owner's server (rule 3); then the owner's go.
+2. **`src/Sallyport` on NuGet** as `Sallyport` (free on nuget.org on 2026-10-21, as is `Sallyport.OpenVpn`) —
+   **built, packed and tested; not yet run on GitHub or published** (D36).
+   - **Done:** two workflows (the owner: "we can set 2 pipeline for this release.yml for nuget and another one for the
+     windows build", then "you can have other name if you wish I can update the tursted policy"): `release.yml` stays
+     the app's, `nuget.yml` is the package's — tests on Linux and Windows, pack, and only when not a rehearsal the push by
+     Trusted Publishing, the version commit and the tag `nuget-v<version>`, never a GitHub release (D34). Its own version
+     (0.1.0, in its project; `version.ps1 -VersionFile -ChangelogFile -TagPrefix`) and `src/Sallyport/CHANGELOG.md`.
+     What Kobo asked for an in-process host (the owner: "powerful enough for other library to use like kobo"; kobo-ec's
+     list): a free port reported, `Ready`, `StatusChanged` with reconnects as `reconnecting`, a `Credentials` callback, a
+     `Log`, `CreateHttpHandler`/`ConnectAsync`/`ResolveAsync` through the tunnel, a taken port refused with why. The
+     public surface: the measuring tools' helpers internal (LB5), every public member documented (CS1591 no longer
+     suppressed), `ProfileStore`'s JSON source-generated, trimmable and AOT-compatible. Metadata, icon, Source Link and
+     symbols; `dotnet pack` looked inside (D36).
+   - **Left:** kobo-ec's review of the API (offered before `nuget.yml` is cut); the rehearsal of `nuget.yml` on GitHub,
+     which runs the library's tests on Linux for the first time; `EnablePackageValidation`'s baseline
+     (`PackageValidationBaselineVersion`) once 0.1.0 is out; the Host's `--listen` on port 0 if Kobo keeps the provider
+     process (its stop signal is named by the port, so a free port needs another name). The tools' reach into the
+     internals (TB2) stays: the measuring tools are this repository's, not the package's users.
+   - **Needs (the owner):** the commits pushed (nothing of this session's is); the Trusted Publishing policy for
+     `JiarongGu/Sallyport` pointed at `nuget.yml`; the profile's path, or a run by the owner, for the sample below.
+   - **Done when:** a rehearsal of `nuget.yml` passes on both systems and its `.nupkg` and `.snupkg` are looked inside; a
+     sample project on that package (`TunnelService`, its `Ready` and `CreateHttpHandler`) connects through the owner's
+     server (rule 3); then the owner's go for the real run.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,

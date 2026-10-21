@@ -5,13 +5,13 @@ using System.Security.Cryptography;
 namespace Sallyport.Net;
 
 /// <summary>An answer from a resolver reached through the tunnel.</summary>
-public sealed record DnsAnswer(IReadOnlyList<IPAddress> Addresses, int ResponseCode, TimeSpan Elapsed, int OtherPacketsSkipped);
+internal sealed record DnsAnswer(IReadOnlyList<IPAddress> Addresses, int ResponseCode, TimeSpan Elapsed, int OtherPacketsSkipped);
 
 /// <summary>
 /// One DNS lookup through the tunnel, reading <see cref="Tunnel.Packets"/> itself — so only usable while nothing else
 /// reads them. Phase 2's measurement and a probe's check; the proxy's resolver will share the packets with TCP.
 /// </summary>
-public static class TunnelDns
+internal static class TunnelDns
 {
     public static async Task<DnsAnswer> QueryAsync(Tunnel tunnel, IPAddress server, string name, TimeSpan timeout, CancellationToken ct = default)
     {

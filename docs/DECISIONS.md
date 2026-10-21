@@ -19,7 +19,7 @@ Which still stand (2026-10-21, the code review; how the parts fit now is `docs/d
 | D25 | in part | D30, D32: the install folder holds one program, its loader and the uninstaller |
 | D28 | in part | D33: a release carries the zip and `manifest.json` too |
 | D30 | in part | D32: the uninstall entry starts `uninstall.exe` |
-| D31–D35 | yes | |
+| D31–D36 | yes | |
 
 ## D1 — Written from the protocol, not from OpenVPN's code; MIT (2026-10-12)
 
@@ -1066,3 +1066,42 @@ Measured: every test (550, a junction listed and not entered among them; the ser
 the tests' own CA, connecting for a matching `name`, `name-prefix` and `subject` and refused for another). The live run
 after the review, through the owner's profile: its outcome is the review record's. Not measured: a real server whose
 profile pins its name (whether the owner's does is the profile's, which no agent opens).
+
+## D36 — The library is a package of its own: its version, its changelog, its workflow, and an API for a host in-process (2026-10-21; packed and tested, not yet published)
+
+The owner set up NuGet's Trusted Publishing for this repository and asked for the package in the pipeline, as its own
+pipeline beside the Windows app's, and "powerful enough for another app to use, like Kobo". Kobo ran the library out
+of process (`Sallyport.Host serve`, a status file, a probe of the SOCKS port) and asked, through its own session, for
+what an in-process host needs (TASKS §0 item 2).
+
+- **Two workflows.** `release.yml` stays the Windows app's release (D28, D33, D34: its runs' history and what every
+  installed copy updates from). `nuget.yml` is the package's: started by hand, a rehearsal unless told otherwise, its
+  tests on Linux as well as Windows (the library claims to be no more Windows' than .NET is), its push signed in by
+  Trusted Publishing — no key stored anywhere; the policy on nuget.org names `nuget.yml`. Least privilege: only its
+  publish job holds `id-token: write` and `contents: write`, and it runs only once the tests on both systems and the
+  pack have passed.
+- **Its own version, tag and changelog, and never a GitHub release.** `<Version>` in `src/Sallyport/Sallyport.csproj`
+  (0.1.0 first) over the app's in Directory.Build.props; `src/Sallyport/CHANGELOG.md`; the tag `nuget-v<version>`.
+  `version.ps1` writes either (`-VersionFile`, `-ChangelogFile`, `-TagPrefix`), so the app's and the package's
+  releases step their numbers the same way. A GitHub release of the package's would be the "latest" every installed
+  app reads for its update (D34), so the package makes none.
+- **What a host in-process gets** (Kobo's list): `TunnelService(profile)` with no address takes a free loopback port
+  and reports it (`ProxyEndpoint`, `Status.ProxyPort`) — a fixed port had collided on Kobo's machine; `Ready`, true
+  once the first tunnel is up and the proxy listening, false if the run ends without — in place of probing the port;
+  `StatusChanged`, a reconnect reported as `reconnecting`, never a `stopped` between two `up`s; a port already taken
+  ends the run `refused`, saying so. `TunnelSessionOptions.Credentials`, asked before each connection, so a host keeps
+  the username and password in its own store and a changed password is used at the next reconnect; `Log`, each attempt
+  and handshake step, never a key, a password or a token (a test holds the password and the pushed token out of it).
+  `CreateHttpHandler()`: a `SocketsHttpHandler` whose connections are the tunnel's own TCP and whose names its DNS —
+  the host's own requests with no proxy hop and no DNS leak; `ConnectAsync`, `ResolveAsync` beside it. Cancelling
+  `RunAsync`'s token is stopping; there is no stop command and nothing pins the working directory.
+- **What a package promises.** Every public member documented (the build fails a missing one); what only the
+  measuring tools use made internal (the one-shot handshake, the raw DNS query, the packet classifier); reflection-free
+  (`ProfileStore`'s JSON generated), so it is marked trimmable and ahead-of-time compatible and the analyzers hold it
+  to that; Source Link and symbols (`.snupkg`); the program's icon. No dependency beyond the base class library (rule 4).
+
+Measured on the owner's machine: the solution's tests; `dotnet pack` — the package holds the library, its XML
+documentation, README and icon, no dependency, the repository and commit; the symbols package its PDB; `version.ps1`
+on copies — the package's version dated in its own changelog and the app's untouched, and the reverse. Not yet: a run of
+`nuget.yml` (its rehearsal first, which runs the tests on Linux for the first time), and the live run's use of the
+handler through the owner's profile.

@@ -32,7 +32,9 @@ public sealed record TunnelOptions
     /// <see cref="ConnectionPolicy.PingRestart"/>): a pushed value outranks the client's, as in OpenVPN, unless
     /// <see cref="KeepaliveOverridesServer"/> (its <c>pull-filter ignore</c>).</summary>
     public int? Ping { get; init; }
+    /// <summary>Seconds of silence from the server after which the tunnel is dead, when the server pushes none.</summary>
     public int? PingRestart { get; init; }
+    /// <summary>This client's keepalive outranks the server's pushed one.</summary>
     public bool KeepaliveOverridesServer { get; init; }
     /// <summary>The username and password a profile that asks for them (<c>auth-user-pass</c>) signs in with; every
     /// reconnect of a session signs in with them again.</summary>
@@ -43,9 +45,12 @@ public sealed record TunnelOptions
 /// nothing that prints the options it rides in (a record's own ToString would) may print either.</summary>
 public sealed class Login(string username, string password)
 {
+    /// <summary>The username.</summary>
     public string Username { get; } = username;
+    /// <summary>The password. Never show or log it.</summary>
     public string Password { get; } = password;
 
+    /// <summary>"Login (hidden)", whatever it holds.</summary>
     public override string ToString() => "Login (hidden)";
 }
 
@@ -91,14 +96,20 @@ public sealed class Tunnel : IAsyncDisposable
             _ => Interlocked.Increment(ref _overflowed));
     }
 
+    /// <summary>The remote this tunnel went to.</summary>
     public required Remote Remote { get; init; }
+    /// <summary>The control channel's TLS version, as negotiated.</summary>
     public required string TlsProtocol { get; init; }
+    /// <summary>The control channel's TLS cipher suite, as negotiated.</summary>
     public required string CipherSuite { get; init; }
+    /// <summary>The subject of the server's certificate.</summary>
     public required string ServerSubject { get; init; }
     /// <summary>The options the server pushed, in order. May include <c>auth-token</c> — show them through
     /// <see cref="Sallyport.PushOptions.Redact"/>.</summary>
     public required IReadOnlyList<string> PushOptions { get; init; }
+    /// <summary>What the push reply configured: the address, the DNS servers, the cipher.</summary>
     public required PushedConfig Config { get; init; }
+    /// <summary>How long the handshake took, from the first packet to the data channel.</summary>
     public required TimeSpan ConnectTime { get; init; }
 
     /// <summary>What the tunnel adds to each packet on the path to the server: the outer IPv4 header, the transport's
@@ -117,11 +128,14 @@ public sealed class Tunnel : IAsyncDisposable
     /// <summary>Completes when the tunnel stops: normally on dispose, with <see cref="TunnelEnded"/> otherwise.</summary>
     public Task Completion => _ended.Task;
 
+    /// <summary>Packets, bytes and keepalives each way, and what was refused or lost, since the tunnel came up.</summary>
     public TunnelCounters Counters => new(
         Interlocked.Read(ref _packetsIn), Interlocked.Read(ref _packetsOut), Interlocked.Read(ref _bytesIn), Interlocked.Read(ref _bytesOut),
         Interlocked.Read(ref _pingsIn), Interlocked.Read(ref _pingsOut), Interlocked.Read(ref _rejected), Interlocked.Read(ref _opposite),
         Interlocked.Read(ref _replayed), _channel.Dropped, _data.Missing, _channel.DataOverflowed + Interlocked.Read(ref _overflowed));
 
+    /// <summary>Sends one IPv4 packet through the tunnel.</summary>
+    /// <exception cref="TunnelEnded">The tunnel has stopped.</exception>
     public async ValueTask SendAsync(ReadOnlyMemory<byte> packet, CancellationToken ct = default)
     {
         if (_ended.Task.IsCompleted) throw new TunnelEnded("the tunnel has stopped", _ended.Task.Exception?.InnerException);
@@ -137,6 +151,11 @@ public sealed class Tunnel : IAsyncDisposable
         Volatile.Write(ref _lastSent, Environment.TickCount64);
     }
 
+    /// <summary>Opens one tunnel to <paramref name="remote"/>, once: no retry, no reconnect — a
+    /// <see cref="Runtime.TunnelSession"/> does those. <paramref name="log"/> hears each step of the handshake, never a
+    /// key or a password.</summary>
+    /// <exception cref="HandshakeFailed">It did not come up within <paramref name="timeout"/>, or the server refused;
+    /// <see cref="HandshakeFailed.Stage"/> and <see cref="HandshakeFailed.Outcome"/> say where and how.</exception>
     public static Task<Tunnel> ConnectAsync(OvpnProfile profile, Remote remote, TimeSpan timeout, TunnelOptions? options = null,
         Action<string>? log = null, CancellationToken ct = default) =>
         ConnectAsync(profile, remote, token => Transports.ConnectAsync(remote, token), timeout, options ?? new TunnelOptions(), log, ct);

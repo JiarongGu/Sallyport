@@ -10,25 +10,38 @@ Target: .NET 10 (`net10.0`). Dependencies: none beyond the base class library â€
 
 ## A route for one application
 
-Keep a tunnel up behind a SOCKS5 proxy, reconnecting while it runs; point an application (or a browser, for the sites
-that need it) at the proxy:
+Keep a tunnel up behind a SOCKS5 proxy, reconnecting while it runs, in your own process; point an embedded browser (or
+another program) at the proxy, and send your own requests straight through the tunnel:
 
 ```csharp
-using System.Net;
 using Sallyport;
 using Sallyport.Profile;
 using Sallyport.Runtime;
 
 var profile = OvpnProfile.Parse(File.ReadAllText(path));   // read in place; it holds a private key
-// A profile that asks for a username and password (auth-user-pass) is given them here; without, it is refused.
-var options = new TunnelSessionOptions { Tunnel = new TunnelOptions { Login = new Login(username, password) } };
-await using var service = new TunnelService(profile, new IPEndPoint(IPAddress.Loopback, 1080),
-    status => Console.WriteLine($"{status.State} {status.Remote}"), options);
-await service.RunAsync(stoppingToken);   // ends when the token is cancelled, or the profile cannot be served
+await using var service = new TunnelService(profile, options: new TunnelSessionOptions
+{
+    // Asked before each connection, for a profile that signs in with a username and password (auth-user-pass):
+    // keep them in your own store; a password changed meanwhile is the one the next reconnect uses.
+    Credentials = async ct => new Login(await store.UsernameAsync(ct), await store.PasswordAsync(ct)),
+    Log = line => logger.Write(line),   // each attempt and handshake step; never a key, a password or a token
+});
+service.StatusChanged += status => ShowRoute(status.State, status.Remote, status.LastError);
+var running = service.RunAsync(stoppingToken);   // cancel the token to stop; nothing else to call
+
+if (await service.Ready)   // true once the first tunnel is up and the proxy listening; false if it never came up
+{
+    browser.UseSocksProxy(service.ProxyEndpoint!);   // a free loopback port, chosen when none is given
+    using var http = new HttpClient(service.CreateHttpHandler());   // no proxy hop: the tunnel's TCP and its DNS
+    var exit = await http.GetStringAsync("https://api.ipify.org");
+}
+await running;
 ```
 
-The proxy binds once the first tunnel is up and stays bound across reconnects; between two tunnels it answers
-"network unreachable". `TunnelService.Status` says which.
+The proxy binds once the first tunnel is up and stays bound across reconnects; between two tunnels it, and the
+handler, answer "network down". A reconnect is reported as `reconnecting`, never as a `stopped` between two `up`s.
+When the run ends without ever coming up, `Status.State` is `refused` (the profile, the credentials, or the port
+asked for was taken) or `stopped`, with `LastError` saying why; `Ready` is then false.
 
 ## The tunnel in your own code
 
@@ -48,8 +61,8 @@ the profile's connection policy says (`OvpnProfile.Policy`, overridable through 
 
 ## What it speaks
 
-`tls-crypt` (v1), signing in with a client certificate, a username and password (`auth-user-pass`, given as
-`TunnelOptions.Login`), or both; TLS 1.2/1.3 through `SslStream`, AES-256-GCM / AES-128-GCM data packets (`P_DATA_V2`),
+`tls-crypt` (v1), signing in with a client certificate, a username and password (`auth-user-pass`, asked for through
+`TunnelSessionOptions.Credentials` or given as `TunnelOptions.Login`), or both; TLS 1.2/1.3 through `SslStream`, AES-256-GCM / AES-128-GCM data packets (`P_DATA_V2`),
 keepalive, exit notices; UDP and TCP remotes. The server's certificate must chain to the profile's `<ca>`, be marked
 for server use when the profile says `remote-cert-tls server`, and carry the name the profile gives in
 `verify-x509-name` (`subject`, `name` or `name-prefix`).

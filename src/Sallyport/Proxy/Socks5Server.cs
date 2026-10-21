@@ -18,6 +18,7 @@ public interface IConnector
 /// <summary>Dials with the OS. A baseline and a test double: it does NOT go through any tunnel.</summary>
 public sealed class DirectConnector : IConnector
 {
+    /// <inheritdoc/>
     public async ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken ct)
     {
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -38,6 +39,7 @@ public sealed class DirectConnector : IConnector
 /// end-of-stream on without cutting the reply still on its way back.</summary>
 public interface IHalfClosable
 {
+    /// <summary>Ends the write side (a FIN); the read side stays open for what is still on its way.</summary>
     void ShutdownWrite();
 }
 
@@ -56,6 +58,12 @@ public sealed class Socks5Server : IAsyncDisposable
     private int _active;
     private long _up, _down;
 
+    /// <summary>Binds and listens at once, so the port is known and taken before <see cref="Start"/>.</summary>
+    /// <param name="connector">Where each CONNECT goes: a <see cref="TunnelConnector"/>, or a
+    /// <see cref="Runtime.SessionConnector"/> to follow a session's tunnels.</param>
+    /// <param name="listen">A loopback endpoint; null or port 0, a free port (<see cref="Endpoint"/>).</param>
+    /// <exception cref="ArgumentException"><paramref name="listen"/> is not loopback.</exception>
+    /// <exception cref="SocketException">The endpoint is taken.</exception>
     public Socks5Server(IConnector connector, IPEndPoint? listen = null)
     {
         listen ??= new IPEndPoint(IPAddress.Loopback, 0);
@@ -77,12 +85,14 @@ public sealed class Socks5Server : IAsyncDisposable
     /// operating system bounds the same state for a closed socket; Linux gives it a minute (tcp_fin_timeout).</summary>
     internal TimeSpan HalfClosedSilence { get; init; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>Connections being relayed now.</summary>
     public int ActiveConnections => Volatile.Read(ref _active);
     /// <summary>Bytes relayed client to remote.</summary>
     public long BytesUp => Interlocked.Read(ref _up);
     /// <summary>Bytes relayed remote to client.</summary>
     public long BytesDown => Interlocked.Read(ref _down);
 
+    /// <summary>Starts accepting; a second call does nothing.</summary>
     public void Start() => _accepting ??= Task.Run(AcceptLoopAsync);
 
     private async Task AcceptLoopAsync()
@@ -281,6 +291,7 @@ public sealed class Socks5Server : IAsyncDisposable
         }
     }
 
+    /// <summary>Stops listening and ends every relay.</summary>
     public async ValueTask DisposeAsync()
     {
         await _cts.CancelAsync();

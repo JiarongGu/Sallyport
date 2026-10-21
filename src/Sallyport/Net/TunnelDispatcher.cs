@@ -10,16 +10,22 @@ namespace Sallyport.Net;
 /// </summary>
 public static class TunnelPorts
 {
+    /// <summary>The first of the proxy's local ports.</summary>
     public const int ProxyFirst = 40960;
+    /// <summary>The last of the proxy's local ports, just below the ephemeral range (49152 and up).</summary>
     public const int ProxyLast = 49151;
+    /// <summary>How many local ports the proxy has.</summary>
     public const int ProxyCount = ProxyLast - ProxyFirst + 1;
 
+    /// <summary>Whether <paramref name="port"/> is one of the proxy's, so a router choosing a port for a program of its
+    /// own never takes one.</summary>
     public static bool IsProxy(int port) => port is >= ProxyFirst and <= ProxyLast;
 }
 
 /// <summary>What the router side of a channel takes from its tunnel: every packet that is not the proxy's.</summary>
 public interface ITunnelRoute : IAsyncDisposable
 {
+    /// <summary>One IPv4 packet from the tunnel, on the dispatcher's reading loop: hand it on, never block.</summary>
     void FromTunnel(byte[] packet);
 }
 
@@ -45,7 +51,7 @@ public sealed class TunnelDispatcher : IAsyncDisposable
     private ITunnelRoute? _route;
     private long _toProxy, _toRouter, _unclaimed, _notForUs, _toEcho, _overflowed;
 
-    public TunnelDispatcher(Tunnel tunnel, int generation)
+    internal TunnelDispatcher(Tunnel tunnel, int generation)
     {
         // As the tunnel's own queue is, and for its reason: unbounded here, that one would bound nothing.
         _proxy = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(4096) { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.DropOldest },
@@ -61,7 +67,9 @@ public sealed class TunnelDispatcher : IAsyncDisposable
         _reading = Task.Run(() => ReadAsync(_stop.Token));
     }
 
+    /// <summary>The tunnel whose packets this dispatcher reads.</summary>
     public Tunnel Tunnel { get; }
+    /// <summary>Which of its session's tunnels this is, 1 for the first.</summary>
     public int Generation { get; }
 
     /// <summary>The proxy's userspace TCP and DNS, fed from here.</summary>
@@ -70,6 +78,7 @@ public sealed class TunnelDispatcher : IAsyncDisposable
     /// <summary>The channel's own echoes, for its latency: their answers are claimed here before any other side sees them.</summary>
     public TunnelEcho Echo { get; }
 
+    /// <summary>How many packets went where, since this tunnel came up.</summary>
     public DispatchCounters Counters => new(Interlocked.Read(ref _toProxy), Interlocked.Read(ref _toRouter), Interlocked.Read(ref _unclaimed),
         Interlocked.Read(ref _notForUs), Interlocked.Read(ref _toEcho), Interlocked.Read(ref _overflowed));
 
@@ -120,12 +129,12 @@ public sealed class TunnelDispatcher : IAsyncDisposable
         }
     }
 
-    public enum Destination { NotForUs, Proxy, Router }
+    internal enum Destination { NotForUs, Proxy, Router }
 
     /// <summary>Which side a packet from the tunnel is for, by the IPv4 header's destination, its fragment fields, and
     /// the ports: TCP and UDP their destination port, an ICMP error the source port of the packet it quotes (its IPv4
     /// header, then at least 8 bytes of it: RFC 792).</summary>
-    public static Destination Classify(ReadOnlySpan<byte> packet, uint address)
+    internal static Destination Classify(ReadOnlySpan<byte> packet, uint address)
     {
         if (packet.Length < 20 || packet[0] >> 4 != 4) return Destination.NotForUs;
         var headerLength = (packet[0] & 0x0F) * 4;

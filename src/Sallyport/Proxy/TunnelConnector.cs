@@ -11,6 +11,7 @@ public sealed class TunnelConnector(TunnelNetwork network) : IConnector
     /// <summary>How many of a name's addresses are tried before giving up — enough to step past one dead server.</summary>
     private const int AddressesTried = 3;
 
+    /// <inheritdoc/>
     public async ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken ct)
     {
         var addresses = await network.ResolveAsync(host, ct);

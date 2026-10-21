@@ -2,16 +2,41 @@
 
   <PropertyGroup>
     <RootNamespace>Sallyport</RootNamespace>
-    <Description>An app-scoped, OpenVPN-compatible client in pure .NET: the tunnel lives in the process and ends in a local SOCKS5 proxy. Written from the protocol, not OpenVPN's code. Not affiliated with OpenVPN Inc.</Description>
+    <!-- The package's own version, apart from the app's in Directory.Build.props: nuget.yml steps it (version.ps1
+         -VersionFile), with src/Sallyport/CHANGELOG.md (D36). -->
+    <Version>0.1.0</Version>
+    <Description>An OpenVPN-compatible client in pure .NET: one profile's tunnel inside your process, with a loopback SOCKS5 proxy, an HttpClient handler and DNS through it — no driver, no administrator, no package beyond the base library. Written from the protocol, not OpenVPN's code. Not affiliated with OpenVPN Inc.</Description>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- Reflection-free, so a host may trim it or compile it ahead of time; the analyzers hold it to that. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <IsPackable>true</IsPackable>
     <PackageId>Sallyport</PackageId>
-    <PackageTags>openvpn;vpn;tunnel;socks5;proxy;tcp-ip</PackageTags>
+    <PackageTags>openvpn;vpn;tunnel;socks5;proxy;tcp-ip;httpclient</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageProjectUrl>https://github.com/JiarongGu/Sallyport</PackageProjectUrl>
+    <PackageReleaseNotes>https://github.com/JiarongGu/Sallyport/blob/main/src/Sallyport/CHANGELOG.md</PackageReleaseNotes>
+    <RepositoryUrl>https://github.com/JiarongGu/Sallyport</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- Source Link (in the SDK): the symbols name each file by its commit on GitHub, so a debugger steps into it. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- Deterministic paths in a CI build only: a local build keeps the machine's, for its own debugger. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
+    <!-- Drawn by apps/Sallyport.Client/icon.ps1 with the program's own icon. -->
+    <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>

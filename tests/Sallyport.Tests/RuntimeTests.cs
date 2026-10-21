@@ -21,7 +21,8 @@ internal sealed class ServerFarm(TestPki pki, byte[] key) : IAsyncDisposable
     public int Attempts => Volatile.Read(ref _attempts);
 
     public TunnelSessionOptions Options(OvpnProfile profile, TimeSpan? connectTimeout = null, ConnectionPolicy? policy = null,
-        Func<Tunnel, int, IAsyncDisposable>? consumer = null, Random? random = null) => new()
+        Func<Tunnel, int, IAsyncDisposable>? consumer = null, Random? random = null,
+        Func<CancellationToken, ValueTask<Login?>>? credentials = null, Action<string>? log = null) => new()
     {
         Policy = policy ?? new ConnectionPolicy
         {
@@ -31,13 +32,15 @@ internal sealed class ServerFarm(TestPki pki, byte[] key) : IAsyncDisposable
         },
         Consumer = consumer,
         Random = random ?? Random.Shared,
-        Connect = (remote, timeout, ct) =>
+        Credentials = credentials,
+        Log = log,
+        Connect = (remote, timeout, options, ct) =>
         {
             Connected.Enqueue(remote);
             var (client, server) = MemoryTransport.Pair();
             if (ServerFor(Interlocked.Increment(ref _attempts)) is { } fake)
                 lock (_serving) _serving.Add(fake.RunAsync(server, key, pki.Server, _stop.Token));
-            return Tunnel.ConnectAsync(profile, remote, _ => Task.FromResult<ITransport>(client), timeout, new TunnelOptions(), null, ct);
+            return Tunnel.ConnectAsync(profile, remote, _ => Task.FromResult<ITransport>(client), timeout, options, log, ct);
         },
     };
 
@@ -476,6 +479,96 @@ public class TunnelSessionTests
         // Refused before asking, not by the server: no wrong password to say.
         Assert.False(session.Status.AuthenticationRefused);
         Assert.Equal(0, farm.Attempts);
+        Assert.False(await session.Ready.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task ReadyIsTrueOnceTheFirstTunnelIsUpAndStaysSoThroughAReconnect()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key));
+        var restart = new TaskCompletionSource();
+        await using var farm = new ServerFarm(pki, key) { ServerFor = n => n == 1 ? new FakeServer { RestartWhen = restart } : new FakeServer() };
+        await using var session = new TunnelSession(profile, farm.Options(profile));
+        var log = new StatusLog();
+        session.StatusChanged += log.Add;
+        using var stop = new CancellationTokenSource();
+        var running = session.RunAsync(stop.Token);
+
+        Assert.True(await session.Ready.WaitAsync(TimeSpan.FromSeconds(20)));
+        Assert.Equal(SessionState.Up, session.Status.State);
+        restart.SetResult();
+        await log.WaitAsync(s => s.State == SessionState.Up, count: 2);
+        await stop.CancelAsync();
+        await running;
+
+        Assert.True(await session.Ready);
+    }
+
+    [Fact]
+    public async Task CredentialsAreAskedForBeforeEachConnectionAndNeitherThePasswordNorTheTokenIsLogged()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key) + "\nauth-user-pass\n");
+        var servers = new System.Collections.Concurrent.ConcurrentQueue<FakeServer>();
+        await using var farm = new ServerFarm(pki, key)
+        {
+            ServerFor = _ => { var server = new FakeServer { Accept = ("alex", "right-password") }; servers.Enqueue(server); return server; },
+        };
+        var asked = 0;
+        var lines = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        await using var session = new TunnelSession(profile, farm.Options(profile,
+            credentials: _ => { Interlocked.Increment(ref asked); return ValueTask.FromResult<Login?>(new Login("alex", "right-password")); },
+            log: lines.Enqueue));
+        using var stop = new CancellationTokenSource();
+        var running = session.RunAsync(stop.Token);
+
+        Assert.True(await session.Ready.WaitAsync(TimeSpan.FromSeconds(20)));
+        await stop.CancelAsync();
+        await running;
+
+        Assert.Equal(1, Volatile.Read(ref asked));
+        Assert.True(servers.TryPeek(out var first));
+        Assert.Equal("alex", first.ClientUsername);
+        Assert.Contains(lines, l => l.StartsWith("up udp/1194", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("data channel ready", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, l => l.Contains("right-password", StringComparison.Ordinal) || l.Contains("SESSION-SECRET", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ACredentialsCallbackThatAnswersNothingRefusesTheSessionBeforeAnyConnection()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key) + "\nauth-user-pass\n");
+        await using var farm = new ServerFarm(pki, key);
+        await using var session = new TunnelSession(profile, farm.Options(profile, credentials: _ => ValueTask.FromResult<Login?>(null)));
+
+        await session.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(SessionState.Refused, session.Status.State);
+        Assert.Contains("username and password", session.Status.LastError);
+        Assert.Equal(0, farm.Attempts);
+        Assert.False(await session.Ready);
+    }
+
+    [Fact]
+    public async Task ConnectingThroughASessionWithNoTunnelUpIsNetworkDown()
+    {
+        using var pki = new TestPki();
+        var profile = OvpnProfile.Parse(pki.Profile(TestKeys.StaticKey()));
+        await using var session = new TunnelSession(profile);
+
+        var connect = await Assert.ThrowsAsync<SocketException>(async () => await session.ConnectAsync("example.com", 443));
+        var resolve = await Assert.ThrowsAsync<SocketException>(() => session.ResolveAsync("example.com"));
+        using var client = new HttpClient(session.CreateHttpHandler());
+        var request = await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("http://example.com/"));
+
+        Assert.Equal(SocketError.NetworkDown, connect.SocketErrorCode);
+        Assert.Equal(SocketError.NetworkDown, resolve.SocketErrorCode);
+        Assert.Equal(SocketError.NetworkDown, Assert.IsType<SocketException>(request.InnerException).SocketErrorCode);
     }
 }
 
@@ -489,8 +582,8 @@ public class TunnelServiceTests
         var profile = OvpnProfile.Parse(pki.Profile(key));
         await using var farm = new ServerFarm(pki, key);
         var statuses = new List<TunnelServiceStatus>();
-        await using var service = new TunnelService(profile, new IPEndPoint(IPAddress.Loopback, 0), s => { lock (statuses) statuses.Add(s); },
-            farm.Options(profile));
+        await using var service = new TunnelService(profile, new IPEndPoint(IPAddress.Loopback, 0), farm.Options(profile));
+        service.StatusChanged += s => { lock (statuses) statuses.Add(s); };
         using var stop = new CancellationTokenSource();
         var running = service.RunAsync(stop.Token);
         for (var i = 0; i < 500 && service.Status.State != TunnelServiceStatus.Up; i++) await Task.Delay(20);
@@ -510,6 +603,51 @@ public class TunnelServiceTests
         var json = JsonSerializer.Serialize(up, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         foreach (var name in new[] { "state", "since", "remote", "attempts", "reconnects", "lastError", "address", "openConnections", "bytesUp", "bytesDown", "proxyPort" })
             Assert.Contains($"\"{name}\"", json);
+    }
+
+    [Fact]
+    public async Task WithNoAddressGivenTheProxyTakesAFreeLoopbackPortAndSaysItIsReadyOnceItListens()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key));
+        await using var farm = new ServerFarm(pki, key);
+        await using var service = new TunnelService(profile, options: farm.Options(profile));
+        using var stop = new CancellationTokenSource();
+        var running = service.RunAsync(stop.Token);
+
+        Assert.Null(service.ProxyEndpoint);
+        Assert.True(await service.Ready.WaitAsync(TimeSpan.FromSeconds(20)));
+        var endpoint = service.ProxyEndpoint!;
+        Assert.Equal(IPAddress.Loopback, endpoint.Address);
+        Assert.NotEqual(0, endpoint.Port);
+        Assert.Equal(endpoint.Port, service.Status.ProxyPort);
+        using (var client = new TcpClient()) await client.ConnectAsync(endpoint);
+        await stop.CancelAsync();
+        await running;
+    }
+
+    [Fact]
+    public async Task APortAlreadyTakenRefusesTheRunAndSaysWhy()
+    {
+        using var pki = new TestPki();
+        var key = TestKeys.StaticKey();
+        var profile = OvpnProfile.Parse(pki.Profile(key));
+        var taken = new TcpListener(IPAddress.Loopback, 0);
+        taken.Start();
+        try
+        {
+            await using var farm = new ServerFarm(pki, key);
+            await using var service = new TunnelService(profile, (IPEndPoint)taken.LocalEndpoint, farm.Options(profile));
+
+            await service.RunAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+
+            Assert.Equal(TunnelServiceStatus.Refused, service.Status.State);
+            Assert.Contains("could not listen", service.Status.LastError);
+            Assert.Null(service.ProxyEndpoint);
+            Assert.False(await service.Ready);
+        }
+        finally { taken.Stop(); }
     }
 }
 

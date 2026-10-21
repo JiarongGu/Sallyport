@@ -53,7 +53,8 @@ static async Task<int> ServeAsync(string profilePath, IPEndPoint listen, string?
     var waiting = signal is null ? Task.CompletedTask : Task.Run(() => { signal.WaitOne(); stop.Cancel(); });
 
     var status = new StatusWriter(statusFile);
-    await using var service = new TunnelService(profile, listen, status.Write);
+    await using var service = new TunnelService(profile, listen);
+    service.StatusChanged += status.Write;
     var running = service.RunAsync(stop.Token);
     // The file is refreshed while up, so a reader can tell a live service from one that died without a word.
     while (!running.IsCompleted)

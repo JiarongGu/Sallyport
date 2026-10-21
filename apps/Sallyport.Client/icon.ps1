@@ -46,3 +46,5 @@ for ($i = 0; $i -lt $sizes.Count; $i++) {
 foreach ($frame in $frames) { $writer.Write($frame) }
 $writer.Flush()
 [System.IO.File]::WriteAllBytes((Join-Path $PSScriptRoot 'Sallyport.ico'), $out.ToArray())
+# The library's package shows the same mark on nuget.org, which takes a PNG (128 px is its recommended size).
+[System.IO.File]::WriteAllBytes((Join-Path $PSScriptRoot '..\..\src\Sallyport\icon.png'), $frames[[Array]::IndexOf($sizes, 128)])

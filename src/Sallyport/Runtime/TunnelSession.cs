@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Sockets;
 using Sallyport.Net;
 using Sallyport.Profile;
@@ -7,7 +8,21 @@ namespace Sallyport.Runtime;
 
 /// <summary><see cref="Refused"/>: the profile cannot be served, or the server refused its credentials and the policy
 /// does not retry that. <see cref="GaveUp"/>: the policy's rounds ran out (connect-retry-max).</summary>
-public enum SessionState { Connecting, Up, Reconnecting, Stopped, Refused, GaveUp }
+public enum SessionState
+{
+    /// <summary>Trying the remotes, no tunnel up yet.</summary>
+    Connecting,
+    /// <summary>A tunnel is up.</summary>
+    Up,
+    /// <summary>Was up; connecting again.</summary>
+    Reconnecting,
+    /// <summary>The run ended because its host stopped it.</summary>
+    Stopped,
+    /// <summary>The profile cannot be served, or the server refused the credentials and the policy does not retry that.</summary>
+    Refused,
+    /// <summary>The policy's rounds ran out (<c>connect-retry-max</c>).</summary>
+    GaveUp,
+}
 
 /// <summary>Where a <see cref="TunnelSession"/> is. No secret and no host name — what a status file or a window may
 /// show. <see cref="Remote"/> is the transport and port only; <see cref="BytesIn"/> and <see cref="BytesOut"/> count the
@@ -24,14 +39,27 @@ public sealed class TunnelSessionOptions
 {
     /// <summary>How the tunnel is kept up; null, the profile's own (<see cref="OvpnProfile.Policy"/>).</summary>
     public ConnectionPolicy? Policy { get; init; }
+
+    /// <summary>What each tunnel is opened with; its keepalive is the <see cref="Policy"/>'s.</summary>
     public TunnelOptions Tunnel { get; init; } = new();
+
+    /// <summary>The username and password for a profile that asks for them (<c>auth-user-pass</c>), asked for before
+    /// each connection — so a host keeps them in its own store, never in the profile, and a changed password is used at
+    /// the next reconnect. Null, or an answer of null, falls back to <see cref="TunnelOptions.Login"/>.</summary>
+    public Func<CancellationToken, ValueTask<Login?>>? Credentials { get; init; }
+
+    /// <summary>What the session does, a line at a time: each attempt, each step of a handshake, up, down and why. No
+    /// key, password or profile text is ever in one; a server's own words are quoted short (<c>LastError</c>'s rule).</summary>
+    public Action<string>? Log { get; init; }
+
     /// <summary>What each tunnel's packets go to, given the tunnel and its generation (1 for the first): the one reader
     /// of <see cref="Tunnel.Packets"/>, disposed when that tunnel goes. Null: a <see cref="TunnelDispatcher"/> — the
     /// userspace TCP a proxy dials through (<see cref="TunnelSession.Network"/>), with a packet router attachable beside it
     /// (<see cref="TunnelSession.DispatcherUp"/>).</summary>
     public Func<Tunnel, int, IAsyncDisposable>? Consumer { get; init; }
-    /// <summary>How a tunnel to a remote is opened; tests put an in-process server here.</summary>
-    internal Func<Remote, TimeSpan, CancellationToken, Task<Tunnel>>? Connect { get; init; }
+    /// <summary>How a tunnel to a remote is opened, with the options the session chose for it; tests put an in-process
+    /// server here.</summary>
+    internal Func<Remote, TimeSpan, TunnelOptions, CancellationToken, Task<Tunnel>>? Connect { get; init; }
     /// <summary>The order of remotes under <see cref="ConnectionPolicy.RandomOrder"/>; tests fix it.</summary>
     internal Random Random { get; init; } = Random.Shared;
 }
@@ -58,7 +86,10 @@ public sealed class TunnelSession : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private Task _running = Task.CompletedTask;
     private int _disposed;
+    private readonly TaskCompletionSource<bool> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>A session for <paramref name="profile"/>; nothing is sent until <see cref="RunAsync"/>.</summary>
+    /// <exception cref="ArgumentException">The policy names a transport the profile has no remote for.</exception>
     public TunnelSession(OvpnProfile profile, TunnelSessionOptions? options = null)
     {
         _profile = profile;
@@ -69,6 +100,7 @@ public sealed class TunnelSession : IAsyncDisposable
             throw new ArgumentException($"The profile has no {only} remote.", nameof(options));
     }
 
+    /// <summary>The policy the session keeps its tunnel by: the options', else the profile's.</summary>
     public ConnectionPolicy Policy => _policy;
 
     /// <summary>Raised on every change of state, on the session's own loop; byte counts move between raises, so read
@@ -92,6 +124,7 @@ public sealed class TunnelSession : IAsyncDisposable
     /// <summary>Raised when a consumer threw as it was disposed; the session goes on.</summary>
     public event Action<Exception>? ConsumerFailed;
 
+    /// <summary>Where the session is now, its address and byte counts current.</summary>
     public SessionStatus Status
     {
         get
@@ -108,8 +141,33 @@ public sealed class TunnelSession : IAsyncDisposable
         }
     }
 
+    /// <summary>True once the first tunnel is up — what a host waits for before it uses the session, in place of
+    /// probing a port; false if the run ended without one ever coming up (refused, given up, stopped). A later
+    /// reconnect does not reset it: <see cref="Status"/> says <see cref="SessionState.Reconnecting"/> meanwhile.</summary>
+    public Task<bool> Ready => _ready.Task;
+
     /// <summary>The current tunnel's network, or null while there is none.</summary>
     public TunnelNetwork? Network => _network;
+
+    /// <summary>A TCP connection through the tunnel up now, its name resolved by the tunnel's DNS — neither the lookup
+    /// nor the traffic touches the machine's network. Throws <see cref="SocketException"/> with
+    /// <see cref="SocketError.NetworkDown"/> between two tunnels, and as its connect fails otherwise.</summary>
+    public ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken ct = default) =>
+        new SessionConnector(this).ConnectAsync(host, port, ct);
+
+    /// <summary>A name's addresses through the tunnel's DNS, never the machine's (<see cref="TunnelNetwork.ResolveAsync"/>).</summary>
+    public Task<IReadOnlyList<IPAddress>> ResolveAsync(string name, CancellationToken ct = default) =>
+        _network is { } network ? network.ResolveAsync(name, ct) : Task.FromException<IReadOnlyList<IPAddress>>(new SocketException((int)SocketError.NetworkDown));
+
+    /// <summary>An HTTP handler whose every connection goes through the tunnel up at the time — HTTPS included, its
+    /// TLS end to end over it — and whose every name is resolved through it: an <see cref="HttpClient"/> for one
+    /// profile's route with no proxy in between. Its connections end with their tunnel; the next request opens one
+    /// through the next.</summary>
+    public SocketsHttpHandler CreateHttpHandler() => new()
+    {
+        UseProxy = false,
+        ConnectCallback = async (context, ct) => await ConnectAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port, ct),
+    };
 
     /// <summary>The current tunnel's dispatcher, or null while there is none (or the session has a consumer of its own).</summary>
     public TunnelDispatcher? Dispatcher => _dispatcher;
@@ -129,18 +187,27 @@ public sealed class TunnelSession : IAsyncDisposable
 
     private async Task RunUntilAsync(CancellationToken caller)
     {
+        // Whatever ends the run, a host still waiting for the first tunnel hears that none came.
+        try { await RunRoundsAsync(caller); }
+        finally { _ready.TrySetResult(false); }
+    }
+
+    private const string NoLogin = "the profile asks for a username and password, and none was given";
+
+    private async Task RunRoundsAsync(CancellationToken caller)
+    {
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(caller, _lifetime.Token);
         var ct = lifetime.Token;
         var cannot = _profile.Remotes.Count == 0 ? "the profile names no remote"
             : Tunnel.Unsupported(_profile)
-            ?? (_profile.AuthUserPass && _options.Tunnel.Login is null ? "the profile asks for a username and password, and none was given" : null);
+            ?? (_profile.AuthUserPass && _options.Tunnel.Login is null && _options.Credentials is null ? NoLogin : null);
         if (cannot is not null)
         {
             Report(SessionState.Refused, null, 0, 0, cannot, 0);
             return;
         }
-        var connect = _options.Connect ?? ((remote, timeout, token) => Tunnel.ConnectAsync(_profile, remote, timeout,
-            _options.Tunnel with { Ping = _policy.Ping, PingRestart = _policy.PingRestart, KeepaliveOverridesServer = _policy.KeepaliveOverridesServer }, ct: token));
+        var connect = _options.Connect ?? ((remote, timeout, options, token) => Tunnel.ConnectAsync(_profile, remote, timeout, options, _options.Log, token));
+        var keepalive = _options.Tunnel with { Ping = _policy.Ping, PingRestart = _policy.PingRestart, KeepaliveOverridesServer = _policy.KeepaliveOverridesServer };
         var attempts = 0;
         var reconnects = 0;
         var failedRounds = 0;
@@ -157,9 +224,16 @@ public sealed class TunnelSession : IAsyncDisposable
                     attempts++;
                     // "connecting" until a tunnel has been up once, as Kobo's status file has always said.
                     Report(reconnects == 0 ? SessionState.Connecting : SessionState.Reconnecting, Label(remote), attempts, reconnects, lastError, failedRounds);
+                    // Asked again for each connection: a password changed since the last is the one used.
+                    var login = _profile.AuthUserPass && _options.Credentials is { } ask ? await ask(ct) ?? _options.Tunnel.Login : _options.Tunnel.Login;
+                    if (_profile.AuthUserPass && login is null)
+                    {
+                        Report(SessionState.Refused, null, attempts, reconnects, NoLogin, failedRounds);
+                        return;
+                    }
                     try
                     {
-                        tunnel = await connect(remote, _policy.AttemptTimeout, ct);
+                        tunnel = await connect(remote, _policy.AttemptTimeout, keepalive with { Login = login }, ct);
                         break;
                     }
                     catch (HandshakeFailed e) when (e.Stage == HandshakeStage.Profile)
@@ -204,6 +278,7 @@ public sealed class TunnelSession : IAsyncDisposable
                 }
                 TunnelUp?.Invoke(tunnel, generation);
                 Report(SessionState.Up, Label(tunnel.Remote), attempts, reconnects, null, 0);
+                _ready.TrySetResult(true);
 
                 var authRefused = false;
                 try { await tunnel.Completion.WaitAsync(ct); }
@@ -265,11 +340,14 @@ public sealed class TunnelSession : IAsyncDisposable
         bool authenticationRefused = false)
     {
         _status = new SessionStatus(state, DateTimeOffset.UtcNow, remote, attempts, reconnects, error, null, 0, 0, next, failedRounds, authenticationRefused);
+        _options.Log?.Invoke($"{state.ToString().ToLowerInvariant()}{(remote is null ? "" : $" {remote}")}, attempt {attempts}"
+            + (next is { } at ? $", next round at {at:HH:mm:ss}Z" : "") + (error is null ? "" : $": {error}"));
         StatusChanged?.Invoke(Status);
     }
 
     private static string Label(Remote remote) => $"{remote.Proto}/{remote.Port}";
 
+    /// <summary>Ends the run and takes its tunnel down, telling the server; the session never connects again.</summary>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
@@ -286,6 +364,7 @@ public sealed class TunnelSession : IAsyncDisposable
 /// a SOCKS client hears as "network unreachable".</summary>
 public sealed class SessionConnector(TunnelSession session) : IConnector
 {
+    /// <inheritdoc/>
     public ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken ct) =>
         session.Network is { } network
             ? new TunnelConnector(network).ConnectAsync(host, port, ct)

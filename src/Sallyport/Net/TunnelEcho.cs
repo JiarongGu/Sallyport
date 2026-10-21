@@ -25,7 +25,7 @@ public sealed class TunnelEcho
     private readonly Dictionary<ushort, (long Sent, uint To, TaskCompletionSource<EchoAnswer> Answer)> _outstanding = [];
     private ushort _sequence;
 
-    public TunnelEcho(IPAddress tunnelAddress, Func<byte[], ValueTask> send)
+    internal TunnelEcho(IPAddress tunnelAddress, Func<byte[], ValueTask> send)
     {
         _address = BinaryPrimitives.ReadUInt32BigEndian(tunnelAddress.GetAddressBytes());
         _send = send;
