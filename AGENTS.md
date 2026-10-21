@@ -24,7 +24,8 @@ and tray, its page in `web/`, hosting the next two), `Sallyport.Service` (the ro
 `Sallyport.Uninstall` (the small uninstaller setup writes beside the program, setup's removal compiled ahead of time, D32),
 `Sallyport.Host` (one profile's tunnel and proxy, headless, for another app); `Sallyport.Observer` and `Sallyport.Vpn`
 are the driverless route, kept but not in the product; `tools/Sallyport.Probe` and `tools/Sallyport.Driver` drive a phase
-against a real server; `tests/` one project per area. Decisions: `docs/DECISIONS.md`; designs: `docs/design/`. Work
+against a real server; `tests/` one project per area. How the parts fit now: `docs/design/architecture.md`.
+Decisions: `docs/DECISIONS.md`; designs, each the record of how it was made: `docs/design/`. Work
 left: `TASKS.md` (open items only), and what was finished, with how it was measured, `docs/TASKS-DONE.md`; what each
 version brings: `CHANGELOG.md`, under `## Unreleased` until it ships.
 

@@ -1,5 +1,8 @@
 # Sallyport.Observer
 
+> **Not in the product.** Part of the driverless route (D16), kept for if the packet driver were ever refused (D18,
+> TASKS §2); Sallyport routes games through the driver (`docs/design/architecture.md`).
+
 A Windows, BCL-only endpoint learner. It reads process identity and endpoint metadata; it never reads packet payloads,
 profiles, keys, command lines or game files. It does not launch a game, install routes or start a VPN.
 

@@ -226,7 +226,7 @@ sealed class Supervisor(Log log)
             if (_run == run) End($"the router stopped (exit {ExitCode(run.Worker)})");
     }
 
-    // Twice a second: the client's lease, the worker's life, and — while a run intercepts — the direct path.
+    // Four times a second: the client's lease, the worker's life, and — while a run intercepts — the direct path.
     private async Task WatchAsync(CancellationToken ct)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(250));

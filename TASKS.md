@@ -2,30 +2,27 @@
 
 A finished item moves to `docs/TASKS-DONE.md` with how it was measured (the owner, 2026-10-21: "you should archive all
 completed TASKS"). Work goes top to bottom, one at a time; an item is done when what it says under **Done when** has
-been measured — against the real server where a server is involved (CLAUDE.md rule 3). **Needs** names what only the
+been measured — against the real server where a server is involved (AGENTS.md rule 3). **Needs** names what only the
 owner can give.
 
 ## 0. Next session: a full code review, then the protocol library on NuGet
 The owner, 2026-10-21: "next session will be a full code review + perpare for nuget release for our core (the MIT
 library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, After 0.1.0.
 
-1. **A full code review**, before anything is published from it.
-   - **Scope:** the library first (`src/Sallyport`: Profile, Protocol, Tunnel, Net, Proxy, Runtime), then
-     `src/Sallyport.Windows` (the driver, the router, the service's protocol), then the one program (`apps/Sallyport.Client`
-     with `Sallyport.Service` and `Sallyport.Setup`, D30), then the tests.
-   - **Against:** AGENTS.md's six rules — above all rule 2 (every log line, exception and test failure that could carry a
-     profile's text, a key or a password) and rule 6 (a check that cannot be made said as that); the service's pipe
-     rights and its identity checks (D30's manager-record path, setup's elevated restart and its quoting); the sealed
-     files and the export's password; the router's two threads (tallies and mappings written by one, read by the other);
-     `GameRunner`, `Connections`' poll and its latency checks; handles and `Process` objects let go; error paths.
-   - **How:** as before — Codex read-only audits on briefs in `local/codex/`, one area each, every finding checked against
-     the code before it is acted on, the record saying how it was made.
-   - **Done when:** each finding fixed, refused with its reason, or open here; every test, and a live run (jp, an app
-     through it, the guard) after the fixes.
+1. **A full code review**, before anything is published from it — **done but for its live run.** Seven audits (Codex
+   three, then Claude four when Codex ran out of credits), every finding checked against the code; the record of each
+   and what became of it is `docs/design/code-review.md`, the decisions it made D35. Fixed and refactored in `aeeb9eb`,
+   `993f49d`, `c9f4e04`, `e8f8312`, `bf4a6e7` and the documents' commit; every test passes (550, from 499). Its open
+   findings are below, each where its work belongs.
+   - **Done when:** the live run — the installed copy on this tree, jp connected, an app through it (TCP and UDP), a
+     download through the proxy, the guard beside it, the window's pages opened — recorded in the review's record.
+   - **Needs (the owner):** a moment with no game running: the deploy restarts the client and the service.
 2. **`src/Sallyport` on NuGet** as `Sallyport` (free on nuget.org on 2026-10-21, as is `Sallyport.OpenVpn`).
    - **Its public API:** 46 public types now; decide what is meant to be public (`OvpnProfile`, `Tunnel`, `TunnelOptions`
      and `Login`, `TunnelNetwork`, `Socks5Server`, `TunnelService`, `ProfileStore`…) and make the rest internal; XML docs
-     on every public member (CS1591 is suppressed today: lift it for the library); its README's examples compiled.
+     on every public member (CS1591 is suppressed today: lift it for the library); its README's examples compiled. The
+     code review's part of it: the measurement helpers in the public surface (`Handshake`, `TunnelDns`, the dispatcher's
+     classification — LB5) and the tools' reach into the internals (`InternalsVisibleTo` Probe and Driver — TB2).
    - **Its JSON:** the profile store's records by reflection, which a trimmed build reports (IL2026, D31):
      source-generated for the package, so that a trimmed or ahead-of-time app can take it.
    - **The package:** repository and project URLs, an icon (the mark), symbols (`.snupkg`) and SourceLink,
@@ -68,25 +65,40 @@ is more like openvpn)"*). The app manages the driver. Each step is measured befo
 7. **Zenless through the service:** Run from launch, attach and detach, a real drop under each policy, sleep → the
    game's session and the coverage recorded. **Needs:** the owner, playing.
 8. **The client — `docs/design/window.md`** (the owner: one Apps list, every routing method in one channel per profile;
-   tabs Apps · Network · Profiles · Settings), in its working increments, each with C# view tests and the real window
+   tabs Overview · Apps · Profiles · Settings), in its working increments, each with C# view tests and the real window
    driven through UI Automation. Its increments are measured (above). Not yet: two different servers in one run, and one lane's outage while the
    other's server stays up (8.5, one server exists to measure against); an export taken to another machine and
    imported there (8.8); a real server that asks for a username and password, an Access Server's
    `/rest/GetUserlogin`, and a profile dropped by mouse (8.10).
    - **Done when:** Zenless Zone Zero is an app from its folder, routed by packets while a browser of the same profile
      uses its proxy, through one login; window and tray agree with the service's and the server's evidence.
-9. **Setup:** `apps/Sallyport.Setup`, BCL-only and self-contained, one administrator prompt — the files in the
+   - **From the code review (`docs/design/code-review.md`), open:** a TCP connection never attributed is not counted for
+     the app's check (W7, the rest of it); a service state not known is shown as installed and stopped (CA2); the store's
+     and the export's reasons are English in a Chinese sentence (UA6); an app with no icon of its own shows another's as
+     chosen (UA7); a folder `GameFolder.Scan` could not read is not said (L22); a saved login that does not read shows as
+     not saved (L23); the page's own refactors — a test that the contract's fields agree both ways, `contract.ts` and
+     `ui/Editors.tsx` split, the subject's encoding and the states the page derives sent by the host, the editor views
+     in a class of their own, `saving` and the empty Overview (UB1–9, UC4–5) — each with the window driven through UI
+     Automation, the page having no tests but its type check.
+9. **Setup:** `apps/Sallyport.Setup`, a library the one program runs (D30), one administrator prompt — the files in the
    folder the person chooses (`%ProgramFiles%\Sallyport` unless they choose otherwise; the owner's is on D:, nothing
    of it on C:), its data (service log, setup record, driver installer) in `data` inside it, the service, the driver on
    request, a Start-menu entry, `.ovpn` under Open With, start with Windows per user, the uninstall entry, upgrade in
    place, and removal that leaves the machine as it was (user data only if asked).
    - **Begun 2026-10-20 and installed on the owner's machine since** (D19, D25, D30: `docs/TASKS-DONE.md`, The
-     product). Not yet: removal with D25's keep, a driver install through the installer's hold, an upgrade across
-     versions, an interrupted install, a clean machine.
+     product); upgrades across versions measured (D30, D34). Not yet: removal with D25's keep, a driver install through
+     the installer's hold, an interrupted install and its recovery by the next run (the review's P4), a clean machine.
+     From the code review, open: a removal's cleanup after exit said as done before it is (P11); an unreadable setup
+     record read as "did not install the driver" (P13).
    - **Done when:** install, upgrade, an interrupted install and removal are each measured on a clean machine, the
      network usable throughout. **Needs:** a clean Windows machine or VM.
 10. **The long run:** hours on the real server with outages, and the peer-to-peer harness → bounded memory and
-    handles; NAT and replies right.
+    handles; NAT and replies right. From the code review, open, measured here: a NAT mapping outliving its socket's
+    owner (W4); a UDP endpoint becoming shared keeps its first owner's decision (W6). And the tools: a guard that every
+    intercepting command checks for (TA4); `service-failure` finding the run's worker since D30 (TA5); the Driver's
+    `Program.cs` in its pieces (TB1), its duplicated echo and STUN parsers (TB3–4), its usage text (TC4); tests for the
+    supervisor's refusals (TA10), the replay window's `Missing` (TA13) and `GameRoute` behind a seam (TA16, TB5); one
+    place for the identity checks (TB6) and the tests' shared helpers (TB7).
 
 - The observer (`apps/Sallyport.Observer`) and the VPN package (`apps/Sallyport.Vpn`) are not in the product: they
   stay the driverless route, for if Defender ever refuses the driver (item 1). Hardening the observer (its ETW session
@@ -123,8 +135,8 @@ were seeded instead), Firefox and Electron launches, the dark theme of the new w
 
 ## 5. Phase 4 — the long run (the library)
 Renegotiation (`ControlStream` refuses a soft reset, so a server that renegotiates costs a reconnect; the owner's did
-not in a 75-minute run on 2026-10-13, though OpenVPN's default is hourly), `auth-user-pass`, `tls-auth`, `tls-crypt-v2`
-and `P_DATA_V1` profiles, uploads at volume (the send side has no SACK of its own), and allocation on the receive path
+not in a 75-minute run on 2026-10-13, though OpenVPN's default is hourly), `auth-user-pass` measured against a server
+that asks (written, D29), `tls-auth`, `tls-crypt-v2`, `P_DATA_V1` and fingerprint-pinned profiles (refused, D35), uploads at volume (the send side has no SACK of its own), and allocation on the receive path
 (about 300 MB allocated per 64 MB downloaded, D7; gen 0/1 collections of 5–11 ms now stall the network's single
 reader).
 - **Written but never run against a server:** whether the server acts on the exit notices (`explicit-exit-notify`,
@@ -140,3 +152,6 @@ reader).
   first that updates itself) is out, its record in `docs/TASKS-DONE.md`.
 - **Needs:** a certificate others trust, for the setup and the binaries (until then SmartScreen and UAC show an unknown
   publisher, and peers are checked by install path, not by signature — `docs/design/product.md`, change 2).
+- **The workflow (the code review's P15):** its actions are pinned by commit; the rest is a build job with read rights
+  only and a publishing job with write rights apart from it, so a rehearsal never holds them. **Needs:** a dispatch to
+  measure it.

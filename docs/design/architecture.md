@@ -1,101 +1,109 @@
-# Architecture (2026-10-19, revised)
+# Architecture — how Sallyport fits together now (2026-10-21)
 
-> **Superseded where it disagrees (2026-10-21):** since D18 Sallyport sends an app's packets through NT Kernel's
-> Windows Packet Filter driver and a LocalSystem router service (`product.md`, `router.md`), and since D30 the window,
-> the service and setup are one program (`Sallyport.Client.exe` in its modes). What stands here: the references and
-> the package boundaries.
+The one page that says what is, not what was planned: the projects and what each may know, the processes and the
+accounts they run as, the pipes between them, and what is kept where. Every other page in this folder is the record
+of a design as it was made (its own header says what of it still holds); where one disagrees with this page, this
+page is the code's and that one the history. Why each part is as it is: `docs/DECISIONS.md`.
 
-What Sallyport is now, and what is still open. History: the first version of this page (approved 2026-10-19, D9–D11)
-planned packet routing through WinDivert and a LocalSystem service; Defender blocked WinDivert (D10), Windows' own
-per-app VPN was measured instead (D12) under a guard (D13), and with no privileged part left the client runs the runtime
-itself (D14). Git has the earlier text.
-
-## What the references do
-
-Read for shape, never code (CLAUDE.md rule 1 binds OpenVPN's source; these are cited for structure only).
-
-| Project | Its layers | What Sallyport takes |
-|---|---|---|
-| WireGuard for Windows | a service per tunnel · a manager service brokering for an unelevated UI | the UI never runs elevated; privileged work, if any, lives apart from it |
-| Mullvad VPN | a platform core · a daemon with a management API · CLI and GUI as its clients · a WFP split-tunnel driver | route by executable; DNS made by the system's service cannot be attributed to an app |
-| sing-box / Clash (mihomo) | inbounds (SOCKS, TUN) → rules → outbounds; GUIs drive the core through an API | inbound → router → outbound; process rules |
-| Netch | a process mode on a packet driver; a TUN mode on Wintun | games ignore proxy settings: they are routed per process at the packet level, or not at all |
-| Shenora (own) | one package per engine boundary | a package boundary only where a dependency or a platform differs |
-
-Sources: [WireGuard for Windows](https://git.zx2c4.com/wireguard-windows/about/), [Mullvad win-split-tunnel](https://github.com/mullvad/win-split-tunnel),
-[sing-box route rules](https://sing-box.sagernet.org/configuration/route/rule/), [Netch](https://github.com/NetchX/Netch).
-
-## Packages and applications
+## Projects and what each may know
 
 ```
-src/
-  Sallyport/                 the package everything uses        net10.0, BCL only (rule 4)
-    Profile/                   .ovpn parsing                      public
-    Protocol/                  control + data channel, transports internal — the wire is not an API
-    Tunnel.cs                  IP packets in and out              public
-    Net/                       userspace TCP + DNS over a tunnel  public
-    Proxy/                     SOCKS5 inbound (CONNECT only)      public
-    Runtime/                   TunnelSession (reconnect, remotes  public
-                               in turn, status events),
-                               TunnelService (a session behind a
-                               loopback SOCKS port), ProfileStore
-apps/
-  Sallyport.Host/            Kobo's headless provider: serve|stop one profile on 127.0.0.1:1080, a status file
-  Sallyport.Client/          the tray and window (Shenora 0.21.1, WebView2, frameless), unelevated
-  Sallyport.Vpn/             per-app routing for games: an MSIX holding the VPN plug-in (a loopback relay) and the
-                             bridge (tunnel, relay, guard), test-signed for now (D16)
-tools/
-  Sallyport.Probe/           live measurements against a real server
-tests/
+src/Sallyport             net10.0, BCL only (rule 4)   the protocol library — bound for NuGet
+src/Sallyport.Windows     net10.0-windows               → Sallyport
+apps/Sallyport.Service    library                       → Sallyport.Windows
+apps/Sallyport.Setup      library                       → Sallyport.Windows
+apps/Sallyport.Client     WinExe, Shenora 0.21.1 (D9)   → Sallyport, Sallyport.Windows, Sallyport.Service, Sallyport.Setup
+apps/Sallyport.Uninstall  WinExe, Native AOT (D32)      → Sallyport.Windows; Setup's Installer*.cs, words and ShellLink compiled in
+apps/Sallyport.Host       Exe                           → Sallyport
+tools/Sallyport.Probe     Exe                           → Sallyport
+tools/Sallyport.Driver    Exe                           → Sallyport, Sallyport.Windows
+apps/Sallyport.Observer   Exe, not in the product (D16) → Sallyport.Windows
+apps/Sallyport.Vpn        not in Sallyport.slnx (D16)   the driverless route, kept, not built with the rest
 ```
 
-`Sallyport.Windows` (a package that may carry a driver) does not exist: game routing needs no driver of ours (D16).
+- **`Sallyport`** — `Profile/` (parsing `.ovpn`, the connection policy), `Protocol/` (internal: control channel and its
+  reliability, tls-crypt, key method 2, the data channel, transports, certificates, the handshake), `Tunnel`, `Net/`
+  (IPv4, the userspace TCP, DNS, echoes, the dispatcher that is a tunnel's one reader), `Proxy/` (SOCKS5, CONNECT
+  only), `Runtime/` (`TunnelSession`, `TunnelService`, `ProfileStore`). Nothing in it is Windows' or the app's: a
+  reference from it to either is a mistake. Its internals are visible to its tests and the two tools only.
+- **`Sallyport.Windows`** — what only Windows has: `PacketFilter/` (Windows Packet Filter's interface, its pinned
+  installer), `Routing/` (the router and its NAT, flows, owner tables, the program selection, `GameRoute` across
+  generations), `Service/` (the service's protocol: messages, framing, the pipes' peers, `RouterClient`, `RunPump`,
+  the service manager), `Apps/` (a game folder's programs, the earlier game store read to migrate it), `InstallLayout`.
+- **The one program (D30)** — `Sallyport.Client.exe` is the window, the service and setup: `Program.Main` hands
+  `--service` to `Sallyport.Service`, a file name holding "setup" (or `/uninstall`, `--setup`) to `Sallyport.Setup`,
+  and anything else to the window. The window's host (`ClientCore` and its views, D15) decides every word and action;
+  the page (`web/`, React, embedded) only shows them.
 
-## The client
+## Processes and accounts
 
-One process per signed-in user (a second start hands its arguments to the first and leaves).
+| Process | Started as | Account, session | Holds |
+|---|---|---|---|
+| The window and tray | `Sallyport.Client.exe` (`--tray` at sign-in, the user's Run key) | the person, their session; one per session (`Local\Sallyport.Client`, a later start handing its arguments over pipe `Sallyport.Client.<session>`) | every profile's tunnel (`TunnelSession`, one per connected profile, its SOCKS5 proxy on a free loopback port), the sealed profiles opened only to connect |
+| The supervisor | `--service`, by the service manager (service `Sallyport`, automatic, restarted 1, 5 and 30 s after a failure) | LocalSystem, session 0 | the control pipe, one run on the machine, the direct-path guard (D13: 1.1.1.1 and 8.8.8.8 on 443, four times a second while a run intercepts) |
+| A run's worker | `--service worker <run> <client pid>`, by the supervisor, in a job object that dies with it, high priority | LocalSystem, session 0 | the packet driver, the router; its own pipe |
+| Setup | the release's file, or `/uninstall`, or `--setup` | elevates itself (`runas`), one prompt; an update run from inside the folder reruns from `<folder>.update` (`--staged`) | the install folder, the service's registration, the driver's install |
+| The uninstaller | `uninstall.exe` beside the program | administrator (its manifest) | setup's removal |
+| The host | `Sallyport.Host serve|stop`, by another app (Kobo) | whoever starts it | one profile's tunnel and proxy, a status file |
 
-- **Profiles** are imported as copies into `%LOCALAPPDATA%\Sallyport\profiles`, sealed with DPAPI for the user (D14).
-  A profile is opened only to connect it.
-- **Connections**: a `TunnelService` per connected profile, in this process, each on its own loopback SOCKS5 port,
-  a free one Windows gives when the tunnel comes up (D20). The port is bound only once the tunnel is up, so "the port
-  answers" means "the route works". Exit tells each server.
-- **Apps** are started through a profile's port, each family the way it listens (`AppLauncher`): Chromium browsers with
-  a profile of their own and the proxy, host-resolver and WebRTC flags; Electron apps with the flags; Firefox with a
-  profile whose `user.js` sets SOCKS5 and remote DNS; anything else with `ALL_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY` as
-  `socks5h://`.
-- **The window is for display.** The host owns state and every decision: it pushes `CLIENT.STATE` (the whole view
-  model) on the ready handshake and on every change, and `CLIENT.NOTICE` for each outcome; the page posts intents that
-  answer nothing. The page's look is `docs/design/client-ui.md`.
-- **The tray** shows the state in its icon's colour (grey nothing, amber connecting, green up, red failed) and offers
-  each profile and app; it repeats a notice as a balloon only while the window is out of sight.
+The tunnel never runs as the system: OpenVPN and TLS stay in the person's process (router design, change 1); only IP
+packets cross to the worker.
 
-## Routing
+## The pipes
 
-**Proxy mode — what exists.** Applications that honour a proxy, through the SOCKS5 inbound and the userspace TCP. TCP
-only: the proxy implements CONNECT, not UDP ASSOCIATE.
+Both carry frames: a 4-byte little-endian length, a 1-byte kind, the payload — a control message as JSON, or a packet
+(its 4-byte generation, lane in the top byte, then the IP packet) — at most 70,000 bytes; both sides speak protocol
+version 5 exactly. The DACL on both: LocalSystem full, interactive users read and write (not create), the network
+denied. No profile, key or credential crosses either.
 
-**Packet mode — for games (D12, D16).** Games ignore proxies. Windows' own per-app VPN carries them: the VPN plug-in
-is given the listed programs' IP packets for the listed prefixes, and relays each over loopback to the bridge, which
-runs the OpenVPN tunnel and relays the replies back. TCP and UDP alike, measured. The plug-in holds no key; the bridge,
-a full-trust process in the same package, holds the tunnel and guards the direct path (D13).
+- **`\\.\pipe\Sallyport.Router.v1`**, made by the supervisor with `FILE_FLAG_FIRST_PIPE_INSTANCE` — nothing can hold the
+  name before it. A peer is refused unless Windows says it is in a person's session (not 0), not the system, and runs
+  an executable in the service's own folder (writable by administrators only, product design change 2). Messages:
+  Hello → Welcome; PrepareRun → RunPrepared or Rejected; Heartbeat every second (the lease is 3 s); StopRun; RunEnded.
+- **`\\.\pipe\Sallyport.Router.v1.run.<run>`**, made by the worker for the one client the run was prepared for (its
+  process id, from Windows). Attach → Attached; CommitGeneration, RetireGeneration and SelectPrograms from the client;
+  RouteState every second from the worker; packet frames both ways.
+- **The client's check of the service:** the pipe's server process against the service manager's record — the
+  service's process, its account (LocalSystem) and executable (the install folder's) — which a person may read where
+  the service's own process is closed to them (D30).
+- **What the worker routes:** the programs of the run — by full path, never one of Sallyport's own — and only processes
+  in the session of the client the run is for (the supervisor passes it from Windows).
+- **Not checked until Sallyport is signed:** publishers. A peer is trusted by account, session and install folder.
+
+## What is kept where
+
+All of it in the install folder (D19, D25), `C:\Program Files\Sallyport` unless the person chose another:
 
 ```
-game.exe ──(app filter: its path; routes: its prefixes)──▶ Windows' VPN interface ──▶ plug-in (AppContainer)
-   ▲                                                                                     │ one datagram per packet,
-   └──────────────────────── replies, the same way back ◀──── bridge ◀── 127.0.0.1 ◀─────┘ token-checked
-                                                                 │
-                                                                 └── Sallyport tunnel ── OpenVPN server
+Sallyport.Client.exe, WebView2Loader.dll, uninstall.exe    administrators write, users read and run
+data\                                                       the machine's part, administrators write
+  setup.json, language, update.json (optional)              setup's record, the language setup ran in, where updates come from
+  logs\                                                     setup.log, service.log (public addresses masked)
+  drivers\                                                  setup's copy of the driver's pinned installer
+  profiles\  config\  library\  apps\  cache\               the shared areas: every user of the computer reads and writes them
 ```
 
-The routes must be the game's own prefixes: a default route takes the whole machine whatever the app filter says
-(D12), and while a prefix is routed only the listed programs reach it. So what is open is which prefixes a game needs
-(known, or learned from its own connections), and the bridge's place in the client (`TASKS.md`).
+- **profiles** — each imported profile sealed by DPAPI for the Windows account that imported it, its description beside
+  it (name, transports, never its servers' names), its sign-in sealed the same way when kept.
+- **config** — Settings (`client.json`), the window's place; **library** — the apps; **apps** — each browser's own
+  profile folder; **cache** — what can be made again (WebView2's, the driver's installer, an update's download).
+- Kept by a removal unless the person says otherwise: profiles, config, library, apps.
+- Earlier installs' own folders per user (`users\<SID>`) and games (`games`) are moved in or migrated once.
+- The driver's own files go beside the install folder (`<parent>\Windows Packet Filter`); the driver itself where
+  Windows keeps drivers.
+- A development build keeps its data in `%LOCALAPPDATA%\Sallyport`, apart from an installed copy's.
 
-## Order of work
+## What talks to what
 
-1. ~~Restructure~~, ~~runtime~~ (done).
-2. **Client, proxy mode** — profiles, connections, apps, tray; measured against the real server.
-3. ~~Decide game routing~~: the per-app VPN with the plug-in as a loopback relay, measured (D16).
-4. **A game's prefixes, and the bridge in the client**; a real game measured.
-5. Phase 4 (`TASKS.md`), then release.
+The window: each profile's server (UDP or TCP, as the profile says); through the VPN, 1.1.1.1 for latency every 30 s
+(and as the proxy's DNS when the server pushes none) and ipinfo.io when asked; GitHub's release API daily and its
+download when updating; a link the person types to import a profile; NT Kernel's GitHub release for the driver's
+installer. The supervisor: 1.1.1.1 and 8.8.8.8 directly while a run intercepts (the guard). A routed program's own
+connections go through its profile's tunnel; its name lookups are Windows' (the DNS Client service), not routed.
+
+## References read for shape, never code
+
+Read for structure only (AGENTS.md rule 1 binds OpenVPN's source): WireGuard for Windows (a manager service brokering
+for an unelevated UI), Mullvad (a daemon and its clients; route by executable; DNS made by the system's service cannot
+be attributed to an app), sing-box / Clash (inbound → rules → outbound), Netch (games routed per process at the packet
+level), and Shenora's own rule — a package boundary only where a dependency or a platform differs.

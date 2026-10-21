@@ -1,5 +1,10 @@
 # The router — design (2026-10-20)
 
+> **Status (2026-10-21, the code review):** the record of the design as adopted; the router now is `architecture.md`'s
+> and the code's. Since the review a TCP connection whose owner was not in the tables at its first packet is looked at
+> again, and one later found a selected program's counts as failed coverage (change 2); one never found is not yet
+> counted for the window (TASKS §2). A run selects only its client's session's processes.
+
 **Why it exists.** Stage 1 of D18: every packet of a game profile's programs into the tunnel from the first one, and
 routing started or stopped in the middle of a game — what Windows' VPN platform cannot do (D17, measured twice). The
 owner: *"so if the processer is attached we need to route all trafic"*, *"we should be setup vpn in mid of the game

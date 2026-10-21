@@ -1,7 +1,7 @@
 # TASKS-DONE.md — what was finished, and how it was measured
 
 `TASKS.md` holds the open work; a finished item comes here with its record, newest first (the owner, 2026-10-21: "you
-should archive all completed TASKS"). A record says what was sent and what came back (CLAUDE.md rule 3); the commit it
+should archive all completed TASKS"). A record says what was sent and what came back (AGENTS.md rule 3); the commit it
 names has the rest. What a record says could not be checked stays open in `TASKS.md`.
 
 ## After 0.1.0 — the owner's reports of 2026-10-21

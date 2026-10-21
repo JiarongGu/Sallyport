@@ -1,5 +1,26 @@
 # Decisions — Sallyport
 
+Each decision as it was taken, with what measured it; a later one that changes it says so, and it is left as written.
+Which still stand (2026-10-21, the code review; how the parts fit now is `docs/design/architecture.md`):
+
+| | Stands | Changed by |
+|---|---|---|
+| D1–D9 | yes | D9's `Sallyport.Windows` "later" exists since D18 |
+| D10 | no | D12, then D18: routed by the packet driver, not WinDivert |
+| D11 | no | D14: profiles sealed for the person, not the service |
+| D12, D16 | not the product | D18: the driverless route, kept (`apps/Sallyport.Vpn`, `apps/Sallyport.Observer`) |
+| D13 | yes | its guard's timing is the code's (`architecture.md`) |
+| D14 | in part | D18 (a service routes), D19 and D25 (the data folder), D20 (ports) |
+| D15, D17, D18 | yes | |
+| D19 | in part | D25: one shared data folder, not a folder per person |
+| D20, D22, D24, D26 | yes | |
+| D21, D27, D29 | in part | the owner's "put edit/delete button on surface" (a2844e3, no entry): a profile's row has Edit and Remove; its Edit page holds its sign-in and how it connects |
+| D23 | in part | D24: a lane per profile |
+| D25 | in part | D30, D32: the install folder holds one program, its loader and the uninstaller |
+| D28 | in part | D33: a release carries the zip and `manifest.json` too |
+| D30 | in part | D32: the uninstall entry starts `uninstall.exe` |
+| D31–D35 | yes | |
+
 ## D1 — Written from the protocol, not from OpenVPN's code; MIT (2026-10-12)
 
 The owner wanted OpenVPN brought into their own software "but avoid the agpl license". OpenVPN 3 Core, the embeddable
@@ -1014,3 +1035,34 @@ running from it at 13:56:05 and the window's process at 13:56:09; the uninstall 
 shortcuts rewritten; `cache\updates` emptied by the new start. Found: the uninstall entry's size counted the download,
 still in the cache while setup ran — Windows said 75 MB for 34; the cache is left out of it since (its next install
 measures it).
+
+## D35 — A profile's check of its server is made or the profile refused; a run routes one session's programs; setup never walks through a link (2026-10-21; measured, but for a server that pins its name)
+
+The full code review (TASKS §0, `docs/design/code-review.md`) fixed some sixty findings; three of them were choices,
+not slips, and are recorded here.
+
+- **A profile's checks of its server.** `verify-x509-name` was read past: a profile pinning its server accepted any
+  server certificate of the same CA, which with a shared tls-crypt key is another of the provider's servers. The
+  library now checks it as OpenVPN's manual describes the directive — `name` (the common name exactly), `name-prefix`,
+  and `subject` (OpenVPN's default: every attribute and value of the subject, `C=KG, ST=NA, CN=Server-1` or the older
+  `/C=KG/…`, compared as a set). A profile that checks its server by `peer-fingerprint` (inline or a block),
+  `verify-hash` or `tls-verify` is refused before any packet (`Tunnel.Unsupported`) rather than connected with the
+  check skipped: a check the profile's author asked for is not this client's to drop. The reason is never the names
+  themselves.
+- **A run selects only its client's session's processes.** The router selected by executable path alone, so a
+  person could route the same program another person on the computer ran, its traffic into their tunnel — as
+  LocalSystem. `docs/design/product.md` had always said it refused this. The supervisor gives the worker the client's
+  session from Windows (never the client's word), and a process of another session is not selected; one whose session
+  cannot be read is unreadable, as one whose image cannot be (rule 6). Not measured: a game helper that runs as a
+  service in session 0, which is not routed since — none of the owner's games has one.
+- **Setup never walks through a link.** .NET 10's recursive enumeration enters a directory junction — measured in a
+  scratch folder: `EnumerateFiles(…, AllDirectories)` listed a file behind one. Setup runs as administrator over the
+  shared areas, where every account may write, so a junction there pointed its removal and its reset of rights at any
+  folder. Every walk is `Installer.Within`, which lists a link and never enters it, and a link's rights are never set
+  (they would be its target's). `rd /s`, which removes what was in use after setup exits, removes a junction without
+  entering it.
+
+Measured: every test (550, a junction listed and not entered among them; the server-name checks against a server of
+the tests' own CA, connecting for a matching `name`, `name-prefix` and `subject` and refused for another). The live run
+after the review, through the owner's profile: its outcome is the review record's. Not measured: a real server whose
+profile pins its name (whether the owner's does is the profile's, which no agent opens).

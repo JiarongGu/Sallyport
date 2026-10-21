@@ -7,7 +7,7 @@ using Sallyport.Profile;
 namespace Sallyport.Tests;
 
 /// <summary>The whole client handshake against an in-process server built from the same layers. It proves the layers
-/// fit together; it cannot prove a real server agrees with them — that is the probe's job (CLAUDE.md rule 3).</summary>
+/// fit together; it cannot prove a real server agrees with them — that is the probe's job (AGENTS.md rule 3).</summary>
 public class HandshakeTests
 {
     private static readonly Remote Remote = new("vpn.example.test", 1194, "udp");

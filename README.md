@@ -6,8 +6,9 @@
 
 Sallyport is a free Windows client for OpenVPN servers that works app by app. Import the `.ovpn` profile your VPN
 provider — or your own server — gave you, pick a game or a program, and turn on **Use VPN** for it. While that profile
-is connected, all of that program's traffic goes through the VPN, TCP and UDP, from its first packet. Nothing else on
-the computer does: your browser, your downloads and your other apps keep your own connection.
+is connected, that program's connections go through the VPN, TCP and UDP, from their first packet. Nothing else on
+the computer does: your browser, your downloads and your other apps keep your own connection. (Its name lookups are
+Windows' own, made for it outside the VPN: [How it works](#how-it-works).)
 
 A sally port is a fortress's small, guarded gate: it lets chosen people through without opening the main gates.
 
@@ -25,7 +26,7 @@ not OpenVPN Connect and is not affiliated with OpenVPN Inc.
   taken off the VPN.
 - **Profiles the way you have them.** Choose the file, drop it on the window, or get it from your provider's link (an
   OpenVPN Access Server address, signing in when it asks). Profiles that sign in with a username and password are
-  supported; the password is remembered only if you ask.
+  supported (not yet tried against a server of that kind); the password is remembered only if you ask.
 - **Browsers too.** A browser can be started with the profile's proxy instead, in a profile folder of its own.
 - **See what it is doing.** Traffic and the VPN's ping on one graph, the exit location, and for each
   program whether it is running and going through the VPN.
@@ -38,9 +39,11 @@ not OpenVPN Connect and is not affiliated with OpenVPN Inc.
 - Windows 10 version 1809 or later, or Windows 11, 64-bit (x64).
 - Microsoft Edge WebView2 Runtime — part of Windows 11, and setup says so if it is missing.
 - An OpenVPN profile (`.ovpn`) for a server whose profiles use **tls-crypt**, with AES-256-GCM or AES-128-GCM, signing in
-  with a certificate, a username and password, or both. Profiles with tls-auth or tls-crypt-v2 are not supported yet:
-  Sallyport says so when you import one.
-- Administrator rights once, to install.
+  with a certificate, a username and password, or both. A profile that names its server (`verify-x509-name`) has that
+  name checked. Profiles with tls-auth or tls-crypt-v2, or that check their server by fingerprint or by a script, are
+  not supported yet: Sallyport says so when you import one, and never connects one with the check skipped.
+- Administrator rights to install, to update and to remove Sallyport, and to install the packet driver: Windows asks
+  each time.
 
 ## Install
 
@@ -54,7 +57,8 @@ not OpenVPN Connect and is not affiliated with OpenVPN Inc.
 
 Installing over an earlier version keeps your profiles, apps and settings. To install without the window:
 `Sallyport-<version>-win-x64-setup.exe /quiet [--folder "D:\Program Files\Sallyport"] [--no-driver] [--language en|zh-Hans]`
-answers by its exit code: 0 done, 1 failed, 2 bad arguments.
+answers by its exit code: 0 done, 1 failed, 2 bad arguments. (Run from inside an installed Sallyport's folder, as an update
+is, it hands over to a copy of itself beside the folder and answers at once: the window says how it went.)
 
 ## Getting started
 
@@ -73,27 +77,38 @@ connects and disconnects your profiles; right-click it and choose **Exit Sallypo
 The tunnel runs inside Sallyport itself: there is no virtual network adapter and no change to Windows' routes. The
 **Sallyport service** uses NT Kernel's **Windows Packet Filter** driver to take the packets of the programs you chose and
 send them through that program's profile; replies come back to the program as if it had its own connection. A routed
-program's IPv6 traffic and its traffic to your local network are blocked rather than leaked. A program started with
-proxy settings sends only TCP through the VPN. Each connected profile also offers a SOCKS5 proxy on `127.0.0.1` for
-other programs to use.
+program's IPv6 connections and its traffic to your local network are blocked rather than leaked. Only the programs of
+your own Windows session are routed: the same program run by another person on the computer keeps their connection.
+
+What it does not carry: a program's **name lookups** are made for it by Windows (its DNS Client service), not by the
+program, so they use your own connection and resolver — the names a game looks up are seen there, its traffic is not.
+A connection whose program Windows had not yet named at its first packet goes direct; one later found to be a routed
+program's is counted, and the app's page says so. A program started with proxy settings sends only TCP through the
+VPN. Each connected profile also offers a SOCKS5 proxy on `127.0.0.1` for other programs to use — any program on the
+computer can, as with any local proxy.
 
 ## Privacy and security
 
 - Your profiles are kept **encrypted for your Windows account** (Windows' DPAPI) in the `data` folder of the install
   folder; the original `.ovpn` file is not needed afterwards. A password is kept the same way, and only when you choose
-  **Remember password**.
+  **Remember password**. That folder is shared by everyone who uses Sallyport on the computer: another account can see
+  your profiles' names, your apps and your settings, and could delete them, but cannot open a profile.
+- An export made **without a password** holds your profiles, their keys included, as they are: keep it as you keep the
+  `.ovpn` files themselves. With a password, they are sealed with it.
 - Sallyport talks to nothing but your VPN server, except: NT Kernel's release on GitHub, to download the packet driver
   when you install it (checked against a pinned SHA-256); 1.1.1.1, through the VPN, every 30 seconds while a VPN is
-  connected, to show its latency; ipinfo.io, through the VPN, when you check the exit location; GitHub's release
-  API, once a day and when you check for updates, and GitHub's download of a newer Sallyport when you update; and a
-  link you type to import a profile. There is no telemetry and no account.
+  connected, to show its latency (and as the proxy's DNS server when your VPN server names none); while an app is routed,
+  1.1.1.1 and 8.8.8.8 on port 443, **directly**, four times a second, by the Sallyport service — the check that your own
+  connection still works, which ends routing if it stops (D13); ipinfo.io, through the VPN, when you check the exit
+  location; GitHub's release API, once a day and when you check for updates, and GitHub's download of a newer Sallyport
+  when you update; and a link you type to import a profile. There is no telemetry and no account.
 - To report a security problem, see [SECURITY.md](SECURITY.md).
 
 ## Update
 
 **Settings → About → Check for updates** says whether a newer Sallyport is out (Sallyport also looks once a day and
-says so). **Update to …** downloads it, checks every byte against the release's manifest, and installs it: Sallyport
-closes for a few seconds and opens again. Your profiles, apps and settings are kept.
+says so). **Update to …** downloads it, checks every byte against the release's manifest, and installs it: Windows asks
+for administrator, and Sallyport closes for a few seconds and opens again. Your profiles, apps and settings are kept.
 
 ## Uninstall
 

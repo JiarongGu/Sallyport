@@ -7,7 +7,7 @@ namespace Sallyport;
 /// asks for something this version does not do — so trying again cannot help.</summary>
 public enum HandshakeStage { Profile, Connect, HardReset, Tls, KeyExchange, Push, DataChannel, Done }
 
-/// <summary>Three answers, never two (CLAUDE.md rule 6).</summary>
+/// <summary>Three answers, never two (AGENTS.md rule 6).</summary>
 public enum Outcome { Holds, Failed, Unverifiable }
 
 /// <summary>A handshake that stopped short. <see cref="Outcome.Failed"/>: the server answered and refused, or answered

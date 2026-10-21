@@ -6,8 +6,8 @@ using Sallyport.Profile;
 
 namespace Sallyport.Runtime;
 
-/// <summary>Seals a profile at rest and opens it again. The service's seals with DPAPI under its own account (D11), so
-/// a copied file opens nowhere else.</summary>
+/// <summary>Seals a profile at rest and opens it again — with whatever the host keeps its secrets by: the Windows app's
+/// is DPAPI for the person (D14), so a copied file opens for no other account and on no other computer.</summary>
 public interface IProfileProtector
 {
     byte[] Protect(byte[] plain);

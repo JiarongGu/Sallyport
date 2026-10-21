@@ -18,8 +18,13 @@ profile (which options it uses, with every key block removed) is enough, and a c
   should not, or that a profile's keys could leak through.
 - The router service and the packet driver's use (`apps/Sallyport.Service`, `src/Sallyport.Windows`): anything that lets
   an unprivileged user or program use the service, change what it runs, or reach the network around the routing.
-- The client and setup: how profiles, passwords and exports are kept, and the install folder's rights.
-- The release itself: a setup that does not match its published SHA-256.
+- The client and setup: how profiles, passwords and exports are kept, and the install folder's rights; the window's
+  page (anything that lets another page or program drive it).
+- Updates: anything that lets a release other than the one its manifest lists be run, or `data\update.json` (where
+  updates come from, and so what is run as administrator) be changed by someone who is not an administrator.
+- The loopback proxy each connected profile offers: it takes no credentials by design (any program on the computer
+  may use it); a way to reach it from another computer is in scope.
+- The release itself: a setup, zip or manifest that does not match what the release publishes.
 
 The packet driver is NT Kernel's Windows Packet Filter; a problem in the driver itself belongs to NT Kernel.
 

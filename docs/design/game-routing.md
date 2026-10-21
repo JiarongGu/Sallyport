@@ -1,5 +1,10 @@
 # Routing a game — design (2026-10-19)
 
+> **Superseded (2026-10-21):** the driverless route designed here (D16) is not the product's; a game is routed by the
+> packet driver (D18, `router.md`, `architecture.md`). Kept as the driverless route's record and for learning a game's
+> endpoints. The names it proposes (`IGameRoutingController`, the backends) were never built, and profiles are kept in
+> the install folder's data (D25), not `%LOCALAPPDATA%`.
+
 **Why it exists.** The owner, 2026-10-19: *"I thought we do monitor for process instead check on range of address"*,
 *"you can check how vpn like wtfast does"*, then, after D17: *"you can co work with codex with the design lets
 continue"*. The decision this designs: driverless now — Windows' VPN platform (D16) with each game's destinations

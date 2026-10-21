@@ -35,13 +35,14 @@ every change, by a person or a coding agent alike.
 | `src/Sallyport.Windows` | What only Windows has: the packet driver's management and interface, the router, the service's protocol, the install layout. |
 | `apps/Sallyport.Client` | Sallyport's one program (D30): the window and the tray (WinForms + WebView2 through Shenora), and the host of the service and setup below. The host decides every word and action (`ClientCore`, `*View*.cs`); the page in `web/` (React, built into the executable) only shows them. |
 | `apps/Sallyport.Service` | The router service (LocalSystem): the one part that opens the packet driver. A library the program runs as `--service`. |
-| `apps/Sallyport.Setup` | The installer and uninstaller — a library the program runs under the release's name or with `/uninstall` — and the scripts that package a release (`package.ps1`, `version.ps1`). |
+| `apps/Sallyport.Setup` | The installer and uninstaller — a library the program runs under the release's name or with `/uninstall` — and the scripts that package a release (`package.ps1`, `version.ps1`) and check one (`verify-release.ps1`). |
+| `apps/Sallyport.Uninstall` | The small uninstaller (D32): setup's removal compiled ahead of time, written beside the program as `uninstall.exe`. |
 | `apps/Sallyport.Host` | A headless host: one profile's tunnel and its SOCKS5 proxy, with a status file, for another application to run. |
 | `apps/Sallyport.Observer`, `apps/Sallyport.Vpn` | The driverless route (ETW observation, a Windows VPN plug-in): kept for if the driver were ever refused (D16), not in the product. |
 | `tools/Sallyport.Probe` | Connects to a real server and says how far it got, phase by phase. |
 | `tools/Sallyport.Driver` | Drives the packet driver and the router against a real server, and the guard that watches the network meanwhile. |
 | `tests/` | One test project per area. No test needs a server, the driver or an account. |
-| `docs/design/` | How each part is meant to work. `docs/DECISIONS.md`: every decision, why, and what measured it. |
+| `docs/design/` | How the parts fit now (`architecture.md`), and the design records each part was built from. `docs/DECISIONS.md`: every decision, why, and what measured it. |
 | `TASKS.md`, `CHANGELOG.md` | The work still open; what each version brings. |
 
 ## Build and test
@@ -69,9 +70,13 @@ Against a real server:
 ```
 dotnet run --project tools/Sallyport.Probe -- <path to your profile.ovpn>
 dotnet run --project tools/Sallyport.Probe -c Release -- <profile.ovpn> --concurrent 64
-Sallyport.Driver guard --seconds 120          # from the install folder, beside anything that touches the packet path
+Sallyport.Driver guard --seconds 120          # from a copy outside the install folder, beside anything that touches the packet path
 Sallyport.Driver route <profile.ovpn> --folder <game folder> --seconds 60
 ```
+
+The probe takes no username and password: a profile that asks for them is measured through the window. What the tools
+print is meant for a commit or TASKS (rule 3), so they mask the public addresses they are told (`A.B.C.x`); the
+server's certificate subject they print is yours to mask before it is written down.
 
 Nothing that can cut the computer off its network runs without the guard outside it (D13): it probes two outside
 addresses twice a second, outside every interceptor, and says when the network stopped answering.
@@ -95,7 +100,9 @@ commit. Pull requests say how the change was tried.
 
 ## Releases
 
-A release is one setup and its SHA-256: Sallyport's one program under the setup's name, which installs itself (D30).
+A release is the setup and its SHA-256 — Sallyport's one program under the setup's name, which installs itself (D30) —
+with the installed folder as a zip and `manifest.json`, each file's size and SHA-256 (D33), which every installed copy's
+update reads (D34): a release without it is one no installed copy can update to.
 
 ```
 powershell -File apps\Sallyport.Setup\version.ps1 -Bump patch     # writes the version and dates its CHANGELOG section
@@ -105,7 +112,8 @@ powershell -File apps\Sallyport.Setup\package.ps1                  # artifacts\r
 `package.ps1` refuses a version whose CHANGELOG section is missing or empty, and always rebuilds the page from the tree.
 On GitHub, the **Release** workflow (Actions → Release → Run workflow) does the same on a hosted Windows runner — every
 test in Release, the package kept as the run's artifact — and, unless it is a rehearsal (`dry_run`, the default),
-commits the version, tags it and drafts the release with the setup, its `.sha256` and the notes. Rehearse first,
+commits the version, tags it and drafts the release with the setup, its `.sha256`, the zip, `manifest.json` and the
+notes; it refuses to release on a tag that names another commit, and runs each action by a pinned commit. Rehearse first,
 install the rehearsal's setup, then run it for real.
 
 ## Working with coding agents

@@ -1,5 +1,9 @@
 # Adding a VPN profile, signing in with it, and seeing it afterwards — design (2026-10-21, D29)
 
+> **Status (2026-10-21, the code review):** built as below but for: a profile's row has Edit and Remove, and Edit holds
+> its sign-in and how it connects — no separate connection-settings view, no Remove inside Edit; the Overview leaves
+> out a profile this version cannot connect rather than show it as unavailable; there is no "Sign-in required" state.
+
 **Why it exists.** The owner, 2026-10-20/21: *"import profile should be similar to how openvpn client does this (the
 default name, the server detail, and etc)"*, *"it has different way to setup profile"*, *"a dragdrop profile into the
 app also will be useful too"*, *"some profile need username password to run, some dont and each profile usually have

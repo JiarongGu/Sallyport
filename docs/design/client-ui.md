@@ -2,7 +2,8 @@
 
 > **Its pages are superseded by `window.md` (2026-10-20):** the tabs are Apps, Network, Profiles and Settings; games and
 > proxy apps are one list of apps; a profile's proxy and its routed apps share one channel. What stands from here: the
-> principles (§1), the host-authored state and its intents (D15), the frameless chrome, the tray's role.
+> principles (§1), the host-authored state and its intents (D15), the frameless chrome, the tray's role. (As built
+> since: Overview, Apps, Profiles and Settings, at 1000×700 — `window.md`'s status; the whole now, `architecture.md`.)
 
 **Why it exists.** The owner, 2026-10-19: *"lets make a better ui/ux design (you can use frameless version of shenora)
 and use event messaging so ui just for display and also the design you can co work with codex (check other repo how

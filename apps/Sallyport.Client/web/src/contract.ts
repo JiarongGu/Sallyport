@@ -463,7 +463,7 @@ export interface ClientState {
   appsEmpty: Empty | null;
   network: NetworkView;
   settings: SettingsView;
-  /** The tab a first look opens on: Profiles while there is nothing to route through, Apps after. */
+  /** The tab a first look opens on: Profiles while there is nothing to route through, the Overview after. */
   initialPage: Page;
   /** A request from the host (the tray's Open Network) to show a page: followed once per new `request`. */
   /** `app`: the app whose own page Apps opens on (a new app, just added). */

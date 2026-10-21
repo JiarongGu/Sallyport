@@ -2,12 +2,27 @@
 
 ## Unreleased
 
+- A full code review (2026-10-21, `docs/design/code-review.md`, D35), and what it fixed that a person would notice:
+  - A profile that names its server (`verify-x509-name`) has the name checked; one that checks its server by
+    fingerprint or by a script is refused at import instead of connected without the check.
+  - Only the programs of your own Windows session go through your VPN; the same program run by another person on the
+    computer keeps their connection.
+  - A game's routing can no longer be ended — the game then going direct — by a malformed packet from a server it
+    talks to. A connection through the proxy no longer stalls to a timeout after one of its acknowledgements is lost.
+  - Copying an address or the guide's example while another program holds the clipboard no longer closes Sallyport.
+  - An update whose download fails says why, instead of staying at "Downloading… 0%" until Sallyport is restarted.
+  - A link dragged onto the window is refused; only Sallyport's own page is ever shown in it.
+  - Setup run again after an interrupted upgrade puts the previous install and your data back, instead of deleting
+    them; removal never reaches past a link in Sallyport's data folder, and stops — removing nothing — when the
+    service will not stop; a packet driver that needs a restart to finish says so.
+  - The service's log masks public addresses.
 - Windows' installed apps gives Sallyport's size without its cache (2026-10-21): after an update it counted the update's
   own download, still there while setup ran — 75 MB for a Sallyport of 34.
 
 ## 0.1.1 — 2026-10-21
 
-- Routing an app works from a client that is not elevated (2026-10-21). The client checked the router service by
+- Routing an app works from a client that is not elevated (2026-10-21; measured on a computer with UAC off, where every
+  program is elevated — not yet with UAC on). The client checked the router service by
   opening the service's own process, which Windows lets only the system and elevated administrators do; started
   normally (by setup, by Windows at sign-in), it could not, and said the service was "not running as the system".
   It now asks the service manager — the service's process, its account, its executable, which a person may read —
@@ -20,7 +35,7 @@
   from the right edge as from the left, and a submenu beside the menu with its entry level with the row it opens from.
 - Setup keeps the install folder chosen when its language is changed (2026-10-21); before, the window opened again in
   the other language on the default folder.
-- The setup is 27.5 MB, from 176 (2026-10-21, D30, D31). Sallyport is one program — the window, the router service and
+- The setup is 31 MB, from 176 (2026-10-21, D30, D31). Sallyport is one program — the window, the router service and
   setup — so the release carries one .NET runtime instead of four, trimmed to what it uses of .NET's own assemblies, and the install folder holds that program, WebView2's
   loader and `data`. An upgrade from 0.1.0 moves the service to the program; the Start menu, sign-in start and `.ovpn`
   association stay as they were.

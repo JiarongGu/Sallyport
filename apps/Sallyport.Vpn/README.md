@@ -1,5 +1,8 @@
 # Sallyport.Vpn — per-app routing on Windows' own VPN platform (D12, D13)
 
+> **Not in the product, nor in `Sallyport.slnx`.** The driverless route (D16), kept for if the packet driver were ever
+> refused (D18, TASKS §2); built only by its own `build.ps1`, so a change to the library's API is not checked against it.
+
 For programs that ignore proxy settings — games first. Windows creates the VPN interface and lets only the listed
 programs' packets into it, for the listed destinations; everything else on the machine stays direct.
 

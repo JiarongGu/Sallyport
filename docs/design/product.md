@@ -2,7 +2,16 @@
 
 > **Since D30 (2026-10-21)** the window, the router service and setup are one program, `Sallyport.Client.exe`: the
 > service is its `--service` mode, setup the release's file of it and its `/uninstall`. Where this page names them
-> apart, they are its modes; their roles, rights and protocol are as written.
+> apart, they are its modes.
+>
+> **Status (2026-10-21, the code review):** the record of the design as adopted. The processes, pipes, rights and
+> protocol now are `architecture.md`'s, and differ from this page's: one control pipe for every session and a pipe per
+> run, not a pipe per session; the pipes' DACL gives interactive users read and write, not a logon SID; fourteen
+> messages, not twenty, with no request ids, revisions or partial-frame deadlines; a peer is checked by the process id
+> Windows gives at connection, its handle not kept; the guard probes every 250 ms with a 1 s connect, ends a run after
+> 3 s dead with no preflight and no recovery check, and judges a router hung after 2 s still. An upgrade keeps the old
+> folder only until the new one is in place (§6's rollback holds for the swap itself); an interrupted one is put back
+> by the next run of setup. A run selects only its client's session's processes, as this page says — since the review.
 
 **Why it exists.** The router works from a console tool (`tools/Sallyport.Driver route`, TASKS item 1, measured with
 Zenless Zone Zero). The owner, asked what a game should do when the VPN drops mid-game: *"so there can be auto

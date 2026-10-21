@@ -1,5 +1,9 @@
 # The window's look — a frameless frame after OpenVPN Connect (2026-10-20)
 
+> **Status (2026-10-21, the code review):** the look stands; the pages it describes were rebuilt since (D24, D27): the
+> Overview has a section per profile, not a profile picker and a Stop; Profiles has Edit and Remove on each row, not a
+> switch and a chevron; an app's card shows its run, its check is on its own page; Help has no Defaults group.
+
 **Why it exists.** The owner, 2026-10-20: *"we should also polish the ui/ux to make it more like a modern application"*;
 of a first polish in Windows Settings' manner, *"i dont think this is a better ui/ux design rn? and you probably better
 use frameless logic to optimize the looking and we propbably dont need the window max button and you can take example

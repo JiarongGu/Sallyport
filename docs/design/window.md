@@ -1,5 +1,11 @@
 # The window — one Apps list, one channel per profile (2026-10-20)
 
+> **Status (2026-10-21, the code review):** the record of the design as adopted. As built: the tabs are Overview, Apps,
+> Profiles and Settings; the window opens at 1000×700 on the Overview (on Profiles before a profile exists); the tray's
+> entry is Open Sallyport; one channel per profile is `Connections` with `GameRunner` joining it, there is no
+> `ChannelManager`; a profile's row has Edit and Remove, and its Edit page holds how it connects — no separate
+> connection-settings view.
+
 **Why it exists.** The owner, 2026-10-20, after the Games page: *"isn't the game and app are the same thing? and we
 better have a network view and a setting view tab"*, then *"because a game can also have multiple routing method, so we
 basiclly need to support them all in the same channel"*. It replaces the window parts of `client-ui.md` and §5 of

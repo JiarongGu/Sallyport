@@ -75,7 +75,7 @@ function Section({ section, now, go }: { section: SectionView; now: number; go: 
   </article>;
 }
 
-// Not an app's id (those are GUIDs): the add list's own entry for a new app.
+// Not an app's id (those are 12 or 16 hex digits): the add list's own entry for a new app.
 const newApp = '+new';
 
 /** An app in a section: its icon and name, what it is doing through this profile, its switch here; while this profile
