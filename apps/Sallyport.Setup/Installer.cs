@@ -592,7 +592,11 @@ sealed class Installer
         key.SetValue("QuietUninstallString", $"\"{remover}\" {arguments} /quiet".Replace("  ", " "));
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
         key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-        var kilobytes = new DirectoryInfo(_folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) / 1024;
+        // Not the cache: what it holds is thrown away, an update's own download among it while that update installs
+        // (Windows said 75 MB after the update to 0.1.1; without the cache, 34).
+        var cache = Path.Combine(Data, "cache") + Path.DirectorySeparatorChar;
+        var kilobytes = new DirectoryInfo(_folder).EnumerateFiles("*", SearchOption.AllDirectories)
+            .Where(f => !f.FullName.StartsWith(cache, StringComparison.OrdinalIgnoreCase)).Sum(f => f.Length) / 1024;
         key.SetValue("EstimatedSize", (int)Math.Min(kilobytes, int.MaxValue), RegistryValueKind.DWord);
     }
 

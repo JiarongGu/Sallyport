@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Windows' installed apps gives Sallyport's size without its cache (2026-10-21): after an update it counted the update's
+  own download, still there while setup ran — 75 MB for a Sallyport of 34.
+
 ## 0.1.1 — 2026-10-21
 
 - Routing an app works from a client that is not elevated (2026-10-21). The client checked the router service by

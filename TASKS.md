@@ -136,9 +136,9 @@ reader).
 - Kobo runs the library as a provider process (`Sallyport.Host.exe serve|stop`); in-process hosting waits for the release.
 
 ## 6. Release
-- **The next release** is D30's one program, about 53 MB (0.1.0, its record in `docs/TASKS-DONE.md`, was D28's three
-  programs); its CHANGELOG is `## Unreleased`.
+- **The next release** is whatever `## Unreleased` in CHANGELOG holds; 0.1.1 (D30's one program, 31.0 MB, and the
+  first that updates itself) is out, its record in `docs/TASKS-DONE.md`.
 - **Needs (the owner):** private vulnerability reporting turned on (Settings → Code security → Private vulnerability
-  reporting), which SECURITY.md points to — the API said `enabled: false` on 2026-10-21.
+  reporting), which SECURITY.md points to — the API said `enabled: false` on 2026-10-21, again after 0.1.1.
 - **Needs:** a certificate others trust, for the setup and the binaries (until then SmartScreen and UAC show an unknown
   publisher, and peers are checked by install path, not by signature — `docs/design/product.md`, change 2).

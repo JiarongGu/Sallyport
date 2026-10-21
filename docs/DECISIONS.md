@@ -908,6 +908,8 @@ Sallyport…", then "Sallyport 已移除", "Sallyport 已移除，但有遗留�
 (exit 1). Found on the way: Windows' icon constants are a WORD (`MAKEINTRESOURCE(-2)`, 0xFFFE); passed wider, the dialog
 read a string's address there (an access violation). Not measured: a removal to the end (the owner's install stays;
 TASKS §4), a machine with UAC on (where its manifest's prompt is the one), and the release workflow's build of it.
+Since measured, that build (0.1.1, 2026-10-21): its `uninstall.exe`, 4,395,520 bytes and the manifest's SHA-256, installed
+by the update (D34) and named by the uninstall entry.
 
 ## D33 — The release as a folder too: a zip of the installed files and a manifest of each one's size and SHA-256 (2026-10-21; measured)
 
@@ -949,6 +951,9 @@ Measured 2026-10-21 (a 0.1.1 rehearsal): `Sallyport-0.1.1-win-x64.zip`, 27,807,6
 1,462 bytes; `verify-release.ps1` "verified: Sallyport 0.1.1, 3 files …", and, on a copy whose manifest had
 `WebView2Loader.dll`'s digest changed, "WebView2Loader.dll's SHA-256 in the zip is not the manifest's" (thrown). Not
 measured: the workflow publishing them (it publishes everything `artifacts/release` holds; its next run is the owner's).
+Since measured, its run for 0.1.1 (2026-10-21, on `54ed6cf`): the release's four downloads fetched from GitHub into an
+empty folder — the setup 31,006,859 bytes, the zip 28,075,043, manifest.json 946 — and `verify-release.ps1` on them
+"verified: Sallyport 0.1.1, 3 files in Sallyport-0.1.1-win-x64.zip, and Sallyport-0.1.1-win-x64-setup.exe".
 
 ## D34 — Updates: the window looks and fetches, the release's manifest checks, setup applies (2026-10-21; measured)
 
@@ -1002,3 +1007,10 @@ started. Before the fix, the failure: setup gave up after 30 s, 0.1.1 and the se
 again saying "更新到 0.1.2 没有完成：当前仍是 0.1.1。…". Not measured: the once-a-day look on its own (it waits for a day
 since the last look, which the measurements made), a machine with UAC on (setup's prompt is the one), a release from
 the workflow (its next run is the owner's), and GitHub's own redirects to its storage (the tests stand them in).
+Since measured, the first update from GitHub (2026-10-21): the owner's install at 0.1.0 (`54ed6cf`), 检查更新 then 更新到
+0.1.1 pressed by the owner. GitHub's download links redirect to `release-assets.githubusercontent.com`, on the allowed
+list. After: the program 0.1.1, its three files each the manifest's size and SHA-256, written at 13:56:02; the service
+running from it at 13:56:05 and the window's process at 13:56:09; the uninstall entry 0.1.1 and the Start menu's two
+shortcuts rewritten; `cache\updates` emptied by the new start. Found: the uninstall entry's size counted the download,
+still in the cache while setup ran — Windows said 75 MB for 34; the cache is left out of it since (its next install
+measures it).
