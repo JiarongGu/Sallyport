@@ -3,7 +3,7 @@
 The library on nuget.org, versioned apart from the Windows app (whose changes are in the repository's own
 `CHANGELOG.md`): `nuget.yml` releases it and tags `nuget-v<version>` (docs/DECISIONS.md D36).
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-10-21
 
 The first package.
 
