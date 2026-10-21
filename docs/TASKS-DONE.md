@@ -40,6 +40,8 @@ up to `7a794b2` (v0.1.0) holds them, and the records below are those that were k
 
 ## Release
 
+- **Private vulnerability reporting on (2026-10-21):** turned on by the owner, which SECURITY.md points to; the API
+  (`/private-vulnerability-reporting`) said `enabled: false` before and after 0.1.1, then `enabled: true`.
 - **0.1.1 published (2026-10-21):** the Release workflow (workflow_dispatch on `54ed6cf`, success) tagged `v0.1.1` and
   released "Sallyport 0.1.1": its setup (31,006,859 bytes, D30's one program trimmed, D31), `.sha256`, the zip
   (28,075,043) and manifest.json (D33). Fetched from GitHub into an empty folder, `verify-release.ps1` verified them.
