@@ -9,14 +9,8 @@ owner can give.
 The owner, 2026-10-21: "next session will be a full code review + perpare for nuget release for our core (the MIT
 library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, After 0.1.0.
 
-1. **A full code review**, before anything is published from it — **done but for its live run.** Seven audits (Codex
-   three, then Claude four when Codex ran out of credits), every finding checked against the code; the record of each
-   and what became of it is `docs/design/code-review.md`, the decisions it made D35. Fixed and refactored in `aeeb9eb`,
-   `993f49d`, `c9f4e04`, `e8f8312`, `bf4a6e7` and the documents' commit; every test passes (550, from 499). Its open
-   findings are below, each where its work belongs.
-   - **Done when:** the live run — the installed copy on this tree, jp connected, an app through it (TCP and UDP), a
-     download through the proxy, the guard beside it, the window's pages opened — recorded in the review's record.
-   - **Needs (the owner):** a moment with no game running: the deploy restarts the client and the service.
+1. **A full code review** — done, its live run with it: `docs/TASKS-DONE.md`, The full code review. Its open findings
+   are below, each where its work belongs.
 2. **`src/Sallyport` on NuGet** as `Sallyport` (free on nuget.org on 2026-10-21, as is `Sallyport.OpenVpn`) —
    **built, packed and tested; not yet run on GitHub or published** (D36).
    - **Done:** two workflows (the owner: "we can set 2 pipeline for this release.yml for nuget and another one for the

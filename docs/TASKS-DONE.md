@@ -4,6 +4,17 @@
 should archive all completed TASKS"). A record says what was sent and what came back (AGENTS.md rule 3); the commit it
 names has the rest. What a record says could not be checked stays open in `TASKS.md`.
 
+## The full code review (TASKS §0 item 1, 2026-10-21)
+
+- **Done:** seven audits (Codex three, Claude four), every finding checked against the code; fixed and refactored in
+  `aeeb9eb`, `993f49d`, `c9f4e04`, `e8f8312`, `bf4a6e7`, the documents in `acb6584`; the decisions it made D35; every
+  finding and its outcome in `docs/design/code-review.md`. Every test passed (550, from 499; 557 with the package's).
+- **The live run** (`docs/design/code-review.md`, The live run): the installed copy on `874df9f`, jp connected by the
+  owner, the guard beside it with every probe answered. Through the window's SOCKS5 proxy, names resolved by the
+  tunnel: the exit in Japan (Cloudflare `loc=JP`, `colo=NRT`; direct `AU`, `SYD`); `games.dmm.com` answered as in
+  Japan (200; direct, a redirect to sign-in); 10 MB in 2.52 s. Not measured, by the owner's choice: a routed app
+  through the router, which the owner tests on another machine with the release.
+
 ## After 0.1.0 — the owner's reports of 2026-10-21
 
 Each was one item of TASKS §0, done in its own commit (newest first), whose message has its measurement on the

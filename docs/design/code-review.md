@@ -198,5 +198,25 @@ passing.
 
 ## The live run
 
-Pending: the installed copy (`D:\Program Files\Sallyport`) on this tree, jp connected, an app through it, the guard
-beside it — TASKS §0 item 1's last condition. Its record goes here, and its numbers in TASKS-DONE.
+2026-10-21, on the owner's machine. The installed copy (`D:\Program Files\Sallyport`) redeployed from this tree with
+the package's work on it (`0.1.1+874df9f`): the service stopped, the one program published into the folder, the service
+started at 18:17:15, the window reopened; Kobo's own `Sallyport.Host` (running since the day before, in Kobo's folder)
+untouched, and Kobo's session paused its routed reads for the run. `Sallyport.Driver guard` from a copy outside the
+install folder from 18:17:48.
+
+- **jp connected** by the owner from the window (总览: "1 个已连接", jp "已连接"), over UDP, its SOCKS5 proxy on a free
+  loopback port the window showed.
+- **The exit through the proxy, its name resolved by the tunnel** (`curl --socks5-hostname`, as a browser's SOCKS5
+  does — the remote resolution Kobo's browser relies on): Cloudflare's trace answered `loc=JP`, `colo=NRT`, from
+  3.113.190.x; direct, `loc=AU`, `colo=SYD`, from 110.150.74.x.
+- **A region-locked site:** `games.dmm.com` through the proxy answered 200, its Japanese site; direct, a 302 to DMM's
+  sign-in. (`www.dmm.co.jp`'s front and `www.dmm.com` answer alike from both, so they say nothing of the region.)
+- **A download through the proxy:** 10,000,000 bytes from speed.cloudflare.com, HTTP 200, in 2.52 s (3.96 MB/s); the
+  window counted 11 MB down, 93 KB up for the tunnel.
+- **The guard:** 2,002 probes of the direct path, every one answered; no remedy. (The earlier guard of the same
+  afternoon logged single probes lost on the Wi-Fi from 17:33 to 17:44, never 3 s in a row, while every adapter was in
+  mode `None` — Sallyport intercepted nothing then; the network's own.)
+
+Not measured here, by the owner's choice ("I think its okay lets release I will test on other machine"): a routed
+app's TCP and UDP through the router (Zenless Zone Zero), and the window's every page. The owner tests the release on
+another machine.
