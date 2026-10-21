@@ -148,7 +148,9 @@ jobs:
           dotnet nuget push "artifacts/nuget/*.nupkg" --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      # The same two files the pack job wrote, written again from its version and date, and only those committed.
+      # The same two files the pack job wrote, written again from its version and date, and only those committed. A newer
+      # main (the app's release commits its version too) is merged, never rebased onto, so the tag stays on the source
+      # that was packed.
       - name: Commit the version
         env:
           VERSION: ${{ needs.pack.outputs.version }}
@@ -163,7 +165,16 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git commit -m "chore: package ${{ needs.pack.outputs.tag }}"
-          git push
+          $version = git rev-parse HEAD
+          for ($try = 1; $try -le 3; $try++) {
+            git push origin HEAD:main
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($try -eq 3) { throw "main would not take the version commit after 3 tries." }
+            git fetch origin main
+            git merge --no-edit origin/main
+            if ($LASTEXITCODE) { throw "main moved, and its changes do not merge with the version commit: finish this package by hand." }
+          }
+          git checkout -q $version
 
       - name: Tag
         env:

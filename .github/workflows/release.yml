@@ -117,7 +117,10 @@ jobs:
           "Version that would ship: ${{ steps.version.outputs.version }}"
           Get-ChildItem artifacts/release | Format-Table Name, Length -AutoSize
 
-      # Only the two files version.ps1 writes, named: nothing else the job made can ride along.
+      # Only the two files version.ps1 writes, named: nothing else the job made can ride along. main may have moved
+      # since this run began — the package's workflow commits its own version (nuget.yml), and on 2026-10-21 two runs
+      # side by side had this push refused — so a newer main is merged, never rebased onto: the tag below stays on the
+      # version commit, the source the release was built from.
       - name: Commit the version
         if: ${{ !inputs.dry_run && steps.version.outputs.changed == 'true' }}
         run: |
@@ -125,7 +128,16 @@ jobs:
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add Directory.Build.props CHANGELOG.md
           git commit -m "chore: release ${{ steps.version.outputs.tag }}"
-          git push
+          $version = git rev-parse HEAD
+          for ($try = 1; $try -le 3; $try++) {
+            git push origin HEAD:main
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($try -eq 3) { throw "main would not take the version commit after 3 tries." }
+            git fetch origin main
+            git merge --no-edit origin/main
+            if ($LASTEXITCODE) { throw "main moved, and its changes do not merge with the version commit: finish this release by hand." }
+          }
+          git checkout -q $version
 
       - name: Tag
         if: ${{ !inputs.dry_run && inputs.create_tag }}

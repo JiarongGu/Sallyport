@@ -26,6 +26,8 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- Each package against the last one published: a change that would break a host built on it fails the pack. -->
+    <PackageValidationBaselineVersion>0.1.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- Deterministic paths in a CI build only: a local build keeps the machine's, for its own debugger. -->
