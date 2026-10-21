@@ -5,35 +5,14 @@ completed TASKS"). Work goes top to bottom, one at a time; an item is done when 
 been measured — against the real server where a server is involved (AGENTS.md rule 3). **Needs** names what only the
 owner can give.
 
-## 0. Next session: a full code review, then the protocol library on NuGet
-The owner, 2026-10-21: "next session will be a full code review + perpare for nuget release for our core (the MIT
-library for openvpn)". The list of 2026-10-21 is done: `docs/TASKS-DONE.md`, After 0.1.0.
-
-1. **A full code review** — done, its live run with it: `docs/TASKS-DONE.md`, The full code review. Its open findings
-   are below, each where its work belongs.
-2. **`src/Sallyport` on NuGet** as `Sallyport` (free on nuget.org on 2026-10-21, as is `Sallyport.OpenVpn`) —
-   **built, packed and tested; not yet run on GitHub or published** (D36).
-   - **Done:** two workflows (the owner: "we can set 2 pipeline for this release.yml for nuget and another one for the
-     windows build", then "you can have other name if you wish I can update the tursted policy"): `release.yml` stays
-     the app's, `nuget.yml` is the package's — tests on Linux and Windows, pack, and only when not a rehearsal the push by
-     Trusted Publishing, the version commit and the tag `nuget-v<version>`, never a GitHub release (D34). Its own version
-     (0.1.0, in its project; `version.ps1 -VersionFile -ChangelogFile -TagPrefix`) and `src/Sallyport/CHANGELOG.md`.
-     What Kobo asked for an in-process host (the owner: "powerful enough for other library to use like kobo"; kobo-ec's
-     list): a free port reported, `Ready`, `StatusChanged` with reconnects as `reconnecting`, a `Credentials` callback, a
-     `Log`, `CreateHttpHandler`/`ConnectAsync`/`ResolveAsync` through the tunnel, a taken port refused with why. The
-     public surface: the measuring tools' helpers internal (LB5), every public member documented (CS1591 no longer
-     suppressed), `ProfileStore`'s JSON source-generated, trimmable and AOT-compatible. Metadata, icon, Source Link and
-     symbols; `dotnet pack` looked inside (D36).
-   - **Left:** kobo-ec's review of the API (offered before `nuget.yml` is cut); the rehearsal of `nuget.yml` on GitHub,
-     which runs the library's tests on Linux for the first time; `EnablePackageValidation`'s baseline
-     (`PackageValidationBaselineVersion`) once 0.1.0 is out; the Host's `--listen` on port 0 if Kobo keeps the provider
-     process (its stop signal is named by the port, so a free port needs another name). The tools' reach into the
-     internals (TB2) stays: the measuring tools are this repository's, not the package's users.
-   - **Needs (the owner):** the commits pushed (nothing of this session's is); the Trusted Publishing policy for
-     `JiarongGu/Sallyport` pointed at `nuget.yml`; the profile's path, or a run by the owner, for the sample below.
-   - **Done when:** a rehearsal of `nuget.yml` passes on both systems and its `.nupkg` and `.snupkg` are looked inside; a
-     sample project on that package (`TunnelService`, its `Ready` and `CreateHttpHandler`) connects through the owner's
-     server (rule 3); then the owner's go for the real run.
+## 0. The package's handler through a real server
+The code review and the package are done and released (`docs/TASKS-DONE.md`: The full code review; Release, 0.1.2 and
+the package 0.1.0). One thing the package promises is not yet measured against a server (rule 3): its own requests
+through the tunnel with no proxy (`TunnelService.CreateHttpHandler`, `ConnectAsync`, `ResolveAsync`). The live run
+measured the same tunnel, its TCP and its DNS through the window's SOCKS5 proxy.
+- **Done when:** a host on the published package — Kobo's in-process route (kobo-ec, its Stage 2), or a sample run by
+  the owner with a profile's path — fetches through `CreateHttpHandler` and sees the exit's country, with its names
+  resolved by the tunnel.
 
 ## 1. Stage 1 — every packet of a game's programs, on Windows Packet Filter
 Per-process routing from the first packet (game-routing §5, amendments 1–2): packets taken at the network layer,

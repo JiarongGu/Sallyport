@@ -51,6 +51,21 @@ up to `7a794b2` (v0.1.0) holds them, and the records below are those that were k
 
 ## Release
 
+- **0.1.2 and the package 0.1.0 published (2026-10-21):** the NuGet workflow (run 39564477136 on `6fa09df`, success):
+  the library's tests on Linux and Windows — Linux's first — the pack, the push by Trusted Publishing, `de00cef` and
+  the tag `nuget-v0.1.0`; nuget.org serves Sallyport 0.1.0 with its icon, readme, licence and source commit, and its
+  symbols. The Release workflow, started beside it on the same commit, had its version commit refused (`main` had
+  moved), and again on `de00cef` as the owner's next run raced this session's push; the third (39566100010 on
+  `61834f5`) tagged `v0.1.2` and released "Sallyport 0.1.2": its setup (31,025,602 bytes), `.sha256`, the zip
+  (28,100,734) and manifest.json. Fetched from GitHub into an empty folder, `verify-release.ps1` verified them. Both
+  workflows now merge a `main` that moved, never rebase onto it, so their tags stay on the source they built. On the
+  owner's other machine the installed copy updated itself to 0.1.2 (the service's log: `supervisor 0.1.2.0` at
+  19:05:27), and a run there routed 16 programs (`route Routing`, `generation 1 committed`), its selection changed
+  live to 13 and back; the owner: the latency detection works.
+- **The package (TASKS §0 item 2, D36):** what Kobo asked for an in-process host (kobo-ec's list, its review
+  approved), the public surface documented and trimmed, trimmable and AOT-compatible, two workflows; its
+  measurements are D36's and the commit `840a830`'s, and the live run's above. Its validation baseline is 0.1.0: a
+  pack fails a change that would break a host built on it.
 - **Private vulnerability reporting on (2026-10-21):** turned on by the owner, which SECURITY.md points to; the API
   (`/private-vulnerability-reporting`) said `enabled: false` before and after 0.1.1, then `enabled: true`.
 - **0.1.1 published (2026-10-21):** the Release workflow (workflow_dispatch on `54ed6cf`, success) tagged `v0.1.1` and
