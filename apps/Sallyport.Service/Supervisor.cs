@@ -193,6 +193,7 @@ sealed class Supervisor(Log log)
         if (line?.StartsWith("ready ", StringComparison.Ordinal) != true || !ulong.TryParse(line[6..], System.Globalization.NumberStyles.HexNumber, null, out adapter))
         {
             Kill(worker);
+            worker.Dispose();
             var why = line?.StartsWith("error ", StringComparison.Ordinal) == true ? line[6..] : "The router did not start.";
             log.Say($"run {id} refused: {why}");
             return new Rejected(why);
@@ -286,6 +287,8 @@ sealed class Supervisor(Log log)
         Kill(run.Worker);
         try { run.Worker.WaitForExit(2000); }
         catch (Exception e) when (e is InvalidOperationException or Win32Exception) { }
+        // Its handle and its pipes let go now, not when the collector comes: a service up for weeks runs many.
+        run.Worker.Dispose();
         ResetAdapter(run.Adapter, "end");
         log.Say($"run {run.Id} ended: {why}");
         _ = TrySend(run.Owner, new RunEnded(run.Id, why));

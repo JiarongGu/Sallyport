@@ -1,9 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Compression;
-using System.Security.AccessControl;
-using System.Security.Principal;
-using System.Text.Json;
 using Microsoft.Win32;
 using Sallyport.Setup;
 using Sallyport.Windows;
@@ -26,14 +23,17 @@ partial class SetupJson : System.Text.Json.Serialization.JsonSerializerContext;
 sealed record SetupProgress(string? Text, double Done);
 
 /// <summary>
-/// Installing and removing Sallyport (docs/design/product.md §6), every step said as it is taken. The order keeps a
-/// half-done run harmless: the new files are staged beside the old and swapped in only whole, the service is
-/// registered after the files it runs, and the shortcuts and the uninstall entry last. Everything Sallyport writes goes
-/// in the folder the person chose — its data (logs, the driver's installer) in a <c>data</c> folder inside it; only
-/// Windows' own entries (the service, the Start menu, the installed-apps list) live where Windows keeps them. What did
-/// not happen but leaves Sallyport working (the driver, a file in use) is returned, not thrown.
+/// Installing and removing Sallyport (docs/design/product.md §6), every step said as it is taken — the order of the
+/// steps here, each step in the part of it that knows how: the folder swapped in whole (Installer.Swap.cs), the folders'
+/// rights (Installer.Rights.cs), Windows' entries for it (Installer.Registration.cs), and what removal takes
+/// (Installer.Removal.cs). The order keeps a half-done run harmless: the new files are staged beside the old and swapped
+/// in only whole, the service is registered after the files it runs, and the shortcuts and the uninstall entry last.
+/// Everything Sallyport writes goes in the folder the person chose — its data (logs, the driver's installer) in a
+/// <c>data</c> folder inside it; only Windows' own entries (the service, the Start menu, the installed-apps list) live
+/// where Windows keeps them. What did not happen but leaves Sallyport working (the driver, a file in use) is returned,
+/// not thrown.
 /// </summary>
-sealed class Installer
+sealed partial class Installer
 {
     private readonly Action<SetupProgress> _report;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -88,8 +88,6 @@ sealed class Installer
     /// <summary>The start that asked for this one to be administrator, and waits for it (<c>--asker</c>): not a window
     /// to close.</summary>
     public static int Asker { get; set; }
-    private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Sallyport";
-    private const string ProgId = "Sallyport.ovpn";
 
     /// <summary>Where a first install goes unless the person chooses otherwise.</summary>
     public static string DefaultFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Name);
@@ -108,6 +106,9 @@ sealed class Installer
     public static string? Unfit(string folder)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Path.IsPathFullyQualified(folder)) return L.T("Type a full folder path, such as D:\\Program Files\\Sallyport.");
+        // Windows' own command line, which removes what is in use once setup has exited, would read %NAME% in it as a
+        // variable to put in its place.
+        if (folder.Contains('%')) return L.T("Choose a folder whose path has no % in it.");
         string full;
         try { full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)); }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return L.T("That is not a folder path Windows accepts."); }
@@ -161,20 +162,7 @@ sealed class Installer
     private string Users => InstallLayout.Users(_folder);
     // What removing keeps unless the person says otherwise: the shared areas, and an earlier install's users' folders.
     private IReadOnlyList<string> KeptData => [.. InstallLayout.Kept.Select(area => InstallLayout.Area(_folder, area)), Users];
-    private string Record => Path.Combine(Data, "setup.json");
-    private static string Programs => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu), "Programs");
-    // A folder of its own in the Start menu: Sallyport, and its removal beside it where a person looks for one (the
-    // owner: "we also missing an uninstall after the installation"). 0.1.0 put Sallyport at the top, alone.
-    private static string MenuFolder => Path.Combine(Programs, Name);
-    private static string Shortcut => Path.Combine(MenuFolder, "Sallyport.lnk");
-    private static string RemovalShortcut => Path.Combine(MenuFolder, L.T("Uninstall Sallyport") + ".lnk");
-    private static string OldShortcut => Path.Combine(Programs, "Sallyport.lnk");
     public string Client => Path.Combine(_folder, Program);
-
-    // What removes Sallyport: the small uninstaller once it is here, else the program itself (D30), as an install from a
-    // payload without one has it.
-    private (string Program, string Arguments) Remover =>
-        File.Exists(Path.Combine(_folder, Uninstaller)) ? (Path.Combine(_folder, Uninstaller), "") : (Client, "/uninstall");
 
     /// <summary>Whether removing Sallyport takes the packet driver too: only if Sallyport put it there.</summary>
     public bool RemovesDriver => ReadRecord()?.InstalledDriver == true;
@@ -224,32 +212,11 @@ sealed class Installer
 
     private async Task<IReadOnlyList<string>> InstallStoppedAsync(Stream payload, string version, SetupChoices choices, string staged, CancellationToken ct)
     {
+        // Before anything else: what an interrupted setup left aside is the person's install, and their data in it.
+        RecoverInterrupted();
         if (Unfit(_folder) is { } why) throw new SetupFailed(why);
         say(L.T("Copying files…"), 0.08);
-        var previous = _folder + ".old";
-        // The folder it goes in is not setup's to protect: only Sallyport's own is.
-        Directory.CreateDirectory(Path.GetDirectoryName(_folder)!);
-        if (Directory.Exists(staged)) Directory.Delete(staged, recursive: true);
-        // Protected before anything is put in it: off the system drive a new folder lets every user write, and the
-        // service believes only clients that run from a folder ordinary users cannot change (product design change 2).
-        Protect(staged);
-        Unpack(payload, staged, 0.08, 0.70);
-        if (Directory.Exists(previous)) Directory.Delete(previous, recursive: true);
-        var hadPrevious = Directory.Exists(_folder);
-        if (hadPrevious) MoveWhenFree(_folder, previous);
-        try { Directory.Move(staged, _folder); }
-        catch
-        {
-            // The old files back as they were: the machine keeps the Sallyport it had.
-            if (hadPrevious && !Directory.Exists(_folder)) Directory.Move(previous, _folder);
-            throw;
-        }
-        Protect(_folder);
-        // The old version's data (its record above all) goes with the new files: a later removal still knows the driver.
-        if (hadPrevious && Directory.Exists(Path.Combine(previous, "data")) && !Directory.Exists(Data))
-            Directory.Move(Path.Combine(previous, "data"), Data);
-        try { if (hadPrevious) Directory.Delete(previous, recursive: true); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("The old version's files could not all be removed from {0}.", previous)); }
+        SwapIn(payload, staged);
 
         Directory.CreateDirectory(Data);
         // Moved first, then given the areas' rights: what moves keeps the rights its owner's client gave it until then.
@@ -281,6 +248,7 @@ sealed class Installer
                     var outcome = await driver.InstallAsync(InstallLayout.DriverFolder(_folder), ct);
                     if (outcome.Succeeded) installedDriver = true;
                     else leave(L.T("The packet driver was not installed: {0}. Install it later from Sallyport's Settings.", outcome.Text));
+                    if (outcome.RebootNeeded) leave(L.T("Windows finishes installing the packet driver when it next restarts."));
                 }
                 catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidDataException or IOException)
                 {
@@ -290,9 +258,7 @@ sealed class Installer
         WriteRecord(new SetupRecord(version, installedDriver, DateTimeOffset.Now));
 
         say(L.T("Adding Sallyport to the Start menu…"), 0.95);
-        try { File.Delete(OldShortcut); } catch (IOException) { }
-        ShellLink.Create(Shortcut, Client, "", L.T("Send your games and apps through your VPN"));
-        ShellLink.Create(RemovalShortcut, Remover.Program, Remover.Arguments, L.T("Remove Sallyport from this computer"));
+        AddToStartMenu();
         RegisterOpenWith();
         RegisterUninstall(version);
         say(L.T("Done."), 1);
@@ -319,9 +285,11 @@ sealed class Installer
         say(L.T("Closing Sallyport…"), 0.02);
         CloseClients();
         say(L.T("Removing the Sallyport service…"), 0.10);
-        // Removing it stops it, and its routing with it: the adapter is given back before the service goes.
+        // Removing it stops it, and its routing with it: the adapter is given back before the service goes. A service
+        // that would not stop is still Sallyport running from its folder: nothing else is removed, so the uninstall
+        // entry is still there to try again.
         try { ServiceControl.Uninstall(RouterProtocol.ServiceName, TimeSpan.FromSeconds(30)); }
-        catch (Win32Exception e) { leave(L.T("The Sallyport service was not removed (Windows error {0}).", e.NativeErrorCode)); }
+        catch (Win32Exception e) { throw new SetupFailed(L.T("The Sallyport service did not stop (Windows error {0}), so nothing was removed. Restart Windows, then remove Sallyport again.", e.NativeErrorCode)); }
 
         if (RemovesDriver)
         {
@@ -333,6 +301,7 @@ sealed class Installer
                 await driver.FetchAsync(http, ct);
                 var outcome = await driver.UninstallAsync(ct);
                 if (!outcome.Succeeded) leave(L.T("The packet driver was not removed: {0}.", outcome.Text));
+                if (outcome.RebootNeeded) leave(L.T("Windows finishes removing the packet driver when it next restarts."));
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidDataException or IOException)
             {
@@ -341,24 +310,10 @@ sealed class Installer
         }
 
         say(L.T("Removing Sallyport from the Start menu and from Windows' lists…"), 0.70);
-        try { File.Delete(OldShortcut); } catch (IOException) { }
-        try { if (Directory.Exists(MenuFolder)) Directory.Delete(MenuFolder, recursive: true); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("The Start menu's Sallyport folder could not be removed: {0}", e.Message)); }
-        Registry.LocalMachine.DeleteSubKeyTree(UninstallKey, throwOnMissingSubKey: false);
-        Registry.LocalMachine.DeleteSubKeyTree($@"Software\Classes\{ProgId}", throwOnMissingSubKey: false);
-        Registry.LocalMachine.OpenSubKey(@"Software\Classes\.ovpn\OpenWithProgids", writable: true)?.DeleteValue(ProgId, throwOnMissingValue: false);
-        Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)?.DeleteValue(Name, throwOnMissingValue: false);
+        RemoveFromWindows();
 
         say(L.T("Removing files…"), 0.80);
-        // Only a folder that is still Sallyport's: whatever else someone put there since is not setup's to take. Its
-        // users' profiles and settings stay unless the person said otherwise, where installing again finds them.
-        var keep = choices.RemoveData ? null : KeptData;
-        if (IsSallyport(_folder))
-        {
-            // This uninstaller may run from the folder it removes: what is in use goes once it has exited.
-            if (Path.GetDirectoryName(Environment.ProcessPath)!.Equals(_folder, StringComparison.OrdinalIgnoreCase)) RemoveAfterExit(_folder, keep);
-            else RemoveFolder(_folder, keep);
-        }
+        RemoveFiles(choices.RemoveData);
         if (choices.RemoveData)
         {
             say(L.T("Removing the VPN profiles and settings…"), 0.92);
@@ -369,32 +324,6 @@ sealed class Installer
         return _left;
     }
 
-    // Unpacked entry by entry so the window can show how far it is: the payload is most of setup's time.
-    private void Unpack(Stream payload, string folder, double from, double to)
-    {
-        using var zip = new ZipArchive(payload, ZipArchiveMode.Read);
-        var total = Math.Max(1, zip.Entries.Sum(e => e.Length));
-        var root = Path.GetFullPath(folder) + Path.DirectorySeparatorChar;
-        long done = 0;
-        foreach (var entry in zip.Entries)
-        {
-            var path = Path.GetFullPath(Path.Combine(folder, entry.FullName));
-            // A payload names only paths inside the folder it is unpacked into.
-            if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"The payload names a path outside its folder: {entry.FullName}");
-            if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
-            {
-                Directory.CreateDirectory(path);
-                continue;
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            entry.ExtractToFile(path, overwrite: true);
-            done += entry.Length;
-            _report(new SetupProgress(null, from + (to - from) * done / total));
-        }
-    }
-
-    // Every client of this user is asked to leave as its own tray's Exit does (routing stopped, tunnels closed), and any
-    // left after a few seconds is ended.
     // Stopped is what the service manager says; the service's process may still be closing its files a moment after,
     // and a folder with a file open in it cannot be moved.
     private static void StopService()
@@ -413,31 +342,13 @@ sealed class Installer
         catch (Exception e) when (e is Win32Exception or ArgumentException or InvalidOperationException) { }
     }
 
-    // The old folder moved aside once nothing has a file open in it. WebView2's processes outlive the client by a few
-    // seconds and keep their cache in data (measured 2026-10-20: still running 3 s after the client had gone, and the
-    // folder could not be moved until the last of them had); an indexer or a scanner may hold a file a moment too.
-    private void MoveWhenFree(string from, string to)
-    {
-        var deadline = Environment.TickCount64 + 30_000;
-        for (var waiting = false; ; Thread.Sleep(500))
-            try
-            {
-                Directory.Move(from, to);
-                if (waiting) Log($"{from} moved aside once free");
-                return;
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                if (Environment.TickCount64 > deadline)
-                    throw new SetupFailed(L.T("A file in {0} is still open in another program. Close it, or restart Windows, and run setup again.", from));
-                if (!waiting) Log($"{from} is in use ({e.Message}); waiting for it");
-                waiting = true;
-            }
-    }
-
+    // Every client of this user is asked to leave as its own tray's Exit does (routing stopped, tunnels closed), and any
+    // left after a few seconds is ended.
     private void CloseClients()
     {
-        if (File.Exists(Client))
+        // Run only from the folder an earlier setup registered and made administrators' alone: a program found in a
+        // folder someone else made before this first install would run as administrator here.
+        if (ExistingFolder() is { } registered && string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(registered)), _folder, StringComparison.OrdinalIgnoreCase))
             try
             {
                 using var exit = Process.Start(new ProcessStartInfo(Client, "--exit") { UseShellExecute = false });
@@ -448,221 +359,18 @@ sealed class Installer
         // A person's windows, not the service and its routers (the same program, D30, in session 0 — stopped as the
         // service, never killed under the service manager, which would start it again), nor this setup and the start
         // that asked for it to be administrator.
-        while (Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Program))
-                   .Where(p => p.SessionId != 0 && p.Id != Environment.ProcessId && p.Id != Asker).ToArray() is { Length: > 0 } left)
+        while (true)
         {
-            if (Environment.TickCount64 > deadline)
-            {
+            var all = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Program));
+            var left = all.Where(p => p.SessionId != 0 && p.Id != Environment.ProcessId && p.Id != Asker).ToArray();
+            var done = left.Length == 0 || Environment.TickCount64 > deadline;
+            if (left.Length > 0 && done)
                 foreach (var p in left)
                     try { p.Kill(); } catch (Exception e) when (e is Win32Exception or InvalidOperationException) { }
-                break;
-            }
+            foreach (var p in all) p.Dispose();
+            if (done) break;
             Thread.Sleep(200);
         }
-    }
-
-    // The shared areas (D25): everyone who uses Sallyport on this computer reads and writes them — the owner's "One
-    // shared folder". Owned by Administrators, so whoever made one first keeps no right over its rights. Nothing in
-    // them is ever run: the programs stay in the folder only administrators can change (product design change 2).
-    private void ShareAreas()
-    {
-        var security = new DirectorySecurity();
-        security.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        foreach (var (sid, rights) in new[]
-                 {
-                     (WellKnownSidType.LocalSystemSid, FileSystemRights.FullControl),
-                     (WellKnownSidType.BuiltinAdministratorsSid, FileSystemRights.FullControl),
-                     (WellKnownSidType.BuiltinUsersSid, FileSystemRights.Modify),
-                 })
-            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null), rights,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        foreach (var area in InstallLayout.Areas)
-        {
-            var info = new DirectoryInfo(InstallLayout.Area(_folder, area));
-            if (!info.Exists) info.Create(security);
-            info.SetAccessControl(security);
-            // What was moved in, or made by an earlier client, takes the area's rights from here on.
-            foreach (var inside in info.EnumerateFileSystemInfos("*", SearchOption.AllDirectories)) Inherit(inside);
-        }
-    }
-
-    // The person running setup kept their part in a folder of their own (D19): it moves into the shared areas, area by
-    // area, into one still empty — two sets of settings are never merged. The window's cache is made again. Another
-    // person's folder stays where it is, as it was.
-    private void MoveMineIn()
-    {
-        if (System.Security.Principal.WindowsIdentity.GetCurrent().User is not { } me) return;
-        var mine = Path.Combine(Users, me.Value);
-        if (!Directory.Exists(mine)) return;
-        foreach (var entry in Directory.EnumerateFileSystemEntries(mine).ToList())
-        {
-            var name = Path.GetFileName(entry);
-            var into = Path.Combine(Data, name);
-            try
-            {
-                if (Directory.Exists(entry) && !InstallLayout.Areas.Contains(name, StringComparer.OrdinalIgnoreCase) && name is not "games")
-                    Directory.Delete(entry, recursive: true);
-                else if (Directory.Exists(entry) && (!Directory.Exists(into) || !Directory.EnumerateFileSystemEntries(into).Any()))
-                {
-                    if (Directory.Exists(into)) Directory.Delete(into);
-                    Directory.Move(entry, into);
-                    // An earlier client's games, not an area: read once, for its migration, with data's own rights.
-                    if (name is "games") foreach (var inside in new DirectoryInfo(into).EnumerateFileSystemInfos("*", SearchOption.AllDirectories).Prepend(new DirectoryInfo(into))) Inherit(inside);
-                }
-                else if (File.Exists(entry)) File.Delete(entry);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                leave(L.T("{0} could not be moved into {1} ({2}).", entry, Data, e.GetType().Name));
-            }
-        }
-        try
-        {
-            if (!Directory.EnumerateFileSystemEntries(mine).Any()) Directory.Delete(mine);
-            if (!Directory.EnumerateFileSystemEntries(Users).Any()) Directory.Delete(Users);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-    }
-
-    private static void Inherit(FileSystemInfo entry)
-    {
-        if (entry is DirectoryInfo directory)
-        {
-            var security = directory.GetAccessControl();
-            security.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier))) security.RemoveAccessRuleSpecific(rule);
-            directory.SetAccessControl(security);
-        }
-        else if (entry is FileInfo file)
-        {
-            var security = file.GetAccessControl();
-            security.SetAccessRuleProtection(isProtected: false, preserveInheritance: false);
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier))) security.RemoveAccessRuleSpecific(rule);
-            file.SetAccessControl(security);
-        }
-    }
-
-    // Written by the system and administrators only, read and run by users, inherited by everything inside, whatever the
-    // drive's own rights would have given it. Owned by Administrators: whoever made the folder first (anyone may, where
-    // the drive lets users create folders) keeps no right to change it back.
-    internal static void Protect(string folder)
-    {
-        var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-        var security = new DirectorySecurity();
-        security.SetOwner(administrators);
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        foreach (var (sid, rights) in new[]
-                 {
-                     (WellKnownSidType.LocalSystemSid, FileSystemRights.FullControl),
-                     (WellKnownSidType.BuiltinAdministratorsSid, FileSystemRights.FullControl),
-                     (WellKnownSidType.BuiltinUsersSid, FileSystemRights.ReadAndExecute),
-                 })
-            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null), rights,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        var info = new DirectoryInfo(folder);
-        if (!info.Exists) info.Create(security);
-        info.SetAccessControl(security);
-    }
-
-    // .ovpn files gain "Sallyport" under Open with, without taking them from whatever opens them now.
-    private void RegisterOpenWith()
-    {
-        using (var prog = Registry.LocalMachine.CreateSubKey($@"Software\Classes\{ProgId}"))
-        {
-            prog.SetValue("", "OpenVPN profile");
-            using (var icon = prog.CreateSubKey("DefaultIcon")) icon.SetValue("", $"\"{Client}\",0");
-            using var command = prog.CreateSubKey(@"shell\open\command");
-            command.SetValue("", $"\"{Client}\" \"%1\"");
-        }
-        using var with = Registry.LocalMachine.CreateSubKey(@"Software\Classes\.ovpn\OpenWithProgids");
-        with.SetValue(ProgId, Array.Empty<byte>(), RegistryValueKind.None);
-    }
-
-    private void RegisterUninstall(string version)
-    {
-        using var key = Registry.LocalMachine.CreateSubKey(UninstallKey);
-        key.SetValue("DisplayName", "Sallyport");
-        key.SetValue("DisplayVersion", version);
-        key.SetValue("Publisher", "Sallyport");
-        key.SetValue("InstallLocation", _folder);
-        key.SetValue("DisplayIcon", $"\"{Client}\",0");
-        var (remover, arguments) = Remover;
-        key.SetValue("UninstallString", $"\"{remover}\" {arguments}".TrimEnd());
-        key.SetValue("QuietUninstallString", $"\"{remover}\" {arguments} /quiet".Replace("  ", " "));
-        key.SetValue("NoModify", 1, RegistryValueKind.DWord);
-        key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
-        // Not the cache: what it holds is thrown away, an update's own download among it while that update installs
-        // (Windows said 75 MB after the update to 0.1.1; without the cache, 34).
-        var cache = Path.Combine(Data, "cache") + Path.DirectorySeparatorChar;
-        var kilobytes = new DirectoryInfo(_folder).EnumerateFiles("*", SearchOption.AllDirectories)
-            .Where(f => !f.FullName.StartsWith(cache, StringComparison.OrdinalIgnoreCase)).Sum(f => f.Length) / 1024;
-        key.SetValue("EstimatedSize", (int)Math.Min(kilobytes, int.MaxValue), RegistryValueKind.DWord);
-    }
-
-    private SetupRecord? ReadRecord()
-    {
-        try { return File.Exists(Record) ? JsonSerializer.Deserialize(File.ReadAllBytes(Record), SetupJson.Default.SetupRecord) : null; }
-        catch (JsonException) { return null; }
-    }
-
-    private void WriteRecord(SetupRecord record) => File.WriteAllBytes(Record, JsonSerializer.SerializeToUtf8Bytes(record, SetupJson.Default.SetupRecord));
-
-    // Everything in the folder but what is kept: a folder inside it, and the folders that lead to it.
-    private static IEnumerable<string> Removable(string folder, IReadOnlyList<string>? keep)
-    {
-        foreach (var entry in Directory.EnumerateFileSystemEntries(folder))
-        {
-            if (keep is null || !keep.Any(k => Leads(entry, k))) yield return entry;
-            else if (!keep.Any(k => Same(entry, k)))
-                foreach (var inner in Removable(entry, keep)) yield return inner;
-        }
-    }
-
-    private static bool Same(string a, string b) =>
-        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);
-
-    private static bool Leads(string entry, string keep) =>
-        (Path.TrimEndingDirectorySeparator(keep) + Path.DirectorySeparatorChar).StartsWith(Path.TrimEndingDirectorySeparator(entry) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-
-    private void RemoveFolder(string folder, IReadOnlyList<string>? keep)
-    {
-        keep = keep?.Where(Directory.Exists).ToList();
-        if (keep is null || keep.Count == 0)
-        {
-            DeleteFolder(folder);
-            return;
-        }
-        foreach (var entry in Removable(folder, keep).ToList())
-            try
-            {
-                if (Directory.Exists(entry)) Directory.Delete(entry, recursive: true);
-                else File.Delete(entry);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("{0} could not be removed ({1}).", entry, e.GetType().Name)); }
-    }
-
-    private static void RemoveAfterExit(string folder, IReadOnlyList<string>? keep)
-    {
-        keep = keep?.Where(Directory.Exists).ToList() is { Count: > 0 } kept ? kept : null;
-        var removable = Removable(folder, keep).ToList();
-        foreach (var file in removable.Where(File.Exists).Concat(removable.Where(Directory.Exists).SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))))
-            try { File.Delete(file); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
-        // A command of Windows' own, detached, waits a few seconds for this process to end and takes the rest.
-        List<string> commands = keep is null
-            ? [$"rd /s /q \"{folder}\""]
-            : removable.Select(entry => Directory.Exists(entry) ? $"rd /s /q \"{entry}\"" : $"del /f /q \"{entry}\"").ToList();
-        Process.Start(new ProcessStartInfo("cmd.exe", $"/d /c ping -n 4 127.0.0.1 >nul & {string.Join(" & ", commands)}")
-        {
-            UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
-        });
-    }
-
-    private void DeleteFolder(string folder)
-    {
-        if (!Directory.Exists(folder)) return;
-        try { Directory.Delete(folder, recursive: true); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { leave(L.T("{0} could not all be removed ({1}).", folder, e.GetType().Name)); }
     }
 }
 

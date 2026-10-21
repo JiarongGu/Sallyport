@@ -1,8 +1,9 @@
 name: Release
 
 # Manual-trigger only, like the sibling repositories: a release is a deliberate act started from the Actions tab, never
-# a side effect of a push, and there is no push CI. It tests the exact commit, packages the setup
-# (apps/Sallyport.Setup/package.ps1: one installer exe and its .sha256) and keeps the package as the run's artifact;
+# a side effect of a push, and there is no push CI. It tests the exact commit, packages the release
+# (apps/Sallyport.Setup/package.ps1: the setup and its .sha256, the installed folder as a zip, and manifest.json, which
+# every installed copy's update reads, D33-D34) and keeps the package as the run's artifact;
 # only once all of that has passed does it commit the version, tag and create the GitHub release. A rehearsal
 # (`dry_run`, the default) stops after the package and touches no git state (docs/DECISIONS.md D28).
 #
@@ -59,16 +60,18 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    # Each action by the commit its version's tag named on 2026-10-21, not by the tag: a tag can be moved to other code,
+    # which would then run here with the right to tag and release.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4
         with:
           fetch-depth: 0   # the tag and the version's commit stand on the whole history
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9   # v4
         with:
           dotnet-version: '10.0.x'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4
         with:
           node-version: '24'
           cache: npm
@@ -99,7 +102,7 @@ jobs:
         run: ./apps/Sallyport.Setup/package.ps1 -Version $env:VERSION
 
       # Kept on every run, a rehearsal's above all: the setup it made is the thing to try before a real release.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02   # v4
         with:
           name: sallyport-${{ steps.version.outputs.version }}
           path: |
@@ -130,7 +133,12 @@ jobs:
           $tag = '${{ steps.version.outputs.tag }}'
           git rev-parse -q --verify "refs/tags/$tag" | Out-Null
           if ($LASTEXITCODE -eq 0) {
-            "Tag $tag already exists: a re-run, left where it is."
+            # A re-run of the same commit only: the release's files are built from this checkout, and a tag on another
+            # commit would carry them under source they were not built from.
+            $tagged = git rev-list -n 1 $tag
+            $built = git rev-parse HEAD
+            if ($tagged -ne $built) { throw "Tag $tag is on $tagged, not on $built, the commit just packaged: give this release its own version." }
+            "Tag $tag already exists on this commit: a re-run, left where it is."
           } else {
             git config user.name 'github-actions[bot]'
             git config user.email 'github-actions[bot]@users.noreply.github.com'
@@ -143,7 +151,7 @@ jobs:
       # zip, and manifest.json, each file's size and SHA-256 (D33), checked by verify-release.ps1 before this step.
       - name: GitHub release
         if: ${{ !inputs.dry_run && inputs.create_tag }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65   # v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Sallyport ${{ steps.version.outputs.version }}

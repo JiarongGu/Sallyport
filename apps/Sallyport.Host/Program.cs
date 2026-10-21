@@ -8,7 +8,7 @@ using Sallyport.Profile;
 //   Keeps the tunnel up behind a loopback SOCKS5 proxy until stopped. Started hidden by a host (Kobo), so what it has
 //   to say goes to the status file, not a console nobody sees.
 // Sallyport.Host stop [--listen 127.0.0.1:1080]
-//   Asks the instance serving that endpoint to leave (telling the server), and waits until the port is closed.
+//   Asks the instance serving that endpoint to leave (telling the server), and waits until it has gone.
 // Exit codes: 0 done; 1 failed; 2 could not start (bad arguments, unreadable or unsupported profile, port taken).
 
 if (args.Length == 0)
@@ -75,8 +75,10 @@ static async Task<int> StopAsync(IPEndPoint listen)
             : $"nothing was serving {listen}");
         return Accepts(listen) ? 1 : 0;
     }
-    for (var i = 0; i < 100 && Accepts(listen); i++) await Task.Delay(100);
-    if (Accepts(listen)) { Console.WriteLine($"asked the instance at {listen} to stop; it still answers after 10 s"); return 1; }
+    // Stopped is the instance gone, not its port closed: the port opens only once the first tunnel is up, so one asked
+    // to stop while still connecting has none — and while it lives, its signal does, which a new one would share.
+    for (var i = 0; i < 100 && StopSignal.Exists(listen); i++) await Task.Delay(100);
+    if (StopSignal.Exists(listen)) { Console.WriteLine($"asked the instance at {listen} to stop; it is still running after 10 s"); return 1; }
     Console.WriteLine($"stopped the instance at {listen}");
     return 0;
 }
@@ -113,6 +115,15 @@ internal static class StopSignal
     {
         if (!OperatingSystem.IsWindows() || !EventWaitHandle.TryOpenExisting(Name(endpoint), out var handle)) return false;
         using (handle) return handle.Set();
+    }
+
+    /// <summary>Whether an instance serving <paramref name="endpoint"/> still holds its signal: it lets go only as it
+    /// ends.</summary>
+    public static bool Exists(IPEndPoint endpoint)
+    {
+        if (!OperatingSystem.IsWindows() || !EventWaitHandle.TryOpenExisting(Name(endpoint), out var handle)) return false;
+        handle.Dispose();
+        return true;
     }
 }
 

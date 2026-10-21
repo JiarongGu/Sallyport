@@ -18,6 +18,9 @@ foreach ($file in $read.files) {
     # A path inside the folder it is installed in, never outside it.
     if ($file.path -match '(^|[\\/])\.\.([\\/]|$)' -or $file.path -match '^[\\/]|:') { throw "manifest.json names a path outside its folder: $($file.path)" }
 }
+# Each path once, as Windows compares them: a list naming one file twice could pass the count below with a file unlisted.
+$named = @($read.files | ForEach-Object { $_.path.Replace('\', '/').ToLowerInvariant() })
+if (@($named | Sort-Object -Unique).Count -ne $named.Count) { throw "manifest.json names a path more than once" }
 
 foreach ($asset in $read.assets.setup, $read.assets.zip) {
     $path = Join-Path $Release $asset.name
@@ -30,6 +33,9 @@ $opened = [IO.Compression.ZipFile]::OpenRead((Join-Path $Release $read.assets.zi
 try {
     $entries = @($opened.Entries | Where-Object { $_.Name })
     if ($entries.Count -ne @($read.files).Count) { throw "the zip holds $($entries.Count) files, the manifest $(@($read.files).Count)" }
+    $zipped = @($entries | ForEach-Object { $_.FullName.Replace('\', '/').ToLowerInvariant() })
+    if (@($zipped | Sort-Object -Unique).Count -ne $zipped.Count) { throw "the zip holds a path more than once" }
+    if (Compare-Object ($zipped | Sort-Object) ($named | Sort-Object)) { throw "the zip's files are not the manifest's" }
     foreach ($file in $read.files) {
         $entry = $opened.GetEntry($file.path)
         if (-not $entry) { throw "the zip has no $($file.path)" }

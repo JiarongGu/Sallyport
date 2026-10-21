@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Sallyport.Windows\Sallyport.Windows.csproj" />
+    <InternalsVisibleTo Include="Sallyport.Client.Tests" />
   </ItemGroup>
 
 </Project>

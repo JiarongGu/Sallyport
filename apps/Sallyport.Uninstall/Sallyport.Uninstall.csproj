@@ -23,7 +23,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\Sallyport.Setup\Installer.cs" Link="Setup\Installer.cs" />
+    <Compile Include="..\Sallyport.Setup\Installer*.cs" Link="Setup\%(Filename)%(Extension)" />
     <Compile Include="..\Sallyport.Setup\Language.cs" Link="Setup\Language.cs" />
     <Compile Include="..\Sallyport.Setup\Chinese.cs" Link="Setup\Chinese.cs" />
     <Compile Include="..\Sallyport.Setup\ShellLink.cs" Link="Setup\ShellLink.cs" />
