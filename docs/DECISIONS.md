@@ -17,7 +17,7 @@ Which still stand (2026-10-21, the code review; how the parts fit now is `docs/d
 | D21, D27, D29 | in part | the owner's "put edit/delete button on surface" (a2844e3, no entry): a profile's row has Edit and Remove; its Edit page holds its sign-in and how it connects |
 | D23 | in part | D24: a lane per profile |
 | D25 | in part | D30, D32: the install folder holds one program, its loader and the uninstaller |
-| D28 | in part | D33: a release carries the zip and `manifest.json` too |
+| D28 | in part | D33: a release carries the zip and `manifest.json` too; the bump defaults to patch (the owner, 2026-10-21) |
 | D30 | in part | D32: the uninstall entry starts `uninstall.exe` |
 | D31–D36 | yes | |
 
